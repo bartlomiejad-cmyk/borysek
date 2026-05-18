@@ -127,6 +127,12 @@ const collectImages = (o: Record<string, unknown>): string[] => {
     if (Array.isArray(v)) v.forEach(push);
     else push(v);
   }
+  // Common nested location: additionalProperties.images: [{url}]
+  const ap = o.additionalProperties as Record<string, unknown> | undefined;
+  if (ap && typeof ap === "object") {
+    const apImgs = ap.images;
+    if (Array.isArray(apImgs)) apImgs.forEach(push);
+  }
   return Array.from(new Set(out));
 };
 

@@ -9,38 +9,114 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthProjectsRouteImport } from './routes/_auth/projects'
+import { Route as AuthProjectsIdRouteImport } from './routes/_auth/projects.$id'
+import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
 
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/_auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthProjectsRoute = AuthProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthProjectsIdRoute = AuthProjectsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AuthProjectsRoute,
+} as any)
+const AuthProjectsIdProductsPidRoute =
+  AuthProjectsIdProductsPidRouteImport.update({
+    id: '/products/$pid',
+    path: '/products/$pid',
+    getParentRoute: () => AuthProjectsIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/projects': typeof AuthProjectsRouteWithChildren
+  '/projects/$id': typeof AuthProjectsIdRouteWithChildren
+  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/projects': typeof AuthProjectsRouteWithChildren
+  '/projects/$id': typeof AuthProjectsIdRouteWithChildren
+  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_auth': typeof AuthRouteWithChildren
+  '/login': typeof LoginRoute
+  '/_auth/projects': typeof AuthProjectsRouteWithChildren
+  '/_auth/projects/$id': typeof AuthProjectsIdRouteWithChildren
+  '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/projects'
+    | '/projects/$id'
+    | '/projects/$id/products/$pid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/login'
+    | '/projects'
+    | '/projects/$id'
+    | '/projects/$id/products/$pid'
+  id:
+    | '__root__'
+    | '/'
+    | '/_auth'
+    | '/login'
+    | '/_auth/projects'
+    | '/_auth/projects/$id'
+    | '/_auth/projects/$id/products/$pid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthRoute: typeof AuthRouteWithChildren
+  LoginRoute: typeof LoginRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_auth': {
+      id: '/_auth'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,11 +124,68 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_auth/projects': {
+      id: '/_auth/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof AuthProjectsRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/projects/$id': {
+      id: '/_auth/projects/$id'
+      path: '/$id'
+      fullPath: '/projects/$id'
+      preLoaderRoute: typeof AuthProjectsIdRouteImport
+      parentRoute: typeof AuthProjectsRoute
+    }
+    '/_auth/projects/$id/products/$pid': {
+      id: '/_auth/projects/$id/products/$pid'
+      path: '/products/$pid'
+      fullPath: '/projects/$id/products/$pid'
+      preLoaderRoute: typeof AuthProjectsIdProductsPidRouteImport
+      parentRoute: typeof AuthProjectsIdRoute
+    }
   }
 }
 
+interface AuthProjectsIdRouteChildren {
+  AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRoute
+}
+
+const AuthProjectsIdRouteChildren: AuthProjectsIdRouteChildren = {
+  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRoute,
+}
+
+const AuthProjectsIdRouteWithChildren = AuthProjectsIdRoute._addFileChildren(
+  AuthProjectsIdRouteChildren,
+)
+
+interface AuthProjectsRouteChildren {
+  AuthProjectsIdRoute: typeof AuthProjectsIdRouteWithChildren
+}
+
+const AuthProjectsRouteChildren: AuthProjectsRouteChildren = {
+  AuthProjectsIdRoute: AuthProjectsIdRouteWithChildren,
+}
+
+const AuthProjectsRouteWithChildren = AuthProjectsRoute._addFileChildren(
+  AuthProjectsRouteChildren,
+)
+
+interface AuthRouteChildren {
+  AuthProjectsRoute: typeof AuthProjectsRouteWithChildren
+}
+
+const AuthRouteChildren: AuthRouteChildren = {
+  AuthProjectsRoute: AuthProjectsRouteWithChildren,
+}
+
+const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthRoute: AuthRouteWithChildren,
+  LoginRoute: LoginRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
