@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/_auth/projects")({ component: ProjectsPage });
+export const Route = createFileRoute("/_auth/projects/")({ component: ProjectsPage });
 
 function ProjectsPage() {
   const navigate = useNavigate();
