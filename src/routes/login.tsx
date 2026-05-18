@@ -21,6 +21,10 @@ function LoginPage() {
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) navigate({ to: "/projects" });
     });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session) navigate({ to: "/projects" });
+    });
+    return () => sub.subscription.unsubscribe();
   }, [navigate]);
 
   const submit = async (e: React.FormEvent) => {
@@ -49,11 +53,16 @@ function LoginPage() {
 
   const google = async () => {
     setLoading(true);
-    const { error } = await lovable.auth.signInWithOAuth("google", {
+    const result = await lovable.auth.signInWithOAuth("google", {
       redirect_uri: `${window.location.origin}/projects`,
     });
-    if (error) toast.error(error.message);
-    setLoading(false);
+    if (result.error) {
+      toast.error(result.error.message);
+      setLoading(false);
+      return;
+    }
+    if (result.redirected) return;
+    navigate({ to: "/projects" });
   };
 
   return (
