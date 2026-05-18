@@ -14,7 +14,219 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      enrichments: {
+        Row: {
+          error: string | null
+          generated_at: string | null
+          golden_description: string | null
+          golden_name: string | null
+          id: string
+          match_type: Database["public"]["Enums"]["match_type"]
+          matched_term: string | null
+          model: string | null
+          picked_urls: string[]
+          previous: Json | null
+          project_id: string
+          source_product_id: string
+          status: Database["public"]["Enums"]["enrichment_status"]
+          updated_at: string
+        }
+        Insert: {
+          error?: string | null
+          generated_at?: string | null
+          golden_description?: string | null
+          golden_name?: string | null
+          id?: string
+          match_type?: Database["public"]["Enums"]["match_type"]
+          matched_term?: string | null
+          model?: string | null
+          picked_urls?: string[]
+          previous?: Json | null
+          project_id: string
+          source_product_id: string
+          status?: Database["public"]["Enums"]["enrichment_status"]
+          updated_at?: string
+        }
+        Update: {
+          error?: string | null
+          generated_at?: string | null
+          golden_description?: string | null
+          golden_name?: string | null
+          id?: string
+          match_type?: Database["public"]["Enums"]["match_type"]
+          matched_term?: string | null
+          model?: string | null
+          picked_urls?: string[]
+          previous?: Json | null
+          project_id?: string
+          source_product_id?: string
+          status?: Database["public"]["Enums"]["enrichment_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrichments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "enrichments_source_product_id_fkey"
+            columns: ["source_product_id"]
+            isOneToOne: true
+            referencedRelation: "source_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_sources: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          images: Json
+          project_id: string
+          raw: Json
+          title: string | null
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          images?: Json
+          project_id: string
+          raw?: Json
+          title?: string | null
+          url: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          images?: Json
+          project_id?: string
+          raw?: Json
+          title?: string | null
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_sources_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          blacklist: string[]
+          created_at: string
+          custom_prompt: string
+          id: string
+          name: string
+          strategy: Database["public"]["Enums"]["mapping_strategy"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          blacklist?: string[]
+          created_at?: string
+          custom_prompt?: string
+          id?: string
+          name: string
+          strategy?: Database["public"]["Enums"]["mapping_strategy"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          blacklist?: string[]
+          created_at?: string
+          custom_prompt?: string
+          id?: string
+          name?: string
+          strategy?: Database["public"]["Enums"]["mapping_strategy"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      search_results: {
+        Row: {
+          created_at: string
+          id: string
+          organic_urls: Json
+          project_id: string
+          term: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          organic_urls?: Json
+          project_id: string
+          term: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          organic_urls?: Json
+          project_id?: string
+          term?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_results_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      source_products: {
+        Row: {
+          created_at: string
+          ean: string | null
+          ext_id: string | null
+          id: string
+          kod: string | null
+          nazwa: string | null
+          project_id: string
+          raw: Json
+        }
+        Insert: {
+          created_at?: string
+          ean?: string | null
+          ext_id?: string | null
+          id?: string
+          kod?: string | null
+          nazwa?: string | null
+          project_id: string
+          raw?: Json
+        }
+        Update: {
+          created_at?: string
+          ean?: string | null
+          ext_id?: string | null
+          id?: string
+          kod?: string | null
+          nazwa?: string | null
+          project_id?: string
+          raw?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_products_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +235,9 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      enrichment_status: "PENDING" | "MATCHED" | "GENERATED" | "FAILED"
+      mapping_strategy: "EAN" | "NAZWA" | "HYBRID"
+      match_type: "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +364,10 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      enrichment_status: ["PENDING", "MATCHED", "GENERATED", "FAILED"],
+      mapping_strategy: ["EAN", "NAZWA", "HYBRID"],
+      match_type: ["EAN_MATCH", "NAME_MATCH", "HYBRID_MATCH", "NO_MATCH"],
+    },
   },
 } as const
