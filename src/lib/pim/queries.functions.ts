@@ -19,7 +19,8 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select("source_product_id, status, match_type, picked_urls, golden_name, generated_at, error")
-      .in("source_product_id", ids);
+      .eq("project_id", data.projectId)
+      .limit(10000);
     type EnrichRow = NonNullable<typeof ens>[number];
     const enMap = new Map<string, EnrichRow>();
     for (const e of ens ?? []) enMap.set(e.source_product_id, e);
