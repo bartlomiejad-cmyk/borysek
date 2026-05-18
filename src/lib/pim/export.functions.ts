@@ -13,11 +13,11 @@ export const exportProject = createServerFn({ method: "GET" })
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
-    const ids = (products ?? []).map((p) => p.id);
     const { data: ens } = await supabase
       .from("enrichments")
       .select("source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, model, generated_at")
-      .in("source_product_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+      .eq("project_id", data.projectId)
+      .limit(100000);
     const map = new Map((ens ?? []).map((e) => [e.source_product_id, e]));
     return (products ?? []).map((p) => {
       const e = map.get(p.id);
