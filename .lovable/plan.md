@@ -1,21 +1,31 @@
-# Fix: Logowanie Google nie kończy procesu
+# Naprawa eksportu CSV
 
 ## Problem
-Po wybraniu konta Google w popupie/oknie OAuth nic się nie dzieje — użytkownik zostaje na `/login`. Logi auth pokazują, że sesja jest poprawnie tworzona po stronie Supabase (token + login OK), więc problem jest po stronie front-endu: brak nawigacji po zakończeniu flow OAuth.
 
-## Przyczyna
-W `src/routes/login.tsx` funkcja `google()` wywołuje `lovable.auth.signInWithOAuth(...)`, ale ignoruje dwa scenariusze z dokumentacji:
-1. `result.redirected === true` — przeglądarka przekierowuje do Google, kod powinien po prostu zwrócić.
-2. Brak `redirected` — tokeny już wróciły, sesja jest ustawiona, ale **trzeba ręcznie wykonać `navigate({ to: "/projects" })`**. Obecny kod tylko ustawia `loading=false` i nic więcej, więc użytkownik tkwi na `/login`.
+Eksportowany CSV otwiera się w Excelu "rozjechany" — kolumny się nie zgadzają. Przyczyny:
 
-Dodatkowo `useEffect` na `/login` sprawdza sesję tylko raz przy montażu — nie reaguje na późniejsze pojawienie się sesji (np. gdy flow OAuth wraca w tym samym oknie bez pełnego remontu).
+1. **Excel PL używa `;` jako separatora**, a my eksportujemy z `,`. Excel wrzuca wtedy całą linię do jednej kolumny lub psuje podział.
+2. **Brak BOM UTF-8** — polskie znaki (ą, ę, ó) mogą się sypać w Excelu.
+3. **Opisy zawierają znaki nowej linii** (`\n`). Papa.unparse cytuje je poprawnie (`"..."`), ale niektóre programy bez wsparcia RFC4180 traktują każdy `\n` jako nowy wiersz — stąd 5672 linii zamiast 523 produktów.
 
-## Plan zmian (1 plik)
+## Plan
 
-### `src/routes/login.tsx`
-1. Obsłużyć wynik `signInWithOAuth` zgodnie z dokumentacją: `if (result.error) toast; if (result.redirected) return; navigate({ to: "/projects" });`
-2. Dodać listener `supabase.auth.onAuthStateChange` w `useEffect`, który nawiguje do `/projects` po wykryciu sesji (zabezpieczenie na wypadek, gdy callback OAuth wraca w tym samym oknie).
-3. Posprzątać subskrypcję w cleanup.
+1. W `src/routes/_auth/projects.$id.index.tsx` w funkcji `exportFile("csv")`:
+   - Dodać BOM (`\uFEFF`) na początku pliku.
+   - Użyć `Papa.unparse(rows, { delimiter: ";", newline: "\r\n", quotes: true })` — średnik dla Excel PL, CRLF jako koniec wiersza (standard CSV/Excel), wymuszone cudzysłowy wokół każdej wartości (bezpieczne dla wielolinijkowych opisów).
+   - MIME zostaje `text/csv;charset=utf-8`.
 
-## Uwaga środowiskowa
-Jeśli problem występuje tylko w iframe podglądu Lovable, opublikowana wersja zwykle działa poprawnie (preview ma inne origin/redirect rules). Po wprowadzeniu poprawki warto przetestować na opublikowanym URL.
+2. XLSX zostaje bez zmian — nie ma problemu z separatorami.
+
+## Szczegóły techniczne
+
+```ts
+const csv = "\uFEFF" + Papa.unparse(rows, {
+  delimiter: ";",
+  newline: "\r\n",
+  quotes: true,
+});
+const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+```
+
+Po tej zmianie plik otwarty dwuklikiem w Excelu PL pokaże 523 wiersze z prawidłowym podziałem na kolumny i poprawnymi polskimi znakami.
