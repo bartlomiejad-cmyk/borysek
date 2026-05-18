@@ -346,7 +346,7 @@ function ProjectPage() {
                     </TableCell>
                   </TableRow>
                 )}
-                {filtered.map((p) => (
+                {paged.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
                       {p.thumbnail ? (
@@ -384,6 +384,45 @@ function ProjectPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span>Wierszy na stronę:</span>
+              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                <SelectTrigger className="w-20 h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[10, 25, 50, 100, 200, 500].map((n) => (
+                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="ml-2">
+                {filtered.length === 0
+                  ? "0 wyników"
+                  : `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, filtered.length)} z ${filtered.length}`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-muted-foreground">
+                Strona {currentPage} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
