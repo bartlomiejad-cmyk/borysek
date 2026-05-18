@@ -56,7 +56,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-export const Route = createFileRoute("/_auth/projects/$id")({ component: ProjectPage });
+export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
 
 const CONCURRENCY = 5;
 

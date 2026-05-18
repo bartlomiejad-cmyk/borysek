@@ -12,8 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthProjectsRouteImport } from './routes/_auth/projects'
-import { Route as AuthProjectsIdRouteImport } from './routes/_auth/projects.$id'
+import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
+import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects.$id.index'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
 
 const LoginRoute = LoginRouteImport.update({
@@ -30,35 +30,35 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthProjectsRoute = AuthProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
+const AuthProjectsIndexRoute = AuthProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
   getParentRoute: () => AuthRoute,
 } as any)
-const AuthProjectsIdRoute = AuthProjectsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AuthProjectsRoute,
+const AuthProjectsIdIndexRoute = AuthProjectsIdIndexRouteImport.update({
+  id: '/projects/$id/',
+  path: '/projects/$id/',
+  getParentRoute: () => AuthRoute,
 } as any)
 const AuthProjectsIdProductsPidRoute =
   AuthProjectsIdProductsPidRouteImport.update({
-    id: '/products/$pid',
-    path: '/products/$pid',
-    getParentRoute: () => AuthProjectsIdRoute,
+    id: '/projects/$id/products/$pid',
+    path: '/projects/$id/products/$pid',
+    getParentRoute: () => AuthRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/projects': typeof AuthProjectsRouteWithChildren
-  '/projects/$id': typeof AuthProjectsIdRouteWithChildren
+  '/projects/': typeof AuthProjectsIndexRoute
+  '/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/projects': typeof AuthProjectsRouteWithChildren
-  '/projects/$id': typeof AuthProjectsIdRouteWithChildren
+  '/projects': typeof AuthProjectsIndexRoute
+  '/projects/$id': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
 export interface FileRoutesById {
@@ -66,8 +66,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
-  '/_auth/projects': typeof AuthProjectsRouteWithChildren
-  '/_auth/projects/$id': typeof AuthProjectsIdRouteWithChildren
+  '/_auth/projects/': typeof AuthProjectsIndexRoute
+  '/_auth/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
 export interface FileRouteTypes {
@@ -75,8 +75,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
-    | '/projects'
-    | '/projects/$id'
+    | '/projects/'
+    | '/projects/$id/'
     | '/projects/$id/products/$pid'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -90,8 +90,8 @@ export interface FileRouteTypes {
     | '/'
     | '/_auth'
     | '/login'
-    | '/_auth/projects'
-    | '/_auth/projects/$id'
+    | '/_auth/projects/'
+    | '/_auth/projects/$id/'
     | '/_auth/projects/$id/products/$pid'
   fileRoutesById: FileRoutesById
 }
@@ -124,60 +124,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_auth/projects': {
-      id: '/_auth/projects'
+    '/_auth/projects/': {
+      id: '/_auth/projects/'
       path: '/projects'
-      fullPath: '/projects'
-      preLoaderRoute: typeof AuthProjectsRouteImport
+      fullPath: '/projects/'
+      preLoaderRoute: typeof AuthProjectsIndexRouteImport
       parentRoute: typeof AuthRoute
     }
-    '/_auth/projects/$id': {
-      id: '/_auth/projects/$id'
-      path: '/$id'
-      fullPath: '/projects/$id'
-      preLoaderRoute: typeof AuthProjectsIdRouteImport
-      parentRoute: typeof AuthProjectsRoute
+    '/_auth/projects/$id/': {
+      id: '/_auth/projects/$id/'
+      path: '/projects/$id'
+      fullPath: '/projects/$id/'
+      preLoaderRoute: typeof AuthProjectsIdIndexRouteImport
+      parentRoute: typeof AuthRoute
     }
     '/_auth/projects/$id/products/$pid': {
       id: '/_auth/projects/$id/products/$pid'
-      path: '/products/$pid'
+      path: '/projects/$id/products/$pid'
       fullPath: '/projects/$id/products/$pid'
       preLoaderRoute: typeof AuthProjectsIdProductsPidRouteImport
-      parentRoute: typeof AuthProjectsIdRoute
+      parentRoute: typeof AuthRoute
     }
   }
 }
 
-interface AuthProjectsIdRouteChildren {
+interface AuthRouteChildren {
+  AuthProjectsIndexRoute: typeof AuthProjectsIndexRoute
+  AuthProjectsIdIndexRoute: typeof AuthProjectsIdIndexRoute
   AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRoute
 }
 
-const AuthProjectsIdRouteChildren: AuthProjectsIdRouteChildren = {
-  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRoute,
-}
-
-const AuthProjectsIdRouteWithChildren = AuthProjectsIdRoute._addFileChildren(
-  AuthProjectsIdRouteChildren,
-)
-
-interface AuthProjectsRouteChildren {
-  AuthProjectsIdRoute: typeof AuthProjectsIdRouteWithChildren
-}
-
-const AuthProjectsRouteChildren: AuthProjectsRouteChildren = {
-  AuthProjectsIdRoute: AuthProjectsIdRouteWithChildren,
-}
-
-const AuthProjectsRouteWithChildren = AuthProjectsRoute._addFileChildren(
-  AuthProjectsRouteChildren,
-)
-
-interface AuthRouteChildren {
-  AuthProjectsRoute: typeof AuthProjectsRouteWithChildren
-}
-
 const AuthRouteChildren: AuthRouteChildren = {
-  AuthProjectsRoute: AuthProjectsRouteWithChildren,
+  AuthProjectsIndexRoute: AuthProjectsIndexRoute,
+  AuthProjectsIdIndexRoute: AuthProjectsIdIndexRoute,
+  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
@@ -190,3 +170,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
