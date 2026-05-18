@@ -18,8 +18,8 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/projects" });
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) navigate({ to: "/projects" });
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session) navigate({ to: "/projects" });
