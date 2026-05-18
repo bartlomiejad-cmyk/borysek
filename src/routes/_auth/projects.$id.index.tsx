@@ -54,6 +54,8 @@ import {
   Trash2,
   ImageOff,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
@@ -87,6 +89,8 @@ function ProjectPage() {
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
   const [search, setSearch] = useState("");
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [page, setPage] = useState<number>(1);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -102,6 +106,18 @@ function ProjectPage() {
       return true;
     });
   }, [products, filter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize],
+  );
+
+  // Reset page when filter/search/pageSize changes
+  useEffect(() => {
+    setPage(1);
+  }, [filter, search, pageSize]);
 
   // ---- Uploads ----
 
