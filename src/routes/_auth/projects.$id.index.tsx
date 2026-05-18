@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { toast } from "sonner";
@@ -54,6 +54,8 @@ import {
   Trash2,
   ImageOff,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
@@ -87,6 +89,8 @@ function ProjectPage() {
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
   const [search, setSearch] = useState("");
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [page, setPage] = useState<number>(1);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -102,6 +106,18 @@ function ProjectPage() {
       return true;
     });
   }, [products, filter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize],
+  );
+
+  // Reset page when filter/search/pageSize changes
+  useEffect(() => {
+    setPage(1);
+  }, [filter, search, pageSize]);
 
   // ---- Uploads ----
 
@@ -330,7 +346,7 @@ function ProjectPage() {
                     </TableCell>
                   </TableRow>
                 )}
-                {filtered.map((p) => (
+                {paged.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
                       {p.thumbnail ? (
@@ -368,6 +384,45 @@ function ProjectPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span>Wierszy na stronę:</span>
+              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                <SelectTrigger className="w-20 h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[10, 25, 50, 100, 200, 500].map((n) => (
+                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="ml-2">
+                {filtered.length === 0
+                  ? "0 wyników"
+                  : `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, filtered.length)} z ${filtered.length}`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-muted-foreground">
+                Strona {currentPage} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
