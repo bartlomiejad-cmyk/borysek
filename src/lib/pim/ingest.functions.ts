@@ -40,7 +40,7 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const payload = data.rows.map((r) => ({ ...r, project_id: data.projectId }));
-    const { error } = await supabase.from("source_products").insert(payload);
+    const { error } = await supabase.from("source_products").insert(payload as never);
     if (error) throw new Error(error.message);
     // Create pending enrichments
     const { data: inserted } = await supabase
@@ -57,7 +57,7 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
       // upsert by unique source_product_id
       const { error: enErr } = await supabase
         .from("enrichments")
-        .upsert(enr, { onConflict: "source_product_id", ignoreDuplicates: true });
+        .upsert(enr as never, { onConflict: "source_product_id", ignoreDuplicates: true });
       if (enErr) throw new Error(enErr.message);
     }
     return { inserted: payload.length };
@@ -80,7 +80,7 @@ export const ingestSearchResults = createServerFn({ method: "POST" })
         term: r.term,
         organic_urls: r.organic_urls,
       }));
-      const { error } = await supabase.from("search_results").insert(payload);
+      const { error } = await supabase.from("search_results").insert(payload as never);
       if (error) throw new Error(error.message);
     }
     return { inserted: data.rows.length };
@@ -101,7 +101,7 @@ export const ingestProductSources = createServerFn({ method: "POST" })
       const payload = b.map((r) => ({ ...r, project_id: data.projectId }));
       const { error } = await supabase
         .from("product_sources")
-        .upsert(payload, { onConflict: "project_id,url" });
+        .upsert(payload as never, { onConflict: "project_id,url" });
       if (error) throw new Error(error.message);
     }
     return { inserted: data.rows.length };
@@ -124,7 +124,7 @@ export const clearProjectData = createServerFn({ method: "POST" })
           ? ["enrichments", "source_products"]
           : [data.scope];
     for (const t of tables) {
-      const { error } = await supabase.from(t).delete().eq("project_id", data.projectId);
+      const { error } = await (supabase.from(t as never) as any).delete().eq("project_id", data.projectId);
       if (error) throw new Error(error.message);
     }
     return { ok: true };
