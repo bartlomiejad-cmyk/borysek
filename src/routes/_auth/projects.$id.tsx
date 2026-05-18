@@ -84,7 +84,7 @@ function ProjectPage() {
     queryFn: () => listFn({ data: { projectId: id } }),
   });
 
-  const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "DONE" | "NO_MATCH">("ALL");
+  const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
   const [search, setSearch] = useState("");
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -93,7 +93,7 @@ function ProjectPage() {
     return products.filter((p) => {
       if (filter === "MATCHED" && p.match_type === "NO_MATCH") return false;
       if (filter === "PENDING" && p.status !== "PENDING") return false;
-      if (filter === "DONE" && p.status !== "DONE") return false;
+      if (filter === "GENERATED" && p.status !== "GENERATED") return false;
       if (filter === "NO_MATCH" && p.match_type !== "NO_MATCH") return false;
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
@@ -158,7 +158,7 @@ function ProjectPage() {
   });
 
   const generateAll = async () => {
-    const targets = products.filter((p) => p.match_type !== "NO_MATCH" && p.status !== "DONE");
+    const targets = products.filter((p) => p.match_type !== "NO_MATCH" && p.status !== "GENERATED");
     if (!targets.length) {
       toast.info("Brak produktów do wygenerowania");
       return;
@@ -304,7 +304,7 @@ function ProjectPage() {
                 <SelectItem value="MATCHED">Dopasowane</SelectItem>
                 <SelectItem value="NO_MATCH">Bez dopasowania</SelectItem>
                 <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
-                <SelectItem value="DONE">Z złotym rekordem</SelectItem>
+                <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -387,7 +387,7 @@ function MatchBadge({ type }: { type: string }) {
 }
 
 function StatusBadge({ status, error }: { status: string; error: string | null }) {
-  if (status === "DONE") return <Badge className="bg-green-600">Gotowe</Badge>;
+  if (status === "GENERATED") return <Badge className="bg-green-600">Gotowe</Badge>;
   if (status === "FAILED")
     return (
       <Badge variant="destructive" title={error ?? ""}>

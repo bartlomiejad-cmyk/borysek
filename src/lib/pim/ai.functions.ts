@@ -153,7 +153,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const { error } = await supabase
         .from("enrichments")
         .update({
-          status: "DONE",
+          status: "GENERATED",
           golden_name: name,
           golden_description: description,
           model: MODEL,

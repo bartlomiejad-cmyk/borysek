@@ -51,7 +51,7 @@ export const getProject = createServerFn({ method: "GET" })
       search_results: sr.count ?? 0,
       product_sources: ps.count ?? 0,
       enrichments_total: en.count ?? 0,
-      enrichments_done: (en.data ?? []).filter((r: { status: string }) => r.status === "DONE").length,
+      enrichments_done: (en.data ?? []).filter((r: { status: string }) => r.status === "GENERATED").length,
     };
     return { project, counts };
   });
