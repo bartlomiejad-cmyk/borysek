@@ -7,8 +7,8 @@ import { LogOut, Boxes } from "lucide-react";
 
 export const Route = createFileRoute("/_auth")({
   beforeLoad: async () => {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) throw redirect({ to: "/login" });
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) throw redirect({ to: "/login" });
   },
   component: AuthLayout,
 });
@@ -18,9 +18,10 @@ function AuthLayout() {
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (!session) navigate({ to: "/login" });
+    supabase.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      setEmail(session?.user.email ?? null);
+      if (event === "SIGNED_OUT") navigate({ to: "/login" });
     });
     return () => sub.subscription.unsubscribe();
   }, [navigate]);
