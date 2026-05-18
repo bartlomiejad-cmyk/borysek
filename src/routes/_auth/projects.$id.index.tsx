@@ -205,7 +205,9 @@ function ProjectPage() {
   const exportFile = async (fmt: "csv" | "xlsx") => {
     const rows = await exportFn({ data: { projectId: id } });
     if (fmt === "csv") {
-      const csv = Papa.unparse(rows);
+      const csv =
+        "\uFEFF" +
+        Papa.unparse(rows, { delimiter: ";", newline: "\r\n", quotes: true });
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       downloadBlob(blob, `${meta?.project.name ?? "export"}.csv`);
     } else {
