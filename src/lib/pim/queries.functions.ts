@@ -20,7 +20,8 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       .from("enrichments")
       .select("source_product_id, status, match_type, picked_urls, golden_name, generated_at, error")
       .in("source_product_id", ids);
-    const enMap = new Map<string, (typeof ens)[number]>();
+    type EnrichRow = NonNullable<typeof ens>[number];
+    const enMap = new Map<string, EnrichRow>();
     for (const e of ens ?? []) enMap.set(e.source_product_id, e);
 
     const allUrls = Array.from(
