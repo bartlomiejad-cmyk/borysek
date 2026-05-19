@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, ShieldCheck, ImageOff, AlertTriangle, CheckCircle2 } from "lucide-react";
 
-export const Route = createFileRoute("/_auth/projects/verify")({ component: VerifyPage });
+export const Route = createFileRoute("/_auth/projects/$id/verify")({ component: VerifyPage });
 
 const CONCURRENCY = 3;
 
