@@ -97,7 +97,12 @@ export const ingestProductSources = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const batches = chunk(data.rows, 200);
+    // Deduplicate by url within the same payload — otherwise the upsert
+    // throws "ON CONFLICT DO UPDATE command cannot affect row a second time".
+    const seen = new Map<string, typeof data.rows[number]>();
+    for (const r of data.rows) seen.set(r.url, r);
+    const deduped = Array.from(seen.values());
+    const batches = chunk(deduped, 200);
     for (const b of batches) {
       const payload = b.map((r) => ({ ...r, project_id: data.projectId }));
       const { error } = await supabase
