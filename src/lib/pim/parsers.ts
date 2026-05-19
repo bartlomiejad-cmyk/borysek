@@ -144,6 +144,9 @@ const pushImage = (out: string[], v: unknown) => {
   }
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
 const collectMainImages = (o: Record<string, unknown>): string[] => {
   const out: string[] = [];
   for (const key of ["images", "image", "photos", "gallery", "image_urls", "imageUrls"]) {
@@ -176,15 +179,16 @@ const firstString = (o: Record<string, unknown>, keys: string[]): string | null 
 
 export const parseProductJson = (raw: unknown): ProductSourceRow[] => {
   const out: ProductSourceRow[] = [];
-  const handle = (node: unknown) => {
-    if (!node || typeof node !== "object") return;
-    const o = node as Record<string, unknown>;
-    const url = firstString(o, ["url", "link", "sourceUrl", "source_url", "product_url"]);
+  const seenNodes = new WeakSet<object>();
+  const handle = (node: unknown, fallbackUrl?: string) => {
+    if (!isRecord(node)) return false;
+    const o = node;
+    const url = firstString(o, ["url", "link", "sourceUrl", "source_url", "product_url"]) ?? fallbackUrl ?? null;
     if (!url) return;
     const main = collectMainImages(o);
     const extra = collectExtraImages(o).filter((u) => !main.includes(u));
     out.push({
-      url,
+      url: url.trim(),
       title: firstString(o, ["title", "name", "productName", "product_name", "h1"]),
       description: firstString(o, [
         "description",
@@ -199,15 +203,22 @@ export const parseProductJson = (raw: unknown): ProductSourceRow[] => {
       extra_images: extra,
       raw: o,
     });
+    return true;
   };
-  if (Array.isArray(raw)) raw.forEach(handle);
-  else if (raw && typeof raw === "object") {
-    // Either single object or map {url: data}
-    const o = raw as Record<string, unknown>;
-    if (typeof o.url === "string") handle(o);
-    else {
-      for (const v of Object.values(o)) handle(v);
+  const visit = (node: unknown, fallbackUrl?: string) => {
+    if (!node || typeof node !== "object") return;
+    if (seenNodes.has(node)) return;
+    seenNodes.add(node);
+    if (Array.isArray(node)) {
+      node.forEach((item) => visit(item, fallbackUrl));
+      return;
     }
-  }
+    if (handle(node, fallbackUrl)) return;
+    for (const [key, value] of Object.entries(node)) {
+      const nextFallback = /^https?:\/\//i.test(key) ? key : fallbackUrl;
+      visit(value, nextFallback);
+    }
+  };
+  visit(raw);
   return out;
 };
