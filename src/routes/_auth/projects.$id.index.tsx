@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { toast } from "sonner";
@@ -640,7 +640,19 @@ function ProductThumbs({
   images: string[];
   onHide: (url: string) => void | Promise<void>;
 }) {
-  const top = images.slice(0, 3);
+  const top = images.slice(0, 5);
+  const [hovered, setHovered] = useState<{ url: string; x: number; y: number } | null>(null);
+  const dimsRef = useRef<Map<string, { w: number; h: number }>>(new Map());
+  const [, force] = useState(0);
+  const ensureDims = (url: string) => {
+    if (dimsRef.current.has(url)) return;
+    const img = new Image();
+    img.onload = () => {
+      dimsRef.current.set(url, { w: img.naturalWidth, h: img.naturalHeight });
+      force((n) => n + 1);
+    };
+    img.src = url;
+  };
   if (!top.length) {
     return (
       <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
@@ -648,13 +660,23 @@ function ProductThumbs({
       </div>
     );
   }
+  const dims = hovered ? dimsRef.current.get(hovered.url) : undefined;
   return (
-    <div className="flex gap-1">
+    <div className="flex gap-1 relative">
       {top.map((url) => (
         <div key={url} className="relative group">
           <Dialog>
             <DialogTrigger asChild>
-              <button type="button" className="block">
+              <button
+                type="button"
+                className="block"
+                onMouseEnter={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  ensureDims(url);
+                  setHovered({ url, x: r.right + 8, y: r.top });
+                }}
+                onMouseLeave={() => setHovered((h) => (h?.url === url ? null : h))}
+              >
                 <img
                   src={url}
                   alt=""
@@ -688,6 +710,22 @@ function ProductThumbs({
           </button>
         </div>
       ))}
+      {hovered ? (
+        <div
+          className="fixed z-50 pointer-events-none rounded-lg border bg-background shadow-xl p-1"
+          style={{ left: hovered.x, top: hovered.y }}
+        >
+          <img
+            src={hovered.url}
+            alt=""
+            className="block rounded"
+            style={{ maxWidth: 320, maxHeight: 320 }}
+          />
+          <div className="absolute bottom-2 right-2 rounded bg-black/70 text-white text-[10px] px-1.5 py-0.5 font-mono">
+            {dims ? `${dims.w} × ${dims.h}` : "…"}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
