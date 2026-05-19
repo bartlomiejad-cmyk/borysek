@@ -579,3 +579,63 @@ function downloadBlob(blob: Blob, name: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+function ProductThumbs({
+  images,
+  onHide,
+}: {
+  productId: string;
+  images: string[];
+  onHide: (url: string) => void | Promise<void>;
+}) {
+  const top = images.slice(0, 3);
+  if (!top.length) {
+    return (
+      <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
+        <ImageOff className="h-4 w-4 text-muted-foreground" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-1">
+      {top.map((url) => (
+        <div key={url} className="relative group">
+          <Dialog>
+            <DialogTrigger asChild>
+              <button type="button" className="block">
+                <img
+                  src={url}
+                  alt=""
+                  loading="lazy"
+                  className="h-10 w-10 object-cover rounded border hover:opacity-80"
+                />
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <img src={url} alt="" className="w-full h-auto rounded" />
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-muted-foreground break-all"
+              >
+                {url}
+              </a>
+            </DialogContent>
+          </Dialog>
+          <button
+            type="button"
+            title="Ukryj zdjęcie"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onHide(url);
+            }}
+            className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 flex items-center justify-center"
+          >
+            <XIcon className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
