@@ -80,7 +80,9 @@ export const runMatching = createServerFn({ method: "POST" })
         }
       }
 
-      const picked = (urls ?? []).slice(0, 3);
+      // Keep ALL matched URLs — downstream views (list + detail) need access to
+      // images from every source, not just the first 3.
+      const picked = Array.from(new Set((urls ?? []).filter((u) => typeof u === "string" && u.length > 0)));
       if (picked.length) matched++;
       updates.push({
         source_product_id: p.id,

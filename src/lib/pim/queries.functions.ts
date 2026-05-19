@@ -57,7 +57,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
           if (!hidden.has(img) && !collected.includes(img)) collected.push(img);
         }
       }
-      const images = collected.slice(0, 12);
+      const images = collected;
       return {
         ...p,
         status: e?.status ?? "PENDING",
@@ -105,7 +105,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       .select("*")
       .eq("source_product_id", data.productId)
       .maybeSingle();
-    const picked = ((enrichment?.picked_urls as string[] | null) ?? []).slice(0, 3);
+    const picked = ((enrichment?.picked_urls as string[] | null) ?? []);
     const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
     let sources: Array<{
       url: string;
