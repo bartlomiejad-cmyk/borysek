@@ -29,23 +29,19 @@ export const exportProject = createServerFn({ method: "GET" })
       .eq("project_id", data.projectId)
       .limit(100000);
 
-    const allUrls = Array.from(
-      new Set((ens ?? []).flatMap((e) => (e.picked_urls as string[] | null) ?? [])),
-    );
     const imgMap = new Map<string, string[]>();
-    if (allUrls.length) {
-      const { data: srcs } = await supabase
-        .from("product_sources")
-        .select("url, images, extra_images")
-        .eq("project_id", data.projectId)
-        .in("url", allUrls);
-      for (const s of srcs ?? []) {
-        const main = Array.isArray(s.images) ? (s.images as string[]) : [];
-        const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
-          ? ((s as { extra_images: string[] }).extra_images)
-          : [];
-        imgMap.set(s.url, [...main, ...extra]);
-      }
+    const { data: srcs, error: srcErr } = await supabase
+      .from("product_sources")
+      .select("url, images, extra_images")
+      .eq("project_id", data.projectId)
+      .limit(5000);
+    if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
+    for (const s of srcs ?? []) {
+      const main = Array.isArray(s.images) ? (s.images as string[]) : [];
+      const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
+        ? ((s as { extra_images: string[] }).extra_images)
+        : [];
+      imgMap.set(s.url, [...main, ...extra]);
     }
 
     const map = new Map((ens ?? []).map((e) => [e.source_product_id, e]));
