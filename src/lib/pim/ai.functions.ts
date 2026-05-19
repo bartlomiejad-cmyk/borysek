@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const MODEL = "google/gemini-3-flash-preview";
+const VISION_MODEL = "google/gemini-2.5-flash";
 
 /**
  * Post-process a generated text to strip white-label / blacklisted terms.
@@ -59,6 +60,36 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
     description: z.string().min(1).max(20000),
   });
   return schema.parse(parsed);
+};
+
+const callGatewayRaw = async (
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: unknown }>,
+): Promise<unknown> => {
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Lovable-API-Key": apiKey,
+      "X-Lovable-AIG-SDK": "raw",
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: "json_object" },
+      messages,
+    }),
+  });
+  if (res.status === 429) throw new Error("RATE_LIMIT");
+  if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+  if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const content = json.choices?.[0]?.message?.content ?? "";
+  try {
+    return JSON.parse(content);
+  } catch {
+    throw new Error("Model did not return valid JSON");
+  }
 };
 
 export const generateGoldenRecord = createServerFn({ method: "POST" })
