@@ -8,13 +8,6 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
 
-    const { data: project } = await supabase
-      .from("projects")
-      .select("include_extra_images")
-      .eq("id", data.projectId)
-      .single();
-    const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
-
     const { data: products, error } = await supabase
       .from("source_products")
       .select("id, ext_id, nazwa, kod, ean")
