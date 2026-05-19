@@ -42,7 +42,7 @@ function ProductDetail() {
     if (data?.enrichment) {
       setName(data.enrichment.golden_name ?? "");
       setDesc(data.enrichment.golden_description ?? "");
-      const f = (data.enrichment as { golden_features?: Array<{ key: string; value: string }> }).golden_features;
+      const f = (data.enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features;
       setFeatures(Array.isArray(f) ? f : []);
     }
   }, [data?.enrichment]);
