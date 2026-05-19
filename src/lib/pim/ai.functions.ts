@@ -358,7 +358,7 @@ export const verifyProduct = createServerFn({ method: "POST" })
     images = images.slice(0, 6);
 
     const name = (enrichment as { golden_name?: string | null }).golden_name ?? product.nazwa ?? "";
-    const features = ((enrichment as { golden_features?: Array<{ key: string; value: string }> }).golden_features ?? []);
+    const features = ((enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features ?? []);
 
     const systemPrompt = [
       "Jesteś asystentem kontroli jakości katalogu produktów.",
