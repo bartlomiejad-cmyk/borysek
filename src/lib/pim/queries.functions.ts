@@ -47,7 +47,8 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
     for (const s of srcs ?? []) {
       const main = Array.isArray(s.images) ? (s.images as string[]) : [];
-      const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
+      // Always include extra_images in list view so user can see them as thumbnails.
+      const extra = Array.isArray((s as { extra_images?: unknown }).extra_images)
         ? ((s as { extra_images: string[] }).extra_images)
         : [];
       imgMap.set(s.url, [...main, ...extra]);
@@ -63,7 +64,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
           if (!hidden.has(img) && !collected.includes(img)) collected.push(img);
         }
       }
-      const images = collected.slice(0, 6);
+      const images = collected.slice(0, 12);
       return {
         ...p,
         status: e?.status ?? "PENDING",
