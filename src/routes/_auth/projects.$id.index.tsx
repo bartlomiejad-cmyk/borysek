@@ -17,12 +17,15 @@ import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
+import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -56,6 +59,8 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
+  ShieldCheck,
+  X as XIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
@@ -76,6 +81,7 @@ function ProjectPage() {
   const listFn = useServerFn(listProductsWithEnrichment);
   const genFn = useServerFn(generateGoldenRecord);
   const exportFn = useServerFn(exportProject);
+  const hideImgFn = useServerFn(hideImageByProduct);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -122,7 +128,12 @@ function ProjectPage() {
   // ---- Uploads ----
 
   const handleSourceCsv = async (file: File) => {
-    const rows = await parseCsv(file);
+    const rows = await parseCsv(file, {
+      id_column: meta?.project.id_column,
+      name_column: meta?.project.name_column,
+      code_column: meta?.project.code_column,
+      ean_column: meta?.project.ean_column,
+    });
     if (!rows.length) throw new Error("Pusty plik CSV lub brak nagłówków id/nazwa/kod/ean");
     await clearFn({ data: { projectId: id, scope: "source_products" } });
     const batchSize = 1000;
@@ -240,6 +251,11 @@ function ProjectPage() {
           <Button onClick={generateAll} disabled={!!genProgress}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
+          <Button asChild variant="outline">
+            <Link to="/projects/$id/verify" params={{ id }}>
+              <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => exportFile("csv")}>
             <Download className="h-4 w-4 mr-2" /> CSV
           </Button>
@@ -332,7 +348,7 @@ function ProjectPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-14"></TableHead>
+                  <TableHead className="w-44">Zdjęcia</TableHead>
                   <TableHead>Nazwa</TableHead>
                   <TableHead>EAN / Kod</TableHead>
                   <TableHead>Match</TableHead>
@@ -351,13 +367,15 @@ function ProjectPage() {
                 {paged.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
-                      {p.thumbnail ? (
-                        <img src={p.thumbnail} alt="" className="h-10 w-10 object-cover rounded border" />
-                      ) : (
-                        <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
-                          <ImageOff className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                      )}
+                      <ProductThumbs
+                        productId={p.id}
+                        images={p.images ?? []}
+                        onHide={async (url) => {
+                          await hideImgFn({ data: { productId: p.id, url } });
+                          toast.success("Zdjęcie ukryte");
+                          refetchProducts();
+                        }}
+                      />
                     </TableCell>
                     <TableCell>
                       <div className="font-medium line-clamp-1">{p.golden_name ?? p.nazwa ?? "—"}</div>
@@ -464,12 +482,22 @@ function SettingsCard({
     custom_prompt: string;
     blacklist: string[];
     strategy: string;
+    include_extra_images?: boolean;
+    code_column?: string;
+    ean_column?: string;
+    name_column?: string;
+    id_column?: string;
   };
   onSave: (p: {
     name?: string;
     custom_prompt?: string;
     blacklist?: string[];
     strategy?: "EAN" | "NAZWA" | "HYBRID";
+    include_extra_images?: boolean;
+    code_column?: string;
+    ean_column?: string;
+    name_column?: string;
+    id_column?: string;
   }) => Promise<void>;
 }) {
   const [name, setName] = useState(project?.name ?? "");
@@ -478,6 +506,11 @@ function SettingsCard({
   const [strategy, setStrategy] = useState<"EAN" | "NAZWA" | "HYBRID">(
     (project?.strategy as "EAN" | "NAZWA" | "HYBRID") ?? "HYBRID",
   );
+  const [includeExtra, setIncludeExtra] = useState(project?.include_extra_images ?? false);
+  const [idCol, setIdCol] = useState(project?.id_column ?? "");
+  const [nameCol, setNameCol] = useState(project?.name_column ?? "");
+  const [codeCol, setCodeCol] = useState(project?.code_column ?? "");
+  const [eanCol, setEanCol] = useState(project?.ean_column ?? "");
 
   // Sync once project loads
   const initialized = useMemo(() => !!project, [project]);
@@ -529,11 +562,48 @@ function SettingsCard({
               custom_prompt: prompt,
               blacklist: blacklist.split("\n").map((s) => s.trim()).filter(Boolean),
               strategy,
+              include_extra_images: includeExtra,
+              id_column: idCol.trim(),
+              name_column: nameCol.trim(),
+              code_column: codeCol.trim(),
+              ean_column: eanCol.trim(),
             })
           }
         >
           Zapisz
         </Button>
+        <div className="pt-4 border-t space-y-3">
+          <div className="flex items-center gap-3">
+            <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
+            <Label htmlFor="extra-imgs" className="cursor-pointer">
+              Uwzględniaj zdjęcia z extraProperties (uwaga: mogą zawierać śmieci)
+            </Label>
+          </div>
+          <div>
+            <Label className="text-sm">Mapowanie kolumn Source CSV</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Zostaw puste = automatyczne wykrycie. Podaj dokładną nazwę kolumny z pliku CSV.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Kolumna „id"</Label>
+                <Input value={idCol} onChange={(e) => setIdCol(e.target.value)} placeholder="np. product_id" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „nazwa"</Label>
+                <Input value={nameCol} onChange={(e) => setNameCol(e.target.value)} placeholder="np. name" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „kod" (kod importu)</Label>
+                <Input value={codeCol} onChange={(e) => setCodeCol(e.target.value)} placeholder="np. symbol" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „ean"</Label>
+                <Input value={eanCol} onChange={(e) => setEanCol(e.target.value)} placeholder="np. gtin" />
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="pt-4 border-t">
           <Button
             variant="destructive"
@@ -560,4 +630,64 @@ function downloadBlob(blob: Blob, name: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function ProductThumbs({
+  images,
+  onHide,
+}: {
+  productId: string;
+  images: string[];
+  onHide: (url: string) => void | Promise<void>;
+}) {
+  const top = images.slice(0, 3);
+  if (!top.length) {
+    return (
+      <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
+        <ImageOff className="h-4 w-4 text-muted-foreground" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-1">
+      {top.map((url) => (
+        <div key={url} className="relative group">
+          <Dialog>
+            <DialogTrigger asChild>
+              <button type="button" className="block">
+                <img
+                  src={url}
+                  alt=""
+                  loading="lazy"
+                  className="h-10 w-10 object-cover rounded border hover:opacity-80"
+                />
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <img src={url} alt="" className="w-full h-auto rounded" />
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-muted-foreground break-all"
+              >
+                {url}
+              </a>
+            </DialogContent>
+          </Dialog>
+          <button
+            type="button"
+            title="Ukryj zdjęcie"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onHide(url);
+            }}
+            className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 flex items-center justify-center"
+          >
+            <XIcon className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }

@@ -7,6 +7,14 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .inputValidator((i) => z.object({ projectId: z.string().uuid() }).parse(i))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+
+    const { data: project } = await supabase
+      .from("projects")
+      .select("include_extra_images")
+      .eq("id", data.projectId)
+      .single();
+    const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
+
     const { data: products, error } = await supabase
       .from("source_products")
       .select("id, ext_id, nazwa, kod, ean")
@@ -18,7 +26,9 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     if (!ids.length) return [];
     const { data: ens } = await supabase
       .from("enrichments")
-      .select("source_product_id, status, match_type, picked_urls, golden_name, generated_at, error")
+      .select(
+        "source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality",
+      )
       .eq("project_id", data.projectId)
       .limit(10000);
     type EnrichRow = NonNullable<typeof ens>[number];
@@ -28,23 +38,33 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const allUrls = Array.from(
       new Set((ens ?? []).flatMap((e) => (e.picked_urls as string[] | null) ?? [])),
     );
-    const thumbMap = new Map<string, string | null>();
+    const imgMap = new Map<string, string[]>();
     if (allUrls.length) {
       const { data: srcs } = await supabase
         .from("product_sources")
-        .select("url, images")
+        .select("url, images, extra_images")
         .eq("project_id", data.projectId)
         .in("url", allUrls);
       for (const s of srcs ?? []) {
-        const arr = Array.isArray(s.images) ? (s.images as string[]) : [];
-        thumbMap.set(s.url, arr[0] ?? null);
+        const main = Array.isArray(s.images) ? (s.images as string[]) : [];
+        const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
+          ? ((s as { extra_images: string[] }).extra_images)
+          : [];
+        imgMap.set(s.url, [...main, ...extra]);
       }
     }
 
     return (products ?? []).map((p) => {
       const e = enMap.get(p.id);
       const picked = (e?.picked_urls as string[] | undefined) ?? [];
-      const thumb = picked.map((u) => thumbMap.get(u)).find(Boolean) ?? null;
+      const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
+      const collected: string[] = [];
+      for (const u of picked) {
+        for (const img of imgMap.get(u) ?? []) {
+          if (!hidden.has(img) && !collected.includes(img)) collected.push(img);
+        }
+      }
+      const images = collected.slice(0, 6);
       return {
         ...p,
         status: e?.status ?? "PENDING",
@@ -52,8 +72,17 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         golden_name: e?.golden_name ?? null,
         generated_at: e?.generated_at ?? null,
         error: e?.error ?? null,
-        thumbnail: thumb,
+        thumbnail: images[0] ?? null,
+        images,
         picked_urls: picked,
+        enrichment_id: (e as { id?: string } | undefined)?.id ?? null,
+        golden_features: ((e as { golden_features?: unknown } | undefined)?.golden_features ?? []) as Array<{ key: string; value: string }>,
+        quality: ((e as { quality?: unknown } | undefined)?.quality ?? null) as unknown as null | {
+          watermark_urls?: string[];
+          name_mismatch?: boolean;
+          feature_mismatches?: string[];
+          notes?: string;
+        },
       };
     });
   });
@@ -65,6 +94,13 @@ export const getProductDetail = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    const { data: project } = await supabase
+      .from("projects")
+      .select("include_extra_images")
+      .eq("id", data.projectId)
+      .single();
+    const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
+
     const { data: product, error } = await supabase
       .from("source_products")
       .select("*")
@@ -77,30 +113,37 @@ export const getProductDetail = createServerFn({ method: "GET" })
       .eq("source_product_id", data.productId)
       .maybeSingle();
     const picked = ((enrichment?.picked_urls as string[] | null) ?? []).slice(0, 3);
+    const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
     let sources: Array<{
       url: string;
       title: string | null;
       description: string | null;
       images: string[];
+      extra_images: string[];
     }> = [];
     if (picked.length) {
       const { data: srcs } = await supabase
         .from("product_sources")
-        .select("url, title, description, images")
+        .select("url, title, description, images, extra_images")
         .eq("project_id", data.projectId)
         .in("url", picked);
       const byUrl = new Map(srcs?.map((s) => [s.url, s]) ?? []);
       sources = picked.map((u) => {
         const s = byUrl.get(u);
+        const main = Array.isArray(s?.images) ? (s!.images as string[]) : [];
+        const extra = Array.isArray((s as { extra_images?: unknown } | undefined)?.extra_images)
+          ? ((s as { extra_images: string[] }).extra_images)
+          : [];
         return {
           url: u,
           title: s?.title ?? null,
           description: s?.description ?? null,
-          images: Array.isArray(s?.images) ? (s!.images as string[]) : [],
+          images: main.filter((img) => !hidden.has(img)),
+          extra_images: includeExtra ? extra.filter((img) => !hidden.has(img)) : [],
         };
       });
     }
-    return { product, enrichment, sources };
+    return { product, enrichment, sources, hidden_images: Array.from(hidden), include_extra_images: includeExtra };
   });
 
 export const updateGoldenRecord = createServerFn({ method: "POST" })

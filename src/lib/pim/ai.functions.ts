@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const MODEL = "google/gemini-3-flash-preview";
+const VISION_MODEL = "google/gemini-2.5-flash";
 
 /**
  * Post-process a generated text to strip white-label / blacklisted terms.
@@ -59,6 +60,36 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
     description: z.string().min(1).max(20000),
   });
   return schema.parse(parsed);
+};
+
+const callGatewayRaw = async (
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: unknown }>,
+): Promise<unknown> => {
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Lovable-API-Key": apiKey,
+      "X-Lovable-AIG-SDK": "raw",
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: "json_object" },
+      messages,
+    }),
+  });
+  if (res.status === 429) throw new Error("RATE_LIMIT");
+  if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+  if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const content = json.choices?.[0]?.message?.content ?? "";
+  try {
+    return JSON.parse(content);
+  } catch {
+    throw new Error("Model did not return valid JSON");
+  }
 };
 
 export const generateGoldenRecord = createServerFn({ method: "POST" })
@@ -172,4 +203,197 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         .eq("id", enrichment.id);
       throw new Error(msg);
     }
+  });
+
+const FeaturesSchema = z.object({
+  features: z.array(z.object({ key: z.string().min(1).max(200), value: z.string().min(1).max(2000) })).max(60),
+});
+
+export const generateFeatures = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ productId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const { data: product, error: pErr } = await supabase
+      .from("source_products")
+      .select("id, project_id, nazwa, kod, ean, raw")
+      .eq("id", data.productId)
+      .single();
+    if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+    const { data: project } = await supabase
+      .from("projects")
+      .select("blacklist")
+      .eq("id", product.project_id)
+      .single();
+    const blacklist = (project?.blacklist as string[] | null) ?? [];
+
+    const { data: enrichment } = await supabase
+      .from("enrichments")
+      .select("id, picked_urls")
+      .eq("source_product_id", product.id)
+      .maybeSingle();
+    if (!enrichment) throw new Error("No enrichment record. Run matching first.");
+
+    const urls = ((enrichment.picked_urls as string[] | null) ?? []).slice(0, 3);
+    const { data: srcs } = urls.length
+      ? await supabase
+          .from("product_sources")
+          .select("url, title, description")
+          .eq("project_id", product.project_id)
+          .in("url", urls)
+      : { data: [] as Array<{ url: string; title: string | null; description: string | null }> };
+
+    const raw = (product.raw as Record<string, unknown> | null) ?? {};
+    const extraProps =
+      (raw.extraProperties as unknown) ||
+      (raw.additionalProperties as unknown) ||
+      (raw.extra_properties as unknown) ||
+      (raw.additional_properties as unknown) ||
+      null;
+
+    const sourceBlocks = (srcs ?? [])
+      .map((s, idx) => {
+        const desc = (s.description ?? "").slice(0, 3000);
+        return `### Źródło ${idx + 1} (${s.url})\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
+      })
+      .join("\n\n---\n\n");
+
+    const systemPrompt = [
+      "Jesteś ekspertem PIM. Wyodrębnij listę cech technicznych produktu jako JSON.",
+      "Odpowiedź MUSI być JSON-em: {\"features\": [{\"key\": string, \"value\": string}]}.",
+      "Klucze po polsku, krótkie (np. \"Kolor\", \"Materiał\", \"Waga\", \"Pojemność\").",
+      "Wartości konkretne, bez marketingu. NIE wymyślaj. Pomiń cechy nieobecne w źródłach.",
+      "Pomiń ceny, dostępność, nazwy sklepów.",
+    ].join("\n");
+
+    const userPrompt = [
+      `PRODUKT: ${product.nazwa ?? ""}`,
+      `EAN: ${product.ean ?? ""} · Kod: ${product.kod ?? ""}`,
+      "",
+      `EXTRA PROPERTIES (z bazy klienta):`,
+      extraProps ? JSON.stringify(extraProps).slice(0, 4000) : "(brak)",
+      "",
+      `ŹRÓDŁA:`,
+      sourceBlocks || "(brak)",
+      "",
+      `Zwróć JSON {\"features\": [{\"key\", \"value\"}]}.`,
+    ].join("\n");
+
+    const parsed = await callGatewayRaw(apiKey, MODEL, [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ]);
+    const out = FeaturesSchema.parse(parsed);
+
+    const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
+    const features = out.features.map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }));
+
+    const { error } = await supabase
+      .from("enrichments")
+      .update({ golden_features: features } as never)
+      .eq("id", enrichment.id);
+    if (error) throw new Error(error.message);
+    return { features };
+  });
+
+const VerifySchema = z.object({
+  watermark_urls: z.array(z.string()).default([]),
+  name_mismatch: z.boolean().default(false),
+  feature_mismatches: z.array(z.string()).default([]),
+  notes: z.string().default(""),
+});
+
+export const verifyProduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ productId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const { data: product, error: pErr } = await supabase
+      .from("source_products")
+      .select("id, project_id, nazwa")
+      .eq("id", data.productId)
+      .single();
+    if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+    const { data: project } = await supabase
+      .from("projects")
+      .select("include_extra_images")
+      .eq("id", product.project_id)
+      .single();
+    const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
+
+    const { data: enrichment } = await supabase
+      .from("enrichments")
+      .select("id, picked_urls, golden_name, golden_features, hidden_images")
+      .eq("source_product_id", product.id)
+      .maybeSingle();
+    if (!enrichment) throw new Error("No enrichment record. Run matching first.");
+
+    const picked = ((enrichment.picked_urls as string[] | null) ?? []).slice(0, 3);
+    const hidden = new Set(((enrichment as { hidden_images?: string[] }).hidden_images ?? []));
+    let images: string[] = [];
+    if (picked.length) {
+      const { data: srcs } = await supabase
+        .from("product_sources")
+        .select("url, images, extra_images")
+        .eq("project_id", product.project_id)
+        .in("url", picked);
+      for (const s of srcs ?? []) {
+        const main = Array.isArray(s.images) ? (s.images as string[]) : [];
+        const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
+          ? ((s as { extra_images: string[] }).extra_images)
+          : [];
+        for (const u of [...main, ...extra]) {
+          if (!hidden.has(u) && !images.includes(u)) images.push(u);
+        }
+      }
+    }
+    images = images.slice(0, 6);
+
+    const name = (enrichment as { golden_name?: string | null }).golden_name ?? product.nazwa ?? "";
+    const features = ((enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features ?? []);
+
+    const systemPrompt = [
+      "Jesteś asystentem kontroli jakości katalogu produktów.",
+      "Otrzymasz nazwę produktu, listę cech i URL-e zdjęć.",
+      "Sprawdź: (1) czy zdjęcia mają znak wodny / logo sklepu / watermark (zwróć ich URL),",
+      "(2) czy zdjęcia pasują do nazwy produktu (name_mismatch=true gdy NIE),",
+      "(3) które cechy są sprzeczne / nieprawdopodobne dla tego produktu (lista stringów).",
+      "Odpowiedź MUSI być JSON-em: {\"watermark_urls\": string[], \"name_mismatch\": boolean, \"feature_mismatches\": string[], \"notes\": string}.",
+      "Po polsku, krótko, rzeczowo.",
+    ].join("\n");
+
+    const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+      {
+        type: "text",
+        text: [
+          `NAZWA: ${name}`,
+          `CECHY: ${features.length ? features.map((f) => `${f.key}: ${f.value}`).join(" | ") : "(brak)"}`,
+          `URL-e zdjęć (do podglądu): ${images.join(" , ") || "(brak)"}`,
+          "",
+          "Zwróć JSON wg schematu.",
+        ].join("\n"),
+      },
+      ...images.map((u) => ({ type: "image_url" as const, image_url: { url: u } })),
+    ];
+
+    const parsed = await callGatewayRaw(apiKey, VISION_MODEL, [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ]);
+    const out = VerifySchema.parse(parsed);
+
+    const { error } = await supabase
+      .from("enrichments")
+      .update({ quality: out as never } as never)
+      .eq("id", enrichment.id);
+    if (error) throw new Error(error.message);
+    return out;
   });

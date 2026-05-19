@@ -20,6 +20,7 @@ const productSourceSchema = z.object({
   title: z.string().nullable(),
   description: z.string().nullable(),
   images: z.array(z.string()),
+  extra_images: z.array(z.string()).default([]),
   raw: z.record(z.unknown()),
 });
 

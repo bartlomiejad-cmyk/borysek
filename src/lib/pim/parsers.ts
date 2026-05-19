@@ -22,17 +22,36 @@ const pick = (row: Record<string, unknown>, keys: string[]): string | null => {
   return null;
 };
 
-export const parseCsv = (file: File): Promise<CsvRow[]> =>
+export type CsvMapping = {
+  id_column?: string;
+  name_column?: string;
+  code_column?: string;
+  ean_column?: string;
+};
+
+export const parseCsv = (file: File, mapping?: CsvMapping): Promise<CsvRow[]> =>
   new Promise((resolve, reject) => {
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
+        const m = mapping ?? {};
+        const lookup = (
+          row: Record<string, unknown>,
+          manual: string | undefined,
+          fallback: string[],
+        ): string | null => {
+          if (manual && manual.trim()) {
+            const v = pick(row, [manual.trim()]);
+            if (v) return v;
+          }
+          return pick(row, fallback);
+        };
         const rows: CsvRow[] = res.data.map((r) => ({
-          ext_id: pick(r, ["id", "ID", "product_id", "sku_id"]),
-          nazwa: pick(r, ["nazwa", "name", "title", "product_name"]),
-          kod: pick(r, ["kod", "code", "sku"]),
-          ean: pick(r, ["ean", "gtin", "barcode"]),
+          ext_id: lookup(r, m.id_column, ["id", "ID", "product_id", "sku_id"]),
+          nazwa: lookup(r, m.name_column, ["nazwa", "name", "title", "product_name"]),
+          kod: lookup(r, m.code_column, ["kod", "code", "sku"]),
+          ean: lookup(r, m.ean_column, ["ean", "gtin", "barcode"]),
           raw: r,
         }));
         resolve(rows.filter((r) => r.nazwa || r.ean || r.kod || r.ext_id));
@@ -110,28 +129,39 @@ export type ProductSourceRow = {
   title: string | null;
   description: string | null;
   images: string[];
+  extra_images: string[];
   raw: Record<string, unknown>;
 };
 
-const collectImages = (o: Record<string, unknown>): string[] => {
+const pushImage = (out: string[], v: unknown) => {
+  if (typeof v === "string" && /^https?:\/\//i.test(v)) out.push(v);
+  else if (v && typeof v === "object") {
+    const cand =
+      (v as Record<string, unknown>).url ??
+      (v as Record<string, unknown>).src ??
+      (v as Record<string, unknown>).href;
+    if (typeof cand === "string" && /^https?:\/\//i.test(cand)) out.push(cand);
+  }
+};
+
+const collectMainImages = (o: Record<string, unknown>): string[] => {
   const out: string[] = [];
-  const push = (v: unknown) => {
-    if (typeof v === "string" && /^https?:\/\//i.test(v)) out.push(v);
-    else if (v && typeof v === "object") {
-      const cand = (v as Record<string, unknown>).url ?? (v as Record<string, unknown>).src;
-      if (typeof cand === "string") out.push(cand);
-    }
-  };
   for (const key of ["images", "image", "photos", "gallery", "image_urls", "imageUrls"]) {
     const v = o[key];
-    if (Array.isArray(v)) v.forEach(push);
-    else push(v);
+    if (Array.isArray(v)) v.forEach((x) => pushImage(out, x));
+    else pushImage(out, v);
   }
-  // Common nested location: additionalProperties.images: [{url}]
-  const ap = o.additionalProperties as Record<string, unknown> | undefined;
-  if (ap && typeof ap === "object") {
-    const apImgs = ap.images;
-    if (Array.isArray(apImgs)) apImgs.forEach(push);
+  return Array.from(new Set(out));
+};
+
+const collectExtraImages = (o: Record<string, unknown>): string[] => {
+  const out: string[] = [];
+  for (const key of ["additionalProperties", "extraProperties", "extra_properties", "additional_properties"]) {
+    const ap = o[key] as Record<string, unknown> | undefined;
+    if (!ap || typeof ap !== "object") continue;
+    const apImgs = ap.images ?? ap.image ?? ap.photos ?? ap.gallery;
+    if (Array.isArray(apImgs)) apImgs.forEach((x) => pushImage(out, x));
+    else pushImage(out, apImgs);
   }
   return Array.from(new Set(out));
 };
@@ -151,6 +181,8 @@ export const parseProductJson = (raw: unknown): ProductSourceRow[] => {
     const o = node as Record<string, unknown>;
     const url = firstString(o, ["url", "link", "sourceUrl", "source_url", "product_url"]);
     if (!url) return;
+    const main = collectMainImages(o);
+    const extra = collectExtraImages(o).filter((u) => !main.includes(u));
     out.push({
       url,
       title: firstString(o, ["title", "name", "productName", "product_name", "h1"]),
@@ -163,7 +195,8 @@ export const parseProductJson = (raw: unknown): ProductSourceRow[] => {
         "text",
         "content",
       ]),
-      images: collectImages(o),
+      images: main,
+      extra_images: extra,
       raw: o,
     });
   };

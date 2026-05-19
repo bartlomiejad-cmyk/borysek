@@ -19,7 +19,9 @@ export type Database = {
           error: string | null
           generated_at: string | null
           golden_description: string | null
+          golden_features: Json
           golden_name: string | null
+          hidden_images: Json
           id: string
           match_type: Database["public"]["Enums"]["match_type"]
           matched_term: string | null
@@ -27,6 +29,7 @@ export type Database = {
           picked_urls: string[]
           previous: Json | null
           project_id: string
+          quality: Json | null
           source_product_id: string
           status: Database["public"]["Enums"]["enrichment_status"]
           updated_at: string
@@ -35,7 +38,9 @@ export type Database = {
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
+          golden_features?: Json
           golden_name?: string | null
+          hidden_images?: Json
           id?: string
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
@@ -43,6 +48,7 @@ export type Database = {
           picked_urls?: string[]
           previous?: Json | null
           project_id: string
+          quality?: Json | null
           source_product_id: string
           status?: Database["public"]["Enums"]["enrichment_status"]
           updated_at?: string
@@ -51,7 +57,9 @@ export type Database = {
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
+          golden_features?: Json
           golden_name?: string | null
+          hidden_images?: Json
           id?: string
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
@@ -59,6 +67,7 @@ export type Database = {
           picked_urls?: string[]
           previous?: Json | null
           project_id?: string
+          quality?: Json | null
           source_product_id?: string
           status?: Database["public"]["Enums"]["enrichment_status"]
           updated_at?: string
@@ -84,6 +93,7 @@ export type Database = {
         Row: {
           created_at: string
           description: string | null
+          extra_images: Json
           id: string
           images: Json
           project_id: string
@@ -94,6 +104,7 @@ export type Database = {
         Insert: {
           created_at?: string
           description?: string | null
+          extra_images?: Json
           id?: string
           images?: Json
           project_id: string
@@ -104,6 +115,7 @@ export type Database = {
         Update: {
           created_at?: string
           description?: string | null
+          extra_images?: Json
           id?: string
           images?: Json
           project_id?: string
@@ -124,30 +136,45 @@ export type Database = {
       projects: {
         Row: {
           blacklist: string[]
+          code_column: string
           created_at: string
           custom_prompt: string
+          ean_column: string
           id: string
+          id_column: string
+          include_extra_images: boolean
           name: string
+          name_column: string
           strategy: Database["public"]["Enums"]["mapping_strategy"]
           updated_at: string
           user_id: string
         }
         Insert: {
           blacklist?: string[]
+          code_column?: string
           created_at?: string
           custom_prompt?: string
+          ean_column?: string
           id?: string
+          id_column?: string
+          include_extra_images?: boolean
           name: string
+          name_column?: string
           strategy?: Database["public"]["Enums"]["mapping_strategy"]
           updated_at?: string
           user_id: string
         }
         Update: {
           blacklist?: string[]
+          code_column?: string
           created_at?: string
           custom_prompt?: string
+          ean_column?: string
           id?: string
+          id_column?: string
+          include_extra_images?: boolean
           name?: string
+          name_column?: string
           strategy?: Database["public"]["Enums"]["mapping_strategy"]
           updated_at?: string
           user_id?: string
