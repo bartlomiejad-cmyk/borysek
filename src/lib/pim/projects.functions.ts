@@ -65,6 +65,11 @@ export const updateProject = createServerFn({ method: "POST" })
       custom_prompt: z.string().max(8000).optional(),
       blacklist: z.array(z.string().min(1).max(120)).max(200).optional(),
       strategy: z.enum(["EAN", "NAZWA", "HYBRID"]).optional(),
+      include_extra_images: z.boolean().optional(),
+      code_column: z.string().max(120).optional(),
+      ean_column: z.string().max(120).optional(),
+      name_column: z.string().max(120).optional(),
+      id_column: z.string().max(120).optional(),
     }).parse(i),
   )
   .handler(async ({ data, context }) => {
