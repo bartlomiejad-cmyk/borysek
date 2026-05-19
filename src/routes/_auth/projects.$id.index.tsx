@@ -482,12 +482,22 @@ function SettingsCard({
     custom_prompt: string;
     blacklist: string[];
     strategy: string;
+    include_extra_images?: boolean;
+    code_column?: string;
+    ean_column?: string;
+    name_column?: string;
+    id_column?: string;
   };
   onSave: (p: {
     name?: string;
     custom_prompt?: string;
     blacklist?: string[];
     strategy?: "EAN" | "NAZWA" | "HYBRID";
+    include_extra_images?: boolean;
+    code_column?: string;
+    ean_column?: string;
+    name_column?: string;
+    id_column?: string;
   }) => Promise<void>;
 }) {
   const [name, setName] = useState(project?.name ?? "");
@@ -496,6 +506,11 @@ function SettingsCard({
   const [strategy, setStrategy] = useState<"EAN" | "NAZWA" | "HYBRID">(
     (project?.strategy as "EAN" | "NAZWA" | "HYBRID") ?? "HYBRID",
   );
+  const [includeExtra, setIncludeExtra] = useState(project?.include_extra_images ?? false);
+  const [idCol, setIdCol] = useState(project?.id_column ?? "");
+  const [nameCol, setNameCol] = useState(project?.name_column ?? "");
+  const [codeCol, setCodeCol] = useState(project?.code_column ?? "");
+  const [eanCol, setEanCol] = useState(project?.ean_column ?? "");
 
   // Sync once project loads
   const initialized = useMemo(() => !!project, [project]);
@@ -547,11 +562,48 @@ function SettingsCard({
               custom_prompt: prompt,
               blacklist: blacklist.split("\n").map((s) => s.trim()).filter(Boolean),
               strategy,
+              include_extra_images: includeExtra,
+              id_column: idCol.trim(),
+              name_column: nameCol.trim(),
+              code_column: codeCol.trim(),
+              ean_column: eanCol.trim(),
             })
           }
         >
           Zapisz
         </Button>
+        <div className="pt-4 border-t space-y-3">
+          <div className="flex items-center gap-3">
+            <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
+            <Label htmlFor="extra-imgs" className="cursor-pointer">
+              Uwzględniaj zdjęcia z extraProperties (uwaga: mogą zawierać śmieci)
+            </Label>
+          </div>
+          <div>
+            <Label className="text-sm">Mapowanie kolumn Source CSV</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Zostaw puste = automatyczne wykrycie. Podaj dokładną nazwę kolumny z pliku CSV.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Kolumna „id"</Label>
+                <Input value={idCol} onChange={(e) => setIdCol(e.target.value)} placeholder="np. product_id" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „nazwa"</Label>
+                <Input value={nameCol} onChange={(e) => setNameCol(e.target.value)} placeholder="np. name" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „kod" (kod importu)</Label>
+                <Input value={codeCol} onChange={(e) => setCodeCol(e.target.value)} placeholder="np. symbol" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „ean"</Label>
+                <Input value={eanCol} onChange={(e) => setEanCol(e.target.value)} placeholder="np. gtin" />
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="pt-4 border-t">
           <Button
             variant="destructive"
