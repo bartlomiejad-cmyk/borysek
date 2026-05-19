@@ -77,7 +77,12 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         picked_urls: picked,
         enrichment_id: (e as { id?: string } | undefined)?.id ?? null,
         golden_features: ((e as { golden_features?: unknown } | undefined)?.golden_features ?? []) as Array<{ key: string; value: string }>,
-        quality: ((e as { quality?: unknown } | undefined)?.quality ?? null) as null | Record<string, unknown>,
+        quality: ((e as { quality?: unknown } | undefined)?.quality ?? null) as unknown as null | {
+          watermark_urls?: string[];
+          name_mismatch?: boolean;
+          feature_mismatches?: string[];
+          notes?: string;
+        },
       };
     });
   });
