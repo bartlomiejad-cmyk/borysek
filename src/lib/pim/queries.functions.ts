@@ -121,11 +121,12 @@ export const getProductDetail = createServerFn({ method: "GET" })
       extra_images: string[];
     }> = [];
     if (picked.length) {
-      const { data: srcs } = await supabase
+      const { data: srcs, error: srcErr } = await supabase
         .from("product_sources")
         .select("url, title, description, images, extra_images")
         .eq("project_id", data.projectId)
         .in("url", picked);
+      if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
       const byUrl = new Map(srcs?.map((s) => [s.url, s]) ?? []);
       sources = picked.map((u) => {
         const s = byUrl.get(u);
