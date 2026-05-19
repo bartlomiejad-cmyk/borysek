@@ -17,12 +17,15 @@ import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
+import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -56,6 +59,8 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
+  ShieldCheck,
+  X as XIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
@@ -76,6 +81,7 @@ function ProjectPage() {
   const listFn = useServerFn(listProductsWithEnrichment);
   const genFn = useServerFn(generateGoldenRecord);
   const exportFn = useServerFn(exportProject);
+  const hideImgFn = useServerFn(hideImageByProduct);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -122,7 +128,12 @@ function ProjectPage() {
   // ---- Uploads ----
 
   const handleSourceCsv = async (file: File) => {
-    const rows = await parseCsv(file);
+    const rows = await parseCsv(file, {
+      id_column: meta?.project.id_column,
+      name_column: meta?.project.name_column,
+      code_column: meta?.project.code_column,
+      ean_column: meta?.project.ean_column,
+    });
     if (!rows.length) throw new Error("Pusty plik CSV lub brak nagłówków id/nazwa/kod/ean");
     await clearFn({ data: { projectId: id, scope: "source_products" } });
     const batchSize = 1000;
@@ -240,6 +251,11 @@ function ProjectPage() {
           <Button onClick={generateAll} disabled={!!genProgress}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
+          <Button asChild variant="outline">
+            <Link to="/projects/$id/verify" params={{ id }}>
+              <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => exportFile("csv")}>
             <Download className="h-4 w-4 mr-2" /> CSV
           </Button>
@@ -332,7 +348,7 @@ function ProjectPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-14"></TableHead>
+                  <TableHead className="w-44">Zdjęcia</TableHead>
                   <TableHead>Nazwa</TableHead>
                   <TableHead>EAN / Kod</TableHead>
                   <TableHead>Match</TableHead>
@@ -351,13 +367,15 @@ function ProjectPage() {
                 {paged.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
-                      {p.thumbnail ? (
-                        <img src={p.thumbnail} alt="" className="h-10 w-10 object-cover rounded border" />
-                      ) : (
-                        <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
-                          <ImageOff className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                      )}
+                      <ProductThumbs
+                        productId={p.id}
+                        images={p.images ?? []}
+                        onHide={async (url) => {
+                          await hideImgFn({ data: { productId: p.id, url } });
+                          toast.success("Zdjęcie ukryte");
+                          refetchProducts();
+                        }}
+                      />
                     </TableCell>
                     <TableCell>
                       <div className="font-medium line-clamp-1">{p.golden_name ?? p.nazwa ?? "—"}</div>
