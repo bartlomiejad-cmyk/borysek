@@ -16,7 +16,7 @@ const searchRowSchema = z.object({
 });
 
 const productSourceSchema = z.object({
-  url: z.string().min(1),
+  url: z.string().trim().min(1),
   title: z.string().nullable(),
   description: z.string().nullable(),
   images: z.array(z.string()),
@@ -100,7 +100,7 @@ export const ingestProductSources = createServerFn({ method: "POST" })
     // Deduplicate by url within the same payload — otherwise the upsert
     // throws "ON CONFLICT DO UPDATE command cannot affect row a second time".
     const seen = new Map<string, typeof data.rows[number]>();
-    for (const r of data.rows) seen.set(r.url, r);
+    for (const r of data.rows) seen.set(r.url.trim(), { ...r, url: r.url.trim() });
     const deduped = Array.from(seen.values());
     const batches = chunk(deduped, 200);
     for (const b of batches) {
