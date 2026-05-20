@@ -32,6 +32,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     // .in("url", [...thousands of urls]) blows up the PostgREST URL length
     // and silently returns nothing, leaving the list with no thumbnails.
     const imgMap = new Map<string, string[]>();
+    const extraSet = new Set<string>();
     const { data: srcs, error: srcErr } = await supabase
       .from("product_sources")
       .select("url, images, extra_images")
@@ -40,10 +41,10 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
     for (const s of srcs ?? []) {
       const main = Array.isArray(s.images) ? (s.images as string[]) : [];
-      // Always include extra_images in list view so user can see them as thumbnails.
       const extra = Array.isArray((s as { extra_images?: unknown }).extra_images)
         ? ((s as { extra_images: string[] }).extra_images)
         : [];
+      for (const u of extra) extraSet.add(u);
       imgMap.set(s.url, [...main, ...extra]);
     }
 
@@ -67,6 +68,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         error: e?.error ?? null,
         thumbnail: images[0] ?? null,
         images,
+        extra_image_urls: images.filter((u) => extraSet.has(u)),
         picked_urls: picked,
         enrichment_id: (e as { id?: string } | undefined)?.id ?? null,
         golden_features: ((e as { golden_features?: unknown } | undefined)?.golden_features ?? []) as Array<{ key: string; value: string }>,
