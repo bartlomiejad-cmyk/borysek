@@ -33,13 +33,23 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     // and silently returns nothing, leaving the list with no thumbnails.
     const imgMap = new Map<string, string[]>();
     const extraSet = new Set<string>();
-    const { data: srcs, error: srcErr } = await supabase
-      .from("product_sources")
-      .select("url, images, extra_images")
-      .eq("project_id", data.projectId)
-      .limit(5000);
-    if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
-    for (const s of srcs ?? []) {
+    // PostgREST caps a single response at 1000 rows even when .limit() is larger,
+    // so we paginate via .range() to fetch every product_source for the project.
+    const PAGE = 1000;
+    const allSrcs: Array<{ url: string; images: unknown; extra_images?: unknown }> = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: srcErr } = await supabase
+        .from("product_sources")
+        .select("url, images, extra_images")
+        .eq("project_id", data.projectId)
+        .order("created_at", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (srcErr) { console.error("product_sources fetch failed:", srcErr.message); break; }
+      if (!page || page.length === 0) break;
+      allSrcs.push(...page);
+      if (page.length < PAGE) break;
+    }
+    for (const s of allSrcs) {
       const main = Array.isArray(s.images) ? (s.images as string[]) : [];
       const extra = Array.isArray((s as { extra_images?: unknown }).extra_images)
         ? ((s as { extra_images: string[] }).extra_images)
