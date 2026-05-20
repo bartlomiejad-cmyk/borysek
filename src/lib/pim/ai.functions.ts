@@ -569,3 +569,119 @@ export const verifyProduct = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return out;
   });
+
+const ImageScoreSchema = z.object({
+  is_central: z.number().min(0).max(10),
+  is_clean: z.number().min(0).max(10),
+  is_banner_or_trash: z.boolean(),
+});
+export type ImageScore = z.infer<typeof ImageScoreSchema> & { scored_at: string };
+
+const SCORE_SYSTEM_PROMPT =
+  "Jesteś ekspertem e-commerce. Oceń kompozycję zdjęcia pod kątem przydatności jako główna miniaturka produktu w sklepie. Zwróć surowy JSON według podanego schematu.";
+
+const SCORE_USER_TEXT = [
+  "Oceń to zdjęcie produktu i zwróć WYŁĄCZNIE JSON o strukturze:",
+  '{"is_central": number (1-10), "is_clean": number (1-10), "is_banner_or_trash": boolean}',
+  "",
+  "is_central: czy produkt jest na środku kadru, dobrze widoczny (10), czy mikro-produkt w rogu / ucięty (1).",
+  "is_clean: czy tło jest jednolite/białe/mało rozpraszające (10). Odejmij punkty za banery, napisy, logotypy, kolaż.",
+  "is_banner_or_trash: true, jeśli obrazek to baner reklamowy, infografika, tabela rozmiarów, ikona, logo sklepu, znak wodny lub kolaż - czyli NIE nadaje się na miniaturę.",
+].join("\n");
+
+async function scoreOneImage(apiKey: string, url: string, timeoutMs = 15000): Promise<ImageScore> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": apiKey,
+        "X-Lovable-AIG-SDK": "raw",
+      },
+      body: JSON.stringify({
+        model: SCORE_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SCORE_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: SCORE_USER_TEXT },
+              { type: "image_url", image_url: { url } },
+            ],
+          },
+        ],
+      }),
+    });
+    if (res.status === 429) throw new Error("RATE_LIMIT");
+    if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+    if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = json.choices?.[0]?.message?.content ?? "";
+    let parsed: unknown;
+    try { parsed = JSON.parse(content); } catch { throw new Error("Model did not return valid JSON"); }
+    const out = ImageScoreSchema.parse(parsed);
+    return { ...out, scored_at: new Date().toISOString() };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export const analyzeProductImages = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      productId: z.string().uuid(),
+      urls: z.array(z.string().url()).min(1).max(8),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const { data: enrichment, error: eErr } = await supabase
+      .from("enrichments")
+      .select("id, image_scores")
+      .eq("source_product_id", data.productId)
+      .maybeSingle();
+    if (eErr) throw new Error(eErr.message);
+    if (!enrichment) throw new Error("No enrichment record. Run matching first.");
+
+    const existing = (((enrichment as unknown as { image_scores?: Record<string, ImageScore> }).image_scores) ?? {}) as Record<string, ImageScore>;
+    const toScore = data.urls.filter((u) => !existing[u]);
+
+    if (!toScore.length) {
+      return { scores: existing, source: "cache" as const, failed: [] as string[] };
+    }
+
+    const settled = await Promise.allSettled(toScore.map((u) => scoreOneImage(apiKey, u)));
+    const merged: Record<string, ImageScore> = { ...existing };
+    const failed: string[] = [];
+    settled.forEach((r, idx) => {
+      const url = toScore[idx];
+      if (r.status === "fulfilled") merged[url] = r.value;
+      else failed.push(url);
+    });
+
+    const anySuccess = settled.some((r) => r.status === "fulfilled");
+    if (anySuccess) {
+      const { error: upErr } = await supabase
+        .from("enrichments")
+        .update({ image_scores: merged as never } as never)
+        .eq("id", enrichment.id);
+      if (upErr) throw new Error(upErr.message);
+    }
+
+    const allFailed = failed.length === toScore.length;
+    if (allFailed) throw new Error("AI scoring failed for all images");
+
+    return {
+      scores: merged,
+      source: (failed.length ? "partial" : "ai") as "partial" | "ai",
+      failed,
+    };
+  });
