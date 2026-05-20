@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { pickImages, type ImageMeta } from "./images";
 
 export const exportProject = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -24,19 +25,27 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, model, generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, model, generated_at",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
 
     const imgMap = new Map<string, string[]>();
-    const { data: srcs, error: srcErr } = await supabase
-      .from("product_sources")
-      .select("url, images, extra_images")
-      .eq("project_id", data.projectId)
-      .limit(5000);
-    if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
-    for (const s of srcs ?? []) {
+    const PAGE = 1000;
+    const allSrcs: Array<{ url: string; images: unknown; extra_images?: unknown }> = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: srcErr } = await supabase
+        .from("product_sources")
+        .select("url, images, extra_images")
+        .eq("project_id", data.projectId)
+        .order("created_at", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (srcErr) { console.error("product_sources fetch failed:", srcErr.message); break; }
+      if (!page || page.length === 0) break;
+      allSrcs.push(...page);
+      if (page.length < PAGE) break;
+    }
+    for (const s of allSrcs) {
       const main = Array.isArray(s.images) ? (s.images as string[]) : [];
       const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
         ? ((s as { extra_images: string[] }).extra_images)
@@ -49,12 +58,14 @@ export const exportProject = createServerFn({ method: "GET" })
       const e = map.get(p.id);
       const urls = (e?.picked_urls as string[] | undefined) ?? [];
       const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
-      const images: string[] = [];
+      const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
+      const all: string[] = [];
       for (const u of urls) {
         for (const img of imgMap.get(u) ?? []) {
-          if (!hidden.has(img) && !images.includes(img)) images.push(img);
+          if (!all.includes(img)) all.push(img);
         }
       }
+      const images = pickImages(all, meta, hidden);
       const features = ((e as unknown as { golden_features?: Array<{ key: string; value: string }> } | undefined)?.golden_features ?? []);
       return {
         id: p.ext_id ?? "",

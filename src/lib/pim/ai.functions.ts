@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { probeManySizes } from "./image-size.server";
 
 const MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -333,6 +334,149 @@ const VerifySchema = z.object({
   feature_mismatches: z.array(z.string()).default([]),
   notes: z.string().default(""),
 });
+
+const VerifySourcesSchema = z.object({
+  watermark_urls: z.array(z.string()).default([]),
+  mismatch_urls: z.array(z.string()).default([]),
+  notes: z.string().default(""),
+});
+
+export const verifySources = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ productId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const { data: product, error: pErr } = await supabase
+      .from("source_products")
+      .select("id, project_id, nazwa, kod, ean")
+      .eq("id", data.productId)
+      .single();
+    if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+    const { data: project } = await supabase
+      .from("projects")
+      .select("include_extra_images")
+      .eq("id", product.project_id)
+      .single();
+    const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
+
+    const { data: enrichment } = await supabase
+      .from("enrichments")
+      .select("id, picked_urls, hidden_images, image_meta, quality")
+      .eq("source_product_id", product.id)
+      .maybeSingle();
+    if (!enrichment) throw new Error("No enrichment record. Run matching first.");
+
+    const picked = ((enrichment.picked_urls as string[] | null) ?? []);
+    if (!picked.length) return { ok: true, hidden_added: 0, measured: 0 };
+
+    const { data: srcs } = await supabase
+      .from("product_sources")
+      .select("url, images, extra_images")
+      .eq("project_id", product.project_id)
+      .in("url", picked);
+
+    const allImages: string[] = [];
+    for (const s of srcs ?? []) {
+      const main = Array.isArray(s.images) ? (s.images as string[]) : [];
+      const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
+        ? ((s as { extra_images: string[] }).extra_images)
+        : [];
+      for (const u of [...main, ...extra]) if (!allImages.includes(u)) allImages.push(u);
+    }
+    if (!allImages.length) return { ok: true, hidden_added: 0, measured: 0 };
+
+    // 1) Measure sizes for all images (cached in image_meta — skip already-known URLs)
+    const existingMeta = ((enrichment as unknown as { image_meta?: Record<string, { w: number; h: number }> }).image_meta ?? {}) as Record<string, { w: number; h: number }>;
+    const toMeasure = allImages.filter((u) => !existingMeta[u]);
+    const fresh = toMeasure.length ? await probeManySizes(toMeasure, 6) : {};
+    const image_meta = { ...existingMeta, ...fresh };
+
+    // 2) Pick a small set (max 8) to send to the vision model — prefer big.
+    const sortedForAI = [...allImages].sort((a, b) => {
+      const am = image_meta[a]; const bm = image_meta[b];
+      const aa = am ? am.w * am.h : 0;
+      const bb = bm ? bm.w * bm.h : 0;
+      return bb - aa;
+    }).slice(0, 8);
+
+    let watermark: string[] = [];
+    let mismatch: string[] = [];
+    let notes = "";
+    try {
+      const systemPrompt = [
+        "Jesteś asystentem QA katalogu produktów. Otrzymasz nazwę produktu (+EAN/kod) i URL-e zdjęć ze źródeł.",
+        "Zwróć URL-e zdjęć, które:",
+        "  (a) mają widoczny znak wodny / logo sklepu / napis 'kup teraz' itp. (watermark_urls),",
+        "  (b) wyraźnie NIE przedstawiają tego produktu (mismatch_urls).",
+        "Bądź zachowawczy — w razie wątpliwości NIE zgłaszaj URL-a.",
+        "Odpowiedź MUSI być JSON-em: {\"watermark_urls\": string[], \"mismatch_urls\": string[], \"notes\": string}.",
+      ].join("\n");
+      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+        {
+          type: "text",
+          text: [
+            `PRODUKT: ${product.nazwa ?? ""}`,
+            `EAN: ${product.ean ?? ""} · Kod: ${product.kod ?? ""}`,
+            "URL-e (w kolejności do oceny):",
+            sortedForAI.map((u, i) => `${i + 1}. ${u}`).join("\n"),
+          ].join("\n"),
+        },
+        ...sortedForAI.map((u) => ({ type: "image_url" as const, image_url: { url: u } })),
+      ];
+      const parsed = await callGatewayRaw(apiKey, VISION_MODEL, [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ]);
+      const out = VerifySourcesSchema.parse(parsed);
+      watermark = out.watermark_urls.filter((u) => sortedForAI.includes(u));
+      mismatch = out.mismatch_urls.filter((u) => sortedForAI.includes(u));
+      notes = out.notes;
+    } catch (e) {
+      notes = `verify failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+
+    // 3) Merge into hidden_images (dedup). Size filter happens at read time
+    //    (so the "only image" fallback can keep a small image when there is
+    //    truly nothing else).
+    const prevHidden = ((enrichment as { hidden_images?: string[] }).hidden_images ?? []) as string[];
+    const hiddenSet = new Set(prevHidden);
+    for (const u of [...watermark, ...mismatch]) hiddenSet.add(u);
+    const newHidden = Array.from(hiddenSet);
+
+    const prevQuality = ((enrichment as { quality?: Record<string, unknown> }).quality ?? {}) as Record<string, unknown>;
+    const quality = {
+      ...prevQuality,
+      pre_verify: {
+        watermark_urls: watermark,
+        mismatch_urls: mismatch,
+        notes,
+        evaluated_urls: sortedForAI,
+        at: new Date().toISOString(),
+      },
+    };
+
+    const { error: upErr } = await supabase
+      .from("enrichments")
+      .update({
+        hidden_images: newHidden as never,
+        image_meta: image_meta as never,
+        quality: quality as never,
+      } as never)
+      .eq("id", enrichment.id);
+    if (upErr) throw new Error(upErr.message);
+
+    return {
+      ok: true,
+      hidden_added: newHidden.length - prevHidden.length,
+      measured: Object.keys(fresh).length,
+      watermark_count: watermark.length,
+      mismatch_count: mismatch.length,
+    };
+  });
 
 export const verifyProduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
