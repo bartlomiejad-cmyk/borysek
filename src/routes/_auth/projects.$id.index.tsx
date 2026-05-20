@@ -14,7 +14,7 @@ import {
 } from "@/lib/pim/ingest.functions";
 import { runMatching } from "@/lib/pim/matching.functions";
 import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
-import { generateGoldenRecord } from "@/lib/pim/ai.functions";
+import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
@@ -80,6 +80,7 @@ function ProjectPage() {
   const matchFn = useServerFn(runMatching);
   const listFn = useServerFn(listProductsWithEnrichment);
   const genFn = useServerFn(generateGoldenRecord);
+  const verifyFn = useServerFn(verifySources);
   const exportFn = useServerFn(exportProject);
   const hideImgFn = useServerFn(hideImageByProduct);
 
@@ -201,6 +202,14 @@ function ProjectPage() {
         const p = queue.shift();
         if (!p) break;
         try {
+          // 1) Verify sources (watermark/mismatch detection + measure image sizes).
+          //    Best-effort: a failure here MUST NOT block generation.
+          try {
+            await verifyFn({ data: { productId: p.id } });
+          } catch (e) {
+            console.warn("verifySources failed for", p.id, e);
+          }
+          // 2) Generate golden record (name + description + features).
           await genFn({ data: { productId: p.id, mode: "all" } });
         } catch {
           failed++;
