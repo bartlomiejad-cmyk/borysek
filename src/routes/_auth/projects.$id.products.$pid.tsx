@@ -4,14 +4,15 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
-import { generateGoldenRecord, generateFeatures, verifyProduct } from "@/lib/pim/ai.functions";
+import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
@@ -28,6 +29,7 @@ function ProductDetail() {
   const hideFn = useServerFn(hideImage);
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
+  const analyzeFn = useServerFn(analyzeProductImages);
 
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
@@ -123,6 +125,174 @@ function ProductDetail() {
   const hiddenImages = ((data as { hidden_images?: string[] }).hidden_images ?? []) as string[];
   const includeExtra = (data as { include_extra_images?: boolean }).include_extra_images ?? false;
   const quality = (enrichment as { quality?: { watermark_urls?: string[]; name_mismatch?: boolean; feature_mismatches?: string[]; notes?: string } | null } | null)?.quality ?? null;
+  const imageMeta = ((data as { image_meta?: Record<string, { w: number; h: number }> }).image_meta ?? {}) as Record<string, { w: number; h: number }>;
+  const imageScores = ((data as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean }> }).image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean }>;
+
+  // Collect all visible image urls across all sources (already filtered for hidden / size by server)
+  const allVisible: string[] = [];
+  for (const s of sources) {
+    for (const u of s.images) if (!allVisible.includes(u)) allVisible.push(u);
+    for (const u of s.extra_images) if (!allVisible.includes(u)) allVisible.push(u);
+  }
+
+  // Top-4 largest by area — these are the ones we send to AI scoring.
+  const top4 = [...allVisible]
+    .sort((a, b) => {
+      const am = imageMeta[a]; const bm = imageMeta[b];
+      return ((bm?.w ?? 0) * (bm?.h ?? 0)) - ((am?.w ?? 0) * (am?.h ?? 0));
+    })
+    .slice(0, 4);
+
+  return (
+    <ProductDetailInner
+      data={data}
+      top4={top4}
+      imageMeta={imageMeta}
+      imageScores={imageScores}
+      analyzeFn={analyzeFn}
+      productId={pid}
+      invalidate={invalidate}
+      // existing render props
+      product={product}
+      enrichment={enrichment}
+      sources={sources}
+      hiddenImages={hiddenImages}
+      includeExtra={includeExtra}
+      quality={quality}
+      id={id}
+      name={name}
+      setName={setName}
+      desc={desc}
+      setDesc={setDesc}
+      features={features}
+      setFeatures={setFeatures}
+      regenAll={regenAll}
+      regenSingle={regenSingle}
+      save={save}
+      genFeat={genFeat}
+      verify={verify}
+      saveFeat={saveFeat}
+      hideMut={hideMut}
+      unhideMut={unhideMut}
+    />
+  );
+}
+
+type DetailInnerProps = {
+  data: NonNullable<ReturnType<typeof useQuery>["data"]>;
+  top4: string[];
+  imageMeta: Record<string, { w: number; h: number }>;
+  imageScores: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean }>;
+  analyzeFn: ReturnType<typeof useServerFn<typeof analyzeProductImages>>;
+  productId: string;
+  invalidate: () => void;
+  product: { nazwa: string | null; ean: string | null; kod: string | null; ext_id: string | null };
+  enrichment: { id: string; match_type: string; status: string; model: string | null; error: string | null; golden_features?: unknown } | null;
+  sources: Array<{ url: string; title: string | null; description: string | null; images: string[]; extra_images: string[] }>;
+  hiddenImages: string[];
+  includeExtra: boolean;
+  quality: { watermark_urls?: string[]; name_mismatch?: boolean; feature_mismatches?: string[]; notes?: string } | null;
+  id: string;
+  name: string; setName: (v: string) => void;
+  desc: string; setDesc: (v: string) => void;
+  features: Array<{ key: string; value: string }>;
+  setFeatures: (f: Array<{ key: string; value: string }>) => void;
+  regenAll: ReturnType<typeof useMutation>;
+  regenSingle: ReturnType<typeof useMutation>;
+  save: ReturnType<typeof useMutation>;
+  genFeat: ReturnType<typeof useMutation>;
+  verify: ReturnType<typeof useMutation>;
+  saveFeat: ReturnType<typeof useMutation>;
+  hideMut: ReturnType<typeof useMutation>;
+  unhideMut: ReturnType<typeof useMutation>;
+};
+
+function ProductDetailInner(props: DetailInnerProps) {
+  const { data, top4, imageMeta, imageScores, analyzeFn, productId, invalidate,
+    product, enrichment, sources, hiddenImages, includeExtra, quality, id,
+    name, setName, desc, setDesc, features, setFeatures,
+    regenAll, regenSingle, save, genFeat, verify, saveFeat, hideMut, unhideMut } = props;
+
+  const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  // Kick off scoring for any top-4 url missing a score (cache-aware on server).
+  useEffect(() => {
+    const missing = top4.filter((u) => !imageScores[u]);
+    if (!missing.length) return;
+    let cancelled = false;
+    setAnalyzing(true);
+    setAiUnavailable(false);
+    analyzeFn({ data: { productId, urls: missing } })
+      .then(() => { if (!cancelled) invalidate(); })
+      .catch(() => { if (!cancelled) setAiUnavailable(true); })
+      .finally(() => { if (!cancelled) setAnalyzing(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top4.join("|"), productId]);
+
+  function scoreFor(url: string): number {
+    const m = imageMeta[url];
+    const area = (m?.w ?? 0) * (m?.h ?? 0);
+    const s = imageScores[url];
+    if (!s) return area; // fallback: resolution only
+    if (s.is_banner_or_trash) return 0;
+    return (s.is_central + s.is_clean) * area;
+  }
+
+  // Global best url to mark as "Main Image".
+  const sortedAll = [...top4].sort((a, b) => scoreFor(b) - scoreFor(a));
+  const mainUrl = sortedAll.find((u) => scoreFor(u) > 0) ?? null;
+
+  function sortInGroup(urls: string[]): string[] {
+    return [...urls].sort((a, b) => scoreFor(b) - scoreFor(a));
+  }
+
+  function scoreToneClass(n: number): string {
+    if (n >= 8) return "border-emerald-500 text-emerald-700 dark:text-emerald-400";
+    if (n >= 5) return "border-amber-500 text-amber-700 dark:text-amber-400";
+    return "border-destructive text-destructive";
+  }
+
+  return (
+    <_RenderShell
+      id={id}
+      product={product}
+      enrichment={enrichment}
+      regenAll={regenAll}
+      sourcesLen={sources.length}
+      analyzing={analyzing}
+      aiUnavailable={aiUnavailable}
+      mainUrl={mainUrl}
+      scoreFor={scoreFor}
+      scoreToneClass={scoreToneClass}
+      sortInGroup={sortInGroup}
+      imageScores={imageScores}
+      // Pass through golden-record block props
+      name={name} setName={setName}
+      desc={desc} setDesc={setDesc}
+      features={features} setFeatures={setFeatures}
+      save={save} genFeat={genFeat} verify={verify} saveFeat={saveFeat}
+      hideMut={hideMut} unhideMut={unhideMut}
+      hiddenImages={hiddenImages}
+      includeExtra={includeExtra}
+      quality={quality}
+      sources={sources}
+      regenSingle={regenSingle}
+      data={data}
+    />
+  );
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function _RenderShell(p: any) {
+  const {
+    id, product, enrichment, regenAll, sourcesLen, analyzing, aiUnavailable,
+    mainUrl, scoreFor, scoreToneClass, sortInGroup, imageScores,
+    name, setName, desc, setDesc, features, setFeatures,
+    save, genFeat, verify, saveFeat, hideMut, unhideMut,
+    hiddenImages, includeExtra, quality, sources, regenSingle, data,
+  } = p;
 
   return (
     <main className="container mx-auto p-6 max-w-7xl">
