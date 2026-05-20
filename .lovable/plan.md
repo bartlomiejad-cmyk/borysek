@@ -1,4 +1,56 @@
-# Naprawa: lista produktów pokazuje tylko 1 zdjęcie
+# Flow: Dopasuj → Generuj złote rekordy (weryfikacja zdjęć + generacja z cechami)
+
+## Cel
+
+Po dopasowaniu (`Dopasuj`) klik w `Generuj złote rekordy` ma dla każdego produktu z dopasowaniem wykonać:
+1. Weryfikację zdjęć ze źródeł — wykryć watermarki i niezgodności z produktem, oznaczyć złe zdjęcia jako ukryte (`hidden_images`), żeby nie trafiły do generacji ani eksportu.
+2. Następnie generację złotego rekordu (nazwa + opis + cechy) — ze zdjęć już przefiltrowanych, z pozostałych źródeł.
+
+Jeśli weryfikacja odrzuci wszystkie zdjęcia / źródła — i tak generujemy z oryginalnych `picked_urls` (tryb best-effort, bez blokowania).
+
+## Zmiany
+
+### 1. `src/lib/pim/ai.functions.ts` — nowy `verifySources`
+
+Nowa funkcja `verifySources({ productId })` analogiczna do obecnego `verifyProduct`, ale wywoływana PRZED generacją:
+- pobiera `picked_urls` + zdjęcia (`images` + opcjonalnie `extra_images`) z `product_sources`,
+- pyta model wizyjny (Gemini 2.5 Flash) o:
+  - URL-e zdjęć z watermarkiem / logo sklepu,
+  - URL-e zdjęć niepasujących do produktu (na podstawie nazwy/EAN/kodu z `source_products`),
+- dopisuje wszystkie wskazane URL-e do `enrichments.hidden_images` (deduplikacja),
+- zapisuje raport do `enrichments.quality` (do podglądu w widoku weryfikacyjnym).
+
+Obecny `verifyProduct` (post-generacji, sprawdza też nazwę i cechy) zostaje — używany w widoku produktu.
+
+### 2. `generateGoldenRecord` bez zmian merytorycznych
+
+Już generuje nazwę + opis + cechy w jednym callu (po poprzednim wdrożeniu). Korzysta z opisów tekstowych źródeł, więc filtr zdjęć go nie blokuje. Bez zmian.
+
+### 3. `src/routes/_auth/projects.$id.index.tsx` — sekwencja w `generateAll`
+
+W handlerze przycisku „Generuj złote rekordy" dla każdego produktu (CONCURRENCY=5):
+1. `verifySourcesFn({ productId })` — try/catch, błąd weryfikacji NIE blokuje generacji (logowany, idziemy dalej).
+2. `genFn({ productId, mode: "all" })`.
+
+Progress pokazuje 2 fazy łącznie (np. `Generowanie 12/40 (weryfikacja + złoty rekord)`), albo dwa paski — wystarczy zaktualizować label paska na „Weryfikacja i generacja {done}/{total}".
+
+### Co zostaje bez zmian
+
+- Schemat bazy (`hidden_images`, `quality`, `golden_features` już istnieją).
+- RLS.
+- Widok produktu (`projects.$id.products.$pid`) — dalej ręczne `Wygeneruj cechy` i `Weryfikuj`.
+- Eksport, scraping, matching.
+
+## Detale techniczne
+
+- `verifySources` przyjmuje opcjonalnie `mode: "all" | "missing"` — domyślnie „all" w bulku.
+- Limit zdjęć przekazanych do modelu wizyjnego: do 8 (oszczędność tokenów).
+- Sanityzacja blacklistą nie dotyczy weryfikacji (operuje tylko na URL-ach).
+- Brak nowych sekretów; korzystamy z `LOVABLE_API_KEY`.
+
+---
+
+# (Historyczne) Naprawa: lista produktów pokazuje tylko 1 zdjęcie
 
 ## Problem
 
