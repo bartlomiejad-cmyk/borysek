@@ -280,7 +280,7 @@ function ProjectPage() {
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Generowanie {genProgress.done}/{genProgress.total}</span>
+              <span>Weryfikacja i generacja {genProgress.done}/{genProgress.total}</span>
               <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
             </div>
             <Progress value={(genProgress.done / genProgress.total) * 100} />
