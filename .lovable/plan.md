@@ -1,6 +1,8 @@
-# Ocena kompozycji zdjęć przez AI (gpt-4o-mini vision)
+# Ocena kompozycji zdjęć przez AI (Gemini vision)
 
 Cel: zanim weryfikator zobaczy zdjęcia produktu, AI ocenia kompozycję 4 największych zdjęć, liczymy `Score` łączący ocenę z rozdzielczością, sortujemy listę, podświetlamy najlepsze jako "Zdjęcie Główne" i pokazujemy badge'y `is_central` / `is_clean`. Fallback bez blokady: sort po pikselach.
+
+Zamiast OpenAI `gpt-4o-mini` używamy Lovable AI Gateway z modelem `google/gemini-2.5-flash-lite` (vision, tani, szybki — odpowiednik "detail: low"). Sekret: `LOVABLE_API_KEY` (już skonfigurowany), bez `OPENAI_API_KEY`.
 
 ## Ważna uwaga techniczna (do akceptacji)
 
@@ -21,16 +23,16 @@ Nowa funkcja w `src/lib/pim/ai.functions.ts`:
 
 - Wejście: `{ productId: string, urls: string[] }` (urls ograniczone do max 4 największych — wybór po `image_meta` po stronie klienta).
 - Middleware: `requireSupabaseAuth` (RLS).
-- Sekret: `OPENAI_API_KEY` (`process.env`, czytany wewnątrz `.handler()`).
-- Model: `gpt-4o-mini`, vision, `image_url.detail = "low"`.
-- Structured Outputs (`response_format: { type: "json_schema", strict: true }`) per zdjęcie:
+- Sekret: `LOVABLE_API_KEY` (`process.env`, czytany wewnątrz `.handler()`).
+- Model: `google/gemini-2.5-flash-lite` (vision) przez Lovable AI Gateway (`https://ai.gateway.lovable.dev/v1/chat/completions`, header `Lovable-API-Key`). Reużywamy istniejącego `callGatewayRaw` z `ai.functions.ts`.
+- Strukturalne wyjście per zdjęcie (`response_format: { type: "json_object" }` + walidacja Zod):
   ```json
   { "is_central": 1-10, "is_clean": 1-10, "is_banner_or_trash": boolean }
   ```
 - System prompt: "Jesteś ekspertem e-commerce. Oceń kompozycję zdjęcia pod kątem przydatności jako główna miniaturka produktu w sklepie. Zwróć surowy JSON według podanego schematu."
 - Równoległe wywołania `Promise.allSettled` (4 obrazki). Per-image timeout 15s.
 - Zapis wyników do `enrichments.image_scores` (nowa kolumna JSONB, mapa `{ [url]: { is_central, is_clean, is_banner_or_trash, scored_at } }`). Cache: jeśli wynik dla URL już istnieje, nie wołamy OpenAI ponownie.
-- Zwrot: `{ scores: { [url]: {...} }, source: "openai" | "cache" | "partial" }`. Błąd całościowy → throw (klient zrobi fallback).
+- Zwrot: `{ scores: { [url]: {...} }, source: "ai" | "cache" | "partial" }`. Błąd całościowy → throw (klient zrobi fallback).
 
 ## Krok 2 — DB migration
 
@@ -39,7 +41,7 @@ Nowa funkcja w `src/lib/pim/ai.functions.ts`:
 
 ## Krok 3 — Sekret
 
-- Wymagany `OPENAI_API_KEY`. Jeśli brak — poproszę przez `add_secret` w trakcie implementacji.
+- `LOVABLE_API_KEY` jest już skonfigurowany w projekcie — żaden nowy sekret nie jest potrzebny.
 
 ## Krok 4 — Frontend (panel produktu)
 
