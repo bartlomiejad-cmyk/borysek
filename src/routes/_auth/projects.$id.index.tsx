@@ -637,13 +637,18 @@ function downloadBlob(blob: Blob, name: string) {
 
 function ProductThumbs({
   images,
+  extraImages,
   onHide,
 }: {
   productId: string;
   images: string[];
+  extraImages?: string[];
   onHide: (url: string) => void | Promise<void>;
 }) {
-  const top = images.slice(0, 5);
+  const MAX = 8;
+  const top = images.slice(0, MAX);
+  const overflow = Math.max(0, images.length - top.length);
+  const extraSet = new Set(extraImages ?? []);
   const [hovered, setHovered] = useState<{ url: string; x: number; y: number } | null>(null);
   const dimsRef = useRef<Map<string, { w: number; h: number }>>(new Map());
   const [, force] = useState(0);
@@ -665,7 +670,7 @@ function ProductThumbs({
   }
   const dims = hovered ? dimsRef.current.get(hovered.url) : undefined;
   return (
-    <div className="flex gap-1 relative">
+    <div className="flex flex-wrap gap-1 relative max-w-[260px]">
       {top.map((url) => (
         <div key={url} className="relative group">
           <Dialog>
@@ -684,8 +689,13 @@ function ProductThumbs({
                   src={url}
                   alt=""
                   loading="lazy"
-                  className="h-10 w-10 object-cover rounded border hover:opacity-80"
+                  className={`h-10 w-10 object-cover rounded border hover:opacity-80 ${extraSet.has(url) ? "ring-2 ring-amber-400" : ""}`}
                 />
+                {extraSet.has(url) && (
+                  <span className="absolute -bottom-1 -left-1 bg-amber-400 text-[8px] font-bold text-black px-1 rounded leading-tight">
+                    extra
+                  </span>
+                )}
               </button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
@@ -713,6 +723,11 @@ function ProductThumbs({
           </button>
         </div>
       ))}
+      {overflow > 0 && (
+        <div className="h-10 min-w-10 px-1 rounded border bg-muted flex items-center justify-center text-xs text-muted-foreground font-medium">
+          +{overflow}
+        </div>
+      )}
       {hovered ? (
         <div
           className="fixed z-50 pointer-events-none rounded-lg border bg-background shadow-xl p-1"
