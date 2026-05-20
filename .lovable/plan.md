@@ -14,11 +14,18 @@ Jeśli weryfikacja odrzuci wszystkie zdjęcia / źródła — i tak generujemy z
 
 Nowa funkcja `verifySources({ productId })` analogiczna do obecnego `verifyProduct`, ale wywoływana PRZED generacją:
 - pobiera `picked_urls` + zdjęcia (`images` + opcjonalnie `extra_images`) z `product_sources`,
-- pyta model wizyjny (Gemini 2.5 Flash) o:
+- **filtr rozmiaru (pre-AI)**: dla każdego URL-a pobiera realny rozmiar pikseli (HEAD/range + dekoder, albo `probe-image-size`-style). Zdjęcia mniejsze niż 600×600 px trafiają na listę do odrzucenia. Wyjątek: jeśli po odrzuceniu wszystkich małych zostałoby 0 zdjęć w danym produkcie, zachowujemy największe dostępne (fallback: „jedyne zdjęcie") — żeby produkt nie został bez miniatury.
+- pyta model wizyjny (Gemini 2.5 Flash) — już na przefiltrowanym zestawie — o:
   - URL-e zdjęć z watermarkiem / logo sklepu,
   - URL-e zdjęć niepasujących do produktu (na podstawie nazwy/EAN/kodu z `source_products`),
-- dopisuje wszystkie wskazane URL-e do `enrichments.hidden_images` (deduplikacja),
-- zapisuje raport do `enrichments.quality` (do podglądu w widoku weryfikacyjnym).
+- dopisuje wszystkie wskazane URL-e (małe + watermark + niezgodne) do `enrichments.hidden_images` (deduplikacja), z zachowaniem wyjątku „jedyne zdjęcie",
+- zapisuje raport do `enrichments.quality` (do podglądu w widoku weryfikacyjnym) — z osobną sekcją `small_images: string[]`.
+
+#### Detale filtra rozmiaru
+- Próg: min(width, height) ≥ 600 px (kwadrat 600×600, ale akceptujemy też większe prostokąty).
+- Pomiar: `fetch` z `Range: bytes=0-65535` + parser nagłówków JPEG/PNG/WebP (lekka funkcja, bez `sharp`/`canvas` — niedostępne w Workerze). Cache wymiarów w pamięci procesu na czas trwania bulku.
+- Jeśli pomiar się nie powiedzie (timeout/404/nieznany format) — traktujemy jak „nieznany rozmiar" i NIE odrzucamy z tego powodu.
+- Wyjątek „jedyne zdjęcie": jeśli po odjęciu małych z danego produktu zostałoby 0, zostawiamy największe (po `width*height`); jeśli żaden nie ma znanego rozmiaru — zostawiamy pierwsze.
 
 Obecny `verifyProduct` (post-generacji, sprawdza też nazwę i cechy) zostaje — używany w widoku produktu.
 
