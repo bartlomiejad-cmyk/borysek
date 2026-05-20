@@ -163,7 +163,16 @@ export const getProductDetail = createServerFn({ method: "GET" })
         };
       });
     }
-    return { product, enrichment, sources, hidden_images: Array.from(hidden), include_extra_images: includeExtra };
+    const image_scores = ((enrichment as unknown as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; scored_at?: string }> } | null)?.image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; scored_at?: string }>;
+    return {
+      product,
+      enrichment,
+      sources,
+      hidden_images: Array.from(hidden),
+      include_extra_images: includeExtra,
+      image_meta: meta,
+      image_scores,
+    };
   });
 
 export const updateGoldenRecord = createServerFn({ method: "POST" })
