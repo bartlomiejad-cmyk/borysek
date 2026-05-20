@@ -90,6 +90,8 @@ function ProjectPage() {
   const { data: products = [], refetch: refetchProducts } = useQuery({
     queryKey: ["project", id, "products"],
     queryFn: () => listFn({ data: { projectId: id } }),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
@@ -370,6 +372,7 @@ function ProjectPage() {
                       <ProductThumbs
                         productId={p.id}
                         images={p.images ?? []}
+                        extraImages={(p as { extra_image_urls?: string[] }).extra_image_urls ?? []}
                         onHide={async (url) => {
                           await hideImgFn({ data: { productId: p.id, url } });
                           toast.success("Zdjęcie ukryte");
