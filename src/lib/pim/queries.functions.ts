@@ -137,6 +137,17 @@ export const getProductDetail = createServerFn({ method: "GET" })
         .in("url", picked);
       if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
       const byUrl = new Map(srcs?.map((s) => [s.url, s]) ?? []);
+      // Global pick across all sources, so per-source filtering uses the
+      // single best fallback rather than keeping a small image per source.
+      const allMain: string[] = [];
+      const allExtra: string[] = [];
+      for (const s of srcs ?? []) {
+        for (const u of (Array.isArray(s.images) ? (s.images as string[]) : [])) if (!allMain.includes(u)) allMain.push(u);
+        const ex = Array.isArray((s as { extra_images?: unknown }).extra_images) ? ((s as { extra_images: string[] }).extra_images) : [];
+        for (const u of ex) if (!allExtra.includes(u)) allExtra.push(u);
+      }
+      const allowedMain = new Set(pickImages(allMain, meta, hidden));
+      const allowedExtra = new Set(includeExtra ? pickImages(allExtra, meta, hidden) : []);
       sources = picked.map((u) => {
         const s = byUrl.get(u);
         const main = Array.isArray(s?.images) ? (s!.images as string[]) : [];
@@ -147,8 +158,8 @@ export const getProductDetail = createServerFn({ method: "GET" })
           url: u,
           title: s?.title ?? null,
           description: s?.description ?? null,
-          images: pickImages(main, meta, hidden),
-          extra_images: includeExtra ? pickImages(extra, meta, hidden) : [],
+          images: main.filter((img) => allowedMain.has(img)),
+          extra_images: includeExtra ? extra.filter((img) => allowedExtra.has(img)) : [],
         };
       });
     }
