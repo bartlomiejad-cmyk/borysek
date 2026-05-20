@@ -390,7 +390,7 @@ export const verifySources = createServerFn({ method: "POST" })
     if (!allImages.length) return { ok: true, hidden_added: 0, measured: 0 };
 
     // 1) Measure sizes for all images (cached in image_meta — skip already-known URLs)
-    const existingMeta = ((enrichment as { image_meta?: Record<string, { w: number; h: number }> }).image_meta ?? {}) as Record<string, { w: number; h: number }>;
+    const existingMeta = ((enrichment as unknown as { image_meta?: Record<string, { w: number; h: number }> }).image_meta ?? {}) as Record<string, { w: number; h: number }>;
     const toMeasure = allImages.filter((u) => !existingMeta[u]);
     const fresh = toMeasure.length ? await probeManySizes(toMeasure, 6) : {};
     const image_meta = { ...existingMeta, ...fresh };
