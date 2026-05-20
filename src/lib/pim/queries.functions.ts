@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { pickImages, type ImageMeta } from "./images";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -20,7 +21,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality",
+        "source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -62,13 +63,14 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       const e = enMap.get(p.id);
       const picked = (e?.picked_urls as string[] | undefined) ?? [];
       const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
-      const collected: string[] = [];
+      const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
+      const allFromSources: string[] = [];
       for (const u of picked) {
         for (const img of imgMap.get(u) ?? []) {
-          if (!hidden.has(img) && !collected.includes(img)) collected.push(img);
+          if (!allFromSources.includes(img)) allFromSources.push(img);
         }
       }
-      const images = collected;
+      const images = pickImages(allFromSources, meta, hidden).slice(0, 8);
       return {
         ...p,
         status: e?.status ?? "PENDING",
@@ -119,6 +121,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       .maybeSingle();
     const picked = ((enrichment?.picked_urls as string[] | null) ?? []);
     const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
+    const meta = ((enrichment as unknown as { image_meta?: ImageMeta } | null)?.image_meta ?? {}) as ImageMeta;
     let sources: Array<{
       url: string;
       title: string | null;
@@ -144,8 +147,8 @@ export const getProductDetail = createServerFn({ method: "GET" })
           url: u,
           title: s?.title ?? null,
           description: s?.description ?? null,
-          images: main.filter((img) => !hidden.has(img)),
-          extra_images: includeExtra ? extra.filter((img) => !hidden.has(img)) : [],
+          images: pickImages(main, meta, hidden),
+          extra_images: includeExtra ? pickImages(extra, meta, hidden) : [],
         };
       });
     }
