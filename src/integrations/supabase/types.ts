@@ -24,6 +24,7 @@ export type Database = {
           hidden_images: Json
           id: string
           image_meta: Json
+          image_scores: Json
           match_type: Database["public"]["Enums"]["match_type"]
           matched_term: string | null
           model: string | null
@@ -44,6 +45,7 @@ export type Database = {
           hidden_images?: Json
           id?: string
           image_meta?: Json
+          image_scores?: Json
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
           model?: string | null
@@ -64,6 +66,7 @@ export type Database = {
           hidden_images?: Json
           id?: string
           image_meta?: Json
+          image_scores?: Json
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
           model?: string | null

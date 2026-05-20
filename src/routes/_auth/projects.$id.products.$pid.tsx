@@ -1,21 +1,31 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
-import { generateGoldenRecord, generateFeatures, verifyProduct } from "@/lib/pim/ai.functions";
+import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
 });
+
+type ImgScore = { is_central: number; is_clean: number; is_banner_or_trash: boolean };
+type ImgMeta = { w: number; h: number };
+
+function scoreToneClass(n: number): string {
+  if (n >= 8) return "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-400";
+  if (n >= 5) return "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-400";
+  return "bg-destructive/15 text-destructive border-destructive/40";
+}
 
 function ProductDetail() {
   const { id, pid } = Route.useParams();
@@ -28,6 +38,7 @@ function ProductDetail() {
   const hideFn = useServerFn(hideImage);
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
+  const analyzeFn = useServerFn(analyzeProductImages);
 
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
@@ -37,6 +48,9 @@ function ProductDetail() {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [features, setFeatures] = useState<Array<{ key: string; value: string }>>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiUnavailable, setAiUnavailable] = useState(false);
+  const analyzedKeyRef = useRef<string>("");
 
   useEffect(() => {
     if (data?.enrichment) {
@@ -47,12 +61,64 @@ function ProductDetail() {
     }
   }, [data?.enrichment]);
 
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["product", id, pid] });
+    qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+  };
+
+  // Derive top-4 visible images and trigger AI scoring for missing ones.
+  const imageMeta = (((data as { image_meta?: Record<string, ImgMeta> } | undefined)?.image_meta) ?? {}) as Record<string, ImgMeta>;
+  const imageScores = (((data as { image_scores?: Record<string, ImgScore> } | undefined)?.image_scores) ?? {}) as Record<string, ImgScore>;
+
+  const allVisible: string[] = [];
+  if (data?.sources) {
+    for (const s of data.sources) {
+      for (const u of s.images) if (!allVisible.includes(u)) allVisible.push(u);
+      for (const u of s.extra_images) if (!allVisible.includes(u)) allVisible.push(u);
+    }
+  }
+  const top4 = [...allVisible]
+    .sort((a, b) => {
+      const am = imageMeta[a]; const bm = imageMeta[b];
+      return ((bm?.w ?? 0) * (bm?.h ?? 0)) - ((am?.w ?? 0) * (am?.h ?? 0));
+    })
+    .slice(0, 4);
+
+  useEffect(() => {
+    if (!data) return;
+    const missing = top4.filter((u) => !imageScores[u]);
+    if (!missing.length) return;
+    const key = `${pid}|${missing.join("|")}`;
+    if (analyzedKeyRef.current === key) return;
+    analyzedKeyRef.current = key;
+    let cancelled = false;
+    setAnalyzing(true);
+    setAiUnavailable(false);
+    analyzeFn({ data: { productId: pid, urls: missing } })
+      .then(() => { if (!cancelled) qc.invalidateQueries({ queryKey: ["product", id, pid] }); })
+      .catch(() => { if (!cancelled) setAiUnavailable(true); })
+      .finally(() => { if (!cancelled) setAnalyzing(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid, top4.join("|")]);
+
+  const scoreFor = (url: string): number => {
+    const m = imageMeta[url];
+    const area = (m?.w ?? 0) * (m?.h ?? 0);
+    const s = imageScores[url];
+    if (!s) return area;
+    if (s.is_banner_or_trash) return 0;
+    return (s.is_central + s.is_clean) * area;
+  };
+
+  const sortedGlobal = [...allVisible].sort((a, b) => scoreFor(b) - scoreFor(a));
+  const mainUrl = sortedGlobal.find((u) => scoreFor(u) > 0) ?? null;
+
   const regenAll = useMutation({
     mutationFn: () => genFn({ data: { productId: pid, mode: "all" } }),
     onSuccess: () => {
       toast.success("Złoty rekord wygenerowany");
-      qc.invalidateQueries({ queryKey: ["product", id, pid] });
-      qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+      invalidate();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
@@ -60,11 +126,7 @@ function ProductDetail() {
   const regenSingle = useMutation({
     mutationFn: (url: string) =>
       genFn({ data: { productId: pid, mode: "single", singleUrl: url } }),
-    onSuccess: () => {
-      toast.success("Wygenerowano z pojedynczego źródła");
-      qc.invalidateQueries({ queryKey: ["product", id, pid] });
-      qc.invalidateQueries({ queryKey: ["project", id, "products"] });
-    },
+    onSuccess: () => { toast.success("Wygenerowano z pojedynczego źródła"); invalidate(); },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
@@ -77,16 +139,8 @@ function ProductDetail() {
           golden_description: desc || null,
         },
       }),
-    onSuccess: () => {
-      toast.success("Zapisano");
-      qc.invalidateQueries({ queryKey: ["product", id, pid] });
-    },
+    onSuccess: () => { toast.success("Zapisano"); invalidate(); },
   });
-
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["product", id, pid] });
-    qc.invalidateQueries({ queryKey: ["project", id, "products"] });
-  };
 
   const genFeat = useMutation({
     mutationFn: () => genFeatFn({ data: { productId: pid } }),
@@ -123,6 +177,57 @@ function ProductDetail() {
   const hiddenImages = ((data as { hidden_images?: string[] }).hidden_images ?? []) as string[];
   const includeExtra = (data as { include_extra_images?: boolean }).include_extra_images ?? false;
   const quality = (enrichment as { quality?: { watermark_urls?: string[]; name_mismatch?: boolean; feature_mismatches?: string[]; notes?: string } | null } | null)?.quality ?? null;
+
+  const renderThumb = (u: string, extra: boolean) => {
+    const s = imageScores[u];
+    const isMain = u === mainUrl;
+    return (
+      <div
+        key={u}
+        className={cn(
+          "relative group rounded border-2 p-0.5",
+          isMain ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-transparent",
+        )}
+      >
+        <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+        {isMain && (
+          <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded shadow flex items-center gap-1">
+            <Crown className="h-2.5 w-2.5" /> Główne
+          </span>
+        )}
+        {extra && <Badge variant="outline" className="absolute top-0 left-0 text-[10px] px-1 py-0">extra</Badge>}
+        <button
+          onClick={() => hideMut.mutate(u)}
+          className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded p-0.5 opacity-0 group-hover:opacity-100 transition"
+          title="Ukryj zdjęcie"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+        <div className="mt-1 flex flex-wrap gap-0.5 justify-center">
+          {s ? (
+            s.is_banner_or_trash ? (
+              <span className="text-[10px] px-1 py-0 rounded border bg-destructive/15 text-destructive border-destructive/40">
+                Baner / śmieć
+              </span>
+            ) : (
+              <>
+                <span className={cn("text-[10px] px-1 py-0 rounded border", scoreToneClass(s.is_central))} title="Centralność produktu">
+                  C {s.is_central}/10
+                </span>
+                <span className={cn("text-[10px] px-1 py-0 rounded border", scoreToneClass(s.is_clean))} title="Czystość tła">
+                  T {s.is_clean}/10
+                </span>
+              </>
+            )
+          ) : top4.includes(u) && analyzing ? (
+            <span className="text-[10px] px-1 py-0 rounded border bg-muted text-muted-foreground inline-flex items-center gap-1">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" /> AI…
+            </span>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <main className="container mx-auto p-6 max-w-7xl">
@@ -264,70 +369,74 @@ function ProductDetail() {
 
         {/* Sources */}
         <div className="space-y-4">
-          <h2 className="font-semibold flex items-center gap-2">
-            Źródła ({sources.length})
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold flex items-center gap-2">
+              Źródła ({sources.length})
+            </h2>
+            {analyzing && (
+              <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" /> AI analizuje kompozycję zdjęć…
+              </span>
+            )}
+            {!analyzing && aiUnavailable && (
+              <span className="text-xs text-muted-foreground">Sortowanie po rozdzielczości (AI niedostępne)</span>
+            )}
+          </div>
           {sources.length === 0 && (
             <Card><CardContent className="py-6 text-sm text-muted-foreground">
               Brak dopasowanych źródeł. Sprawdź pliki Search/Product JSON i uruchom dopasowanie.
             </CardContent></Card>
           )}
-          {sources.map((s, i) => (
-            <Card key={s.url}>
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <CardTitle className="text-base">
-                      <span className="text-muted-foreground mr-2">#{i + 1}</span>
-                      {s.title ?? "(brak tytułu)"}
-                    </CardTitle>
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 truncate max-w-full"
-                    >
-                      <ExternalLink className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{s.url}</span>
-                    </a>
+          {sources.map((s, i) => {
+            const combined = [
+              ...s.images.map((u) => ({ u, extra: false })),
+              ...s.extra_images.map((u) => ({ u, extra: true })),
+            ].sort((a, b) => scoreFor(b.u) - scoreFor(a.u));
+            return (
+              <Card key={s.url}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <CardTitle className="text-base">
+                        <span className="text-muted-foreground mr-2">#{i + 1}</span>
+                        {s.title ?? "(brak tytułu)"}
+                      </CardTitle>
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 truncate max-w-full"
+                      >
+                        <ExternalLink className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{s.url}</span>
+                      </a>
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {(s.images.length > 0 || s.extra_images.length > 0) ? (
-                  <div className="flex flex-wrap gap-2">
-                    {[...s.images.map((u) => ({ u, extra: false })), ...s.extra_images.map((u) => ({ u, extra: true }))].map(({ u, extra }) => (
-                      <div key={u} className="relative group">
-                        <img src={u} alt="" className="h-20 w-20 rounded border object-cover" />
-                        {extra && <Badge variant="outline" className="absolute top-0 left-0 text-[10px] px-1 py-0">extra</Badge>}
-                        <button
-                          onClick={() => hideMut.mutate(u)}
-                          className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded p-0.5 opacity-0 group-hover:opacity-100 transition"
-                          title="Ukryj zdjęcie"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {combined.length > 0 ? (
+                    <div className="flex flex-wrap gap-3">
+                      {combined.map(({ u, extra }) => renderThumb(u, extra))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground"><ImageOff className="h-3 w-3" /> brak zdjęć{!includeExtra ? " (extra wyłączone)" : ""}</div>
+                  )}
+                  <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border rounded p-2 bg-muted/30">
+                    {s.description ?? "(brak opisu)"}
                   </div>
-                ) : (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground"><ImageOff className="h-3 w-3" /> brak zdjęć{!includeExtra ? " (extra wyłączone)" : ""}</div>
-                )}
-                <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border rounded p-2 bg-muted/30">
-                  {s.description ?? "(brak opisu)"}
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={regenSingle.isPending}
-                  onClick={() => regenSingle.mutate(s.url)}
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Regeneruj tylko z tego źródła
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={regenSingle.isPending}
+                    onClick={() => regenSingle.mutate(s.url)}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Regeneruj tylko z tego źródła
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </main>

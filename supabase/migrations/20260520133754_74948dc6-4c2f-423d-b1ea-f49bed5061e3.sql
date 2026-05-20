@@ -1,0 +1,1 @@
+ALTER TABLE public.enrichments ADD COLUMN IF NOT EXISTS image_scores JSONB NOT NULL DEFAULT '{}'::jsonb;
