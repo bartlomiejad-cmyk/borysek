@@ -5,6 +5,7 @@ import { probeManySizes } from "./image-size.server";
 
 const MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
+const SCORE_MODEL = "google/gemini-2.5-flash-lite";
 
 /**
  * Post-process a generated text to strip white-label / blacklisted terms.
