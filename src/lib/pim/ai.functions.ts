@@ -58,6 +58,11 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
   const schema = z.object({
     name: z.string().min(1).max(500),
     description: z.string().min(1).max(20000),
+    features: z
+      .array(z.object({ key: z.string().min(1).max(200), value: z.string().min(1).max(2000) }))
+      .max(60)
+      .optional()
+      .default([]),
   });
   return schema.parse(parsed);
 };
@@ -108,7 +113,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
 
     const { data: product, error: pErr } = await supabase
       .from("source_products")
-      .select("id, project_id, nazwa, kod, ean")
+      .select("id, project_id, nazwa, kod, ean, raw")
       .eq("id", data.productId)
       .single();
     if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -145,12 +150,21 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       })
       .join("\n\n---\n\n");
 
+    const raw = (product.raw as Record<string, unknown> | null) ?? {};
+    const extraProps =
+      (raw.extraProperties as unknown) ||
+      (raw.additionalProperties as unknown) ||
+      (raw.extra_properties as unknown) ||
+      (raw.additional_properties as unknown) ||
+      null;
+
     const systemPrompt = [
       "Jesteś ekspertem PIM. Twoim zadaniem jest stworzyć jeden, najlepszy 'Złoty Rekord' produktu na podstawie 1-3 źródeł internetowych.",
-      "Twoja odpowiedź MUSI być poprawnym JSON-em o strukturze: {\"name\": string, \"description\": string}.",
+      "Twoja odpowiedź MUSI być poprawnym JSON-em o strukturze: {\"name\": string, \"description\": string, \"features\": [{\"key\": string, \"value\": string}]}.",
       "Pisz po polsku. Opis powinien być rzeczowy, dobrze sformatowany (akapity, listy specyfikacji jeśli sensowne), 200-1500 znaków.",
       "NIE wymyślaj danych technicznych których nie ma w źródłach. NIE umieszczaj URL-i, nazw sklepów ani fraz typu 'kup teraz', 'dostawa', 'gwarancja'.",
       "Jeśli źródła się różnią - syntetyzuj wiarygodne wspólne fakty.",
+      "FEATURES: wyodrębnij listę cech technicznych (max 60). Klucze po polsku, krótkie (np. \"Kolor\", \"Materiał\", \"Waga\", \"Pojemność\"). Wartości konkretne, bez marketingu. NIE wymyślaj — pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych do cech, zwróć \"features\": [].",
     ].join("\n");
 
     const userPrompt = [
@@ -159,19 +173,29 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       `kod: ${product.kod ?? ""}`,
       `ean: ${product.ean ?? ""}`,
       "",
+      `EXTRA PROPERTIES (z bazy klienta):`,
+      extraProps ? JSON.stringify(extraProps).slice(0, 4000) : "(brak)",
+      "",
       `DODATKOWE INSTRUKCJE KLIENTA:`,
       customPrompt || "(brak)",
       "",
       `ŹRÓDŁA:`,
       sourceBlocks || "(brak)",
       "",
-      `Wygeneruj JSON {\"name\", \"description\"}.`,
+      `Wygeneruj JSON {\"name\", \"description\", \"features\"}.`,
     ].join("\n");
 
     try {
       const out = await callGateway(apiKey, systemPrompt, userPrompt);
       const name = sanitize(out.name, blacklist);
       const description = sanitize(out.description, blacklist);
+      const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
+      const newFeatures = (out.features ?? [])
+        .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
+        .filter((f) => f.key && f.value);
+      const existingFeatures = ((enrichment as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
+      const shouldWriteFeatures =
+        newFeatures.length > 0 && (data.mode === "all" || !existingFeatures.length);
 
       const previous = enrichment.golden_name
         ? {
@@ -181,20 +205,23 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
           }
         : null;
 
+      const updatePayload: Record<string, unknown> = {
+        status: "GENERATED",
+        golden_name: name,
+        golden_description: description,
+        model: MODEL,
+        generated_at: new Date().toISOString(),
+        error: null,
+        previous: previous as never,
+      };
+      if (shouldWriteFeatures) updatePayload.golden_features = newFeatures;
+
       const { error } = await supabase
         .from("enrichments")
-        .update({
-          status: "GENERATED",
-          golden_name: name,
-          golden_description: description,
-          model: MODEL,
-          generated_at: new Date().toISOString(),
-          error: null,
-          previous: previous as never,
-        } as never)
+        .update(updatePayload as never)
         .eq("id", enrichment.id);
       if (error) throw new Error(error.message);
-      return { ok: true, name, description };
+      return { ok: true, name, description, features: shouldWriteFeatures ? newFeatures : existingFeatures };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await supabase
