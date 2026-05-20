@@ -23,6 +23,7 @@ export type Database = {
           golden_name: string | null
           hidden_images: Json
           id: string
+          image_meta: Json
           match_type: Database["public"]["Enums"]["match_type"]
           matched_term: string | null
           model: string | null
@@ -42,6 +43,7 @@ export type Database = {
           golden_name?: string | null
           hidden_images?: Json
           id?: string
+          image_meta?: Json
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
           model?: string | null
@@ -61,6 +63,7 @@ export type Database = {
           golden_name?: string | null
           hidden_images?: Json
           id?: string
+          image_meta?: Json
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
           model?: string | null
