@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import {
   Select,
@@ -107,6 +108,7 @@ function ProjectPage() {
   const [regenProgress, setRegenProgress] = useState<{ done: number; total: number } | null>(null);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -134,6 +136,31 @@ function ProjectPage() {
   useEffect(() => {
     setPage(1);
   }, [filter, search, pageSize]);
+
+  const toggleSelected = (pid: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid);
+      else next.add(pid);
+      return next;
+    });
+  };
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every((p) => selectedIds.has(p.id));
+  const someVisibleSelected =
+    !allVisibleSelected && filtered.some((p) => selectedIds.has(p.id));
+  const toggleAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const p of filtered) next.delete(p.id);
+      } else {
+        for (const p of filtered) next.add(p.id);
+      }
+      return next;
+    });
+  };
+  const clearSelected = () => setSelectedIds(new Set());
 
   // ---- Uploads ----
 
@@ -194,8 +221,13 @@ function ProjectPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
-  const generateAll = async () => {
-    const targets = products.filter((p) => p.match_type !== "NO_MATCH" && p.status !== "GENERATED");
+  const generateAll = async (productIds?: string[]) => {
+    const idSet = productIds ? new Set(productIds) : null;
+    const targets = products.filter((p) => {
+      if (idSet && !idSet.has(p.id)) return false;
+      if (idSet) return p.match_type !== "NO_MATCH";
+      return p.match_type !== "NO_MATCH" && p.status !== "GENERATED";
+    });
     if (!targets.length) {
       toast.info("Brak produktów do wygenerowania");
       return;
@@ -231,8 +263,10 @@ function ProjectPage() {
     refetchProducts();
   };
 
-  const regenerateAll = async () => {
-    const targets = filtered
+  const regenerateAll = async (productIds?: string[]) => {
+    const idSet = productIds ? new Set(productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
+    const targets = source
       .map((p) => ({
         enrichmentId: (p as { enrichment_id?: string | null }).enrichment_id ?? null,
         url:
@@ -270,7 +304,14 @@ function ProjectPage() {
   };
 
   const exportFile = async (fmt: "csv" | "xlsx") => {
-    const rows = await exportFn({ data: { projectId: id } });
+    const allRows = await exportFn({ data: { projectId: id } });
+    const rows =
+      selectedIds.size > 0
+        ? allRows.filter((r: Record<string, unknown>) => {
+            const pid = (r.id ?? r.product_id ?? r.productId) as string | undefined;
+            return pid ? selectedIds.has(pid) : true;
+          })
+        : allRows;
     if (fmt === "csv") {
       const csv =
         "\uFEFF" +
@@ -304,10 +345,10 @@ function ProjectPage() {
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
           </Button>
-          <Button onClick={generateAll} disabled={!!genProgress}>
+          <Button onClick={() => generateAll()} disabled={!!genProgress}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
-          <Button variant="outline" onClick={regenerateAll} disabled={!!regenProgress}>
+          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenProgress}>
             <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
           </Button>
           <Button asChild variant="outline">
@@ -415,10 +456,56 @@ function ProjectPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {selectedIds.size > 0 && (
+            <div className="sticky top-0 z-20 -mx-6 px-6 py-2 mb-3 bg-primary/10 border-y border-primary/30 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium">
+                Zaznaczono {selectedIds.size}{" "}
+                {selectedIds.size === 1 ? "produkt" : "produktów"}
+              </span>
+              <Button size="sm" variant="ghost" onClick={clearSelected}>
+                <XIcon className="h-4 w-4 mr-1" /> Wyczyść
+              </Button>
+              <div className="flex-1" />
+              <Button
+                size="sm"
+                onClick={() => generateAll([...selectedIds])}
+                disabled={!!genProgress}
+              >
+                <Sparkles className="h-4 w-4 mr-1" /> Generuj złote rekordy
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => regenerateAll([...selectedIds])}
+                disabled={!!regenProgress}
+              >
+                <RefreshCw className="h-4 w-4 mr-1" /> Regeneruj tła
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
+                <Download className="h-4 w-4 mr-1" /> CSV
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => exportFile("xlsx")}>
+                <Download className="h-4 w-4 mr-1" /> XLSX
+              </Button>
+            </div>
+          )}
           <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={
+                        allVisibleSelected
+                          ? true
+                          : someVisibleSelected
+                          ? "indeterminate"
+                          : false
+                      }
+                      onCheckedChange={toggleAllVisible}
+                      aria-label="Zaznacz wszystkie"
+                    />
+                  </TableHead>
                   <TableHead className="w-44">Zdjęcia</TableHead>
                   <TableHead>Nazwa</TableHead>
                   <TableHead>EAN / Kod</TableHead>
@@ -430,13 +517,20 @@ function ProjectPage() {
               <TableBody>
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       Brak produktów do wyświetlenia
                     </TableCell>
                   </TableRow>
                 )}
                 {paged.map((p) => (
                   <TableRow key={p.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(p.id)}
+                        onCheckedChange={() => toggleSelected(p.id)}
+                        aria-label={`Zaznacz ${p.nazwa ?? p.id}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <ProductThumbs
                         productId={p.id}
@@ -821,7 +915,22 @@ function ProductThumbs({
                 onMouseEnter={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
                   ensureDims(url);
-                  setHovered({ url, x: r.right + 8, y: r.top });
+                  const PREVIEW_W = 320;
+                  const PREVIEW_H = 360;
+                  const GAP = 4;
+                  const vw = window.innerWidth;
+                  const vh = window.innerHeight;
+                  let x = r.right + GAP;
+                  if (x + PREVIEW_W + 8 > vw) {
+                    x = r.left - PREVIEW_W - GAP;
+                  }
+                  x = Math.max(8, Math.min(x, vw - PREVIEW_W - 8));
+                  let y = r.top;
+                  if (y + PREVIEW_H + 8 > vh) {
+                    y = vh - PREVIEW_H - 8;
+                  }
+                  y = Math.max(8, y);
+                  setHovered({ url, x, y });
                 }}
                 onMouseLeave={() => setHovered((h) => (h?.url === url ? null : h))}
               >
