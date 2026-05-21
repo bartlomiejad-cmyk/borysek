@@ -148,30 +148,19 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const generatedUrl = shot.images?.[0]?.url;
     if (!generatedUrl) throw new Error("FAL nie zwróciło zdjęcia");
 
-    // Step 2 — spróbuj konwersji do WebP po stronie FAL (image-conversion).
-    // Jeśli się nie uda lub zwróci inny format, zapisujemy oryginał jako JPG.
-    let bytes: Uint8Array;
-    let ext: "webp" | "jpg" = "jpg";
-    let contentType = "image/jpeg";
-    const webp = await tryConvertToWebpViaFal(generatedUrl, FAL_KEY);
-    if (webp) {
-      bytes = webp.bytes;
-      ext = "webp";
-      contentType = webp.contentType;
-    } else {
-      const fileRes = await fetch(generatedUrl);
-      if (!fileRes.ok) throw new Error(`Pobranie pliku FAL nieudane (${fileRes.status})`);
-      contentType = fileRes.headers.get("content-type") ?? "image/jpeg";
-      bytes = new Uint8Array(await fileRes.arrayBuffer());
-      ext = contentType.includes("png") ? "jpg" : "jpg";
-    }
+    // Step 2 — pobierz gotowy plik z FAL i zapisz w formacie, który zwrócił model.
+    const generated = await fetchImageBytes(generatedUrl);
+    const generatedFormat = detectImageFormat(generated.bytes, generated.contentType);
+    const bytes = generated.bytes;
+    const ext = generatedFormat.ext;
+    const contentType = generatedFormat.contentType;
 
     const path = `${data.enrichmentId}.${ext}`;
 
     // Wyczyść stare warianty (gdyby poprzednio był JPG, a teraz WebP itp.).
     await supabaseAdmin.storage
       .from("regenerated-images")
-      .remove([`${data.enrichmentId}.webp`, `${data.enrichmentId}.jpg`])
+      .remove([`${data.enrichmentId}.webp`, `${data.enrichmentId}.jpg`, `${data.enrichmentId}.png`])
       .catch(() => undefined);
 
     const { error: upErr } = await supabaseAdmin.storage
