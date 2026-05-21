@@ -71,7 +71,7 @@ function VerifyPage() {
         <Link to="/projects/$id" params={{ id }}><ArrowLeft className="h-4 w-4 mr-2" /> Wróć</Link>
       </Button>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h1 className="text-2xl font-bold">Widok weryfikacyjny</h1>
+        <h1 className="font-serif text-4xl tracking-tight">Widok weryfikacyjny</h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setOnlyProblems((v) => !v)}>
             {onlyProblems ? "Pokaż wszystkie" : "Tylko z problemami"}

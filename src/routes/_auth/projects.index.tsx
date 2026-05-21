@@ -5,9 +5,8 @@ import { useState } from "react";
 import { listProjects, createProject, deleteProject } from "@/lib/pim/projects.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, ArrowRight } from "lucide-react";
+import { Plus, Trash2, ArrowRight, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_auth/projects/")({ component: ProjectsPage });
@@ -41,74 +40,103 @@ function ProjectsPage() {
   });
 
   return (
-    <main className="container mx-auto p-6 max-w-5xl">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Projekty</h1>
-      </div>
+    <div className="container mx-auto px-6 py-12 max-w-5xl">
+      {/* Hero */}
+      <section className="text-center mb-12 animate-fade-in">
+        <h1 className="font-serif text-5xl md:text-6xl tracking-tight">Projekty</h1>
+        <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
+          Wybierz istniejący projekt lub stwórz nowy, aby zacząć wzbogacać dane produktowe.
+        </p>
+      </section>
 
-      <Card className="mb-6">
-        <CardHeader><CardTitle>Nowy projekt</CardTitle></CardHeader>
-        <CardContent>
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim()) create.mutate(name.trim());
-            }}
-          >
-            <Input
-              placeholder="np. Broń Q1 2026"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={120}
-            />
-            <Button type="submit" disabled={!name.trim() || create.isPending}>
-              <Plus className="h-4 w-4 mr-2" /> Utwórz
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {/* Prompt-bar */}
+      <form
+        className="mx-auto max-w-3xl rounded-3xl bg-card/70 backdrop-blur-xl border border-border/50 shadow-lg p-3 flex items-center gap-2 animate-scale-in"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim()) create.mutate(name.trim());
+        }}
+      >
+        <Input
+          placeholder="Nazwij nowy projekt, np. „Broń Q1 2026”…"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={120}
+          className="flex-1 h-12 rounded-2xl border-0 bg-transparent focus-visible:ring-0 text-base px-4"
+        />
+        <Button
+          type="submit"
+          disabled={!name.trim() || create.isPending}
+          className="rounded-full h-12 px-6 bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          <Sparkles className="h-4 w-4 mr-2" /> Stwórz projekt
+        </Button>
+      </form>
 
-      {isLoading ? (
-        <p className="text-muted-foreground">Ładowanie...</p>
-      ) : projects.length === 0 ? (
-        <p className="text-muted-foreground">Brak projektów. Utwórz pierwszy powyżej.</p>
-      ) : (
-        <div className="grid gap-3">
-          {projects.map((p) => (
-            <Card key={p.id} className="hover:border-primary transition-colors">
-              <CardContent className="flex items-center justify-between p-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">{p.name}</h3>
-                    <Badge variant="outline">{p.strategy}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Utworzono {new Date(p.created_at).toLocaleString("pl-PL")}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      if (confirm(`Usunąć projekt "${p.name}"? Wszystkie dane przepadną.`))
-                        del.mutate(p.id);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                  <Button asChild>
-                    <Link to="/projects/$id" params={{ id: p.id }}>
-                      Otwórz <ArrowRight className="h-4 w-4 ml-2" />
-                    </Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+      {/* Lista */}
+      <section className="mt-12">
+        <div className="flex items-center justify-between mb-4 px-1">
+          <h2 className="font-serif text-2xl">Ostatnie projekty</h2>
+          {projects.length > 0 && (
+            <span className="text-xs text-muted-foreground">{projects.length} łącznie</span>
+          )}
         </div>
-      )}
-    </main>
+
+        {isLoading ? (
+          <p className="text-muted-foreground px-1">Ładowanie…</p>
+        ) : projects.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-border/60 p-12 text-center">
+            <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-primary/15 flex items-center justify-center">
+              <Plus className="h-5 w-5 text-primary" />
+            </div>
+            <p className="text-muted-foreground">Brak projektów. Stwórz pierwszy powyżej.</p>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-4">
+            {projects.map((p, idx) => {
+              const accents = ["bg-primary", "bg-accent", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
+              const dot = accents[idx % accents.length];
+              return (
+                <div
+                  key={p.id}
+                  className="group relative rounded-3xl bg-card/60 backdrop-blur-sm border border-border/50 p-5 hover-lift transition-all"
+                >
+                  <span className={`absolute top-5 right-5 h-3 w-3 rounded-full ${dot}`} />
+                  <div className="flex items-center gap-2 pr-6">
+                    <h3 className="font-serif text-xl truncate">{p.name}</h3>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-widest border-border/60">
+                      {p.strategy}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(p.created_at).toLocaleDateString("pl-PL")}
+                    </span>
+                  </div>
+                  <div className="mt-5 flex items-center justify-between">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="rounded-full text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        if (confirm(`Usunąć projekt "${p.name}"? Wszystkie dane przepadną.`))
+                          del.mutate(p.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <Button asChild className="rounded-full px-5">
+                      <Link to="/projects/$id" params={{ id: p.id }}>
+                        Otwórz <ArrowRight className="h-4 w-4 ml-2" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
