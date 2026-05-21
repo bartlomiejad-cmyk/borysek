@@ -199,7 +199,7 @@ function ProductDetail() {
     mutationFn: (vars: { enrichmentId: string; imageUrl: string }) =>
       regenFn({ data: vars }),
     onSuccess: () => { toast.success("Zdjęcie zregenerowane"); invalidate(); },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd FAL.ai"),
+    onError: (e) => toast.error(friendlyError(e, "Regeneracja nie powiodła się")),
   });
 
   const clearRegenMut = useMutation({
