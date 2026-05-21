@@ -107,7 +107,7 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const shot = await callFal(
       "fal-ai/bytedance/seedream/v4/edit",
       {
-        image_urls: [data.imageUrl],
+        image_urls: [encodeImageUrl(data.imageUrl)],
         prompt:
           "Move the exact same product onto a pure white seamless studio background. The background color must be #FFFFFF, RGB 255,255,255 — no warm tint, no gradient, no paper texture. Keep the product identical to the input image: preserve every printed label, logo, brand name, illustration, color, material and proportions exactly as in the source — do NOT redraw, restyle or remove any packaging text or graphics. Add a soft realistic contact shadow directly under the product. Center the product, occupying about 70 percent of the frame with even margins. Sharp focus, professional e-commerce product photography, accurate colors. Avoid: cream background, beige, off-white, missing labels, blurred text, regenerated artwork.",
         image_size: { width: 2560, height: 2560 },
