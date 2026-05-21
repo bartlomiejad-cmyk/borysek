@@ -18,6 +18,8 @@ import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
+import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
+import { regenerateMainImage } from "@/lib/pim/regen.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,6 +63,9 @@ import {
   ChevronRight,
   ShieldCheck,
   X as XIcon,
+  Pin,
+  PinOff,
+  RefreshCw,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
@@ -83,6 +88,8 @@ function ProjectPage() {
   const verifyFn = useServerFn(verifySources);
   const exportFn = useServerFn(exportProject);
   const hideImgFn = useServerFn(hideImageByProduct);
+  const pinFn = useServerFn(setPinnedMainImage);
+  const regenFn = useServerFn(regenerateMainImage);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -96,6 +103,7 @@ function ProjectPage() {
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
   const [search, setSearch] = useState("");
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  const [regenProgress, setRegenProgress] = useState<{ done: number; total: number } | null>(null);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
 
@@ -222,6 +230,44 @@ function ProjectPage() {
     refetchProducts();
   };
 
+  const regenerateAll = async () => {
+    const targets = filtered
+      .map((p) => ({
+        enrichmentId: (p as { enrichment_id?: string | null }).enrichment_id ?? null,
+        url:
+          (p as { pinned_main_url?: string | null }).pinned_main_url ??
+          ((p.images ?? [])[0] ?? null),
+      }))
+      .filter((t): t is { enrichmentId: string; url: string } => !!t.enrichmentId && !!t.url);
+    if (!targets.length) {
+      toast.info("Brak produktów do regeneracji");
+      return;
+    }
+    if (!confirm(`Zregenerować tła dla ${targets.length} produktów? To zużyje kredyty FAL.`)) return;
+    setRegenProgress({ done: 0, total: targets.length });
+    let done = 0;
+    let failed = 0;
+    const queue = [...targets];
+    const worker = async () => {
+      while (queue.length) {
+        const t = queue.shift();
+        if (!t) break;
+        try {
+          await regenFn({ data: { enrichmentId: t.enrichmentId, imageUrl: t.url } });
+        } catch (e) {
+          console.warn("regen failed", t, e);
+          failed++;
+        }
+        done++;
+        setRegenProgress({ done, total: targets.length });
+      }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    setRegenProgress(null);
+    toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    refetchProducts();
+  };
+
   const exportFile = async (fmt: "csv" | "xlsx") => {
     const rows = await exportFn({ data: { projectId: id } });
     if (fmt === "csv") {
@@ -260,6 +306,9 @@ function ProjectPage() {
           <Button onClick={generateAll} disabled={!!genProgress}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
+          <Button variant="outline" onClick={regenerateAll} disabled={!!regenProgress}>
+            <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
+          </Button>
           <Button asChild variant="outline">
             <Link to="/projects/$id/verify" params={{ id }}>
               <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
@@ -282,6 +331,18 @@ function ProjectPage() {
               <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
             </div>
             <Progress value={(genProgress.done / genProgress.total) * 100} />
+          </CardContent>
+        </Card>
+      )}
+
+      {regenProgress && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>Regeneracja teł {regenProgress.done}/{regenProgress.total}</span>
+              <span className="text-muted-foreground">{Math.round((regenProgress.done / regenProgress.total) * 100)}%</span>
+            </div>
+            <Progress value={(regenProgress.done / regenProgress.total) * 100} />
           </CardContent>
         </Card>
       )}
@@ -380,6 +441,18 @@ function ProjectPage() {
                         productId={p.id}
                         images={p.images ?? []}
                         extraImages={(p as { extra_image_urls?: string[] }).extra_image_urls ?? []}
+                        pinnedUrl={(p as { pinned_main_url?: string | null }).pinned_main_url ?? null}
+                        enrichmentId={(p as { enrichment_id?: string | null }).enrichment_id ?? null}
+                        onPin={async (url) => {
+                          const enId = (p as { enrichment_id?: string | null }).enrichment_id;
+                          if (!enId) {
+                            toast.error("Najpierw dopasuj i wygeneruj");
+                            return;
+                          }
+                          await pinFn({ data: { enrichmentId: enId, url } });
+                          toast.success(url ? "Ustawiono główne zdjęcie" : "Odpięto główne zdjęcie");
+                          refetchProducts();
+                        }}
                         onHide={async (url) => {
                           await hideImgFn({ data: { productId: p.id, url } });
                           toast.success("Zdjęcie ukryte");
@@ -404,11 +477,37 @@ function ProjectPage() {
                       <StatusBadge status={p.status as string} error={p.error} />
                     </TableCell>
                     <TableCell>
-                      <Button asChild size="sm" variant="ghost">
-                        <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }}>
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Regeneruj tło"
+                          disabled={
+                            !((p as { enrichment_id?: string | null }).enrichment_id) ||
+                            !(((p as { pinned_main_url?: string | null }).pinned_main_url) || (p.images ?? [])[0])
+                          }
+                          onClick={async () => {
+                            const enId = (p as { enrichment_id?: string | null }).enrichment_id;
+                            const url = (p as { pinned_main_url?: string | null }).pinned_main_url ?? (p.images ?? [])[0];
+                            if (!enId || !url) return;
+                            const id = toast.loading("Regeneruję tło...");
+                            try {
+                              await regenFn({ data: { enrichmentId: enId, imageUrl: url } });
+                              toast.success("Wygenerowano", { id });
+                              refetchProducts();
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : "Błąd", { id });
+                            }
+                          }}
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                        <Button asChild size="sm" variant="ghost">
+                          <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }}>
+                            <ArrowRight className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -645,18 +744,28 @@ function downloadBlob(blob: Blob, name: string) {
 function ProductThumbs({
   images,
   extraImages,
+  pinnedUrl,
+  enrichmentId,
+  onPin,
   onHide,
 }: {
   productId: string;
   images: string[];
   extraImages?: string[];
+  pinnedUrl?: string | null;
+  enrichmentId?: string | null;
+  onPin?: (url: string | null) => void | Promise<void>;
   onHide: (url: string) => void | Promise<void>;
 }) {
   const MAX = 8;
-  const top = images.slice(0, MAX);
-  const overflow = Math.max(0, images.length - top.length);
+  const ordered = pinnedUrl && images.includes(pinnedUrl)
+    ? [pinnedUrl, ...images.filter((u) => u !== pinnedUrl)]
+    : images;
+  const top = ordered.slice(0, MAX);
+  const overflow = Math.max(0, ordered.length - top.length);
   const extraSet = new Set(extraImages ?? []);
   const [hovered, setHovered] = useState<{ url: string; x: number; y: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const dimsRef = useRef<Map<string, { w: number; h: number }>>(new Map());
   const [, force] = useState(0);
   const ensureDims = (url: string) => {
@@ -676,8 +785,25 @@ function ProductThumbs({
     );
   }
   const dims = hovered ? dimsRef.current.get(hovered.url) : undefined;
+  const canPin = !!enrichmentId && !!onPin;
   return (
-    <div className="flex flex-wrap gap-1 relative max-w-[260px]">
+    <div
+      className={`flex flex-wrap gap-1 relative max-w-[260px] rounded p-0.5 transition-colors ${dragOver ? "bg-primary/10 ring-2 ring-primary" : ""}`}
+      onDragOver={(e) => {
+        if (!canPin) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        setDragOver(false);
+        if (!canPin) return;
+        const url = e.dataTransfer.getData("text/plain");
+        if (!url || !top.includes(url)) return;
+        e.preventDefault();
+        void onPin!(url);
+      }}
+    >
       {top.map((url) => (
         <div key={url} className="relative group">
           <Dialog>
@@ -685,6 +811,12 @@ function ProductThumbs({
               <button
                 type="button"
                 className="block"
+                draggable={canPin}
+                onDragStart={(e) => {
+                  if (!canPin) return;
+                  e.dataTransfer.setData("text/plain", url);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
                 onMouseEnter={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
                   ensureDims(url);
@@ -696,8 +828,13 @@ function ProductThumbs({
                   src={url}
                   alt=""
                   loading="lazy"
-                  className={`h-10 w-10 object-cover rounded border hover:opacity-80 ${extraSet.has(url) ? "ring-2 ring-amber-400" : ""}`}
+                  className={`h-10 w-10 object-cover rounded border hover:opacity-80 ${pinnedUrl === url ? "ring-2 ring-primary" : extraSet.has(url) ? "ring-2 ring-amber-400" : ""}`}
                 />
+                {pinnedUrl === url && (
+                  <span className="absolute -top-1 -left-1 bg-primary text-primary-foreground text-[8px] font-bold px-1 rounded leading-tight">
+                    główne
+                  </span>
+                )}
                 {extraSet.has(url) && (
                   <span className="absolute -bottom-1 -left-1 bg-amber-400 text-[8px] font-bold text-black px-1 rounded leading-tight">
                     extra
@@ -717,6 +854,19 @@ function ProductThumbs({
               </a>
             </DialogContent>
           </Dialog>
+          {canPin && (
+            <button
+              type="button"
+              title={pinnedUrl === url ? "Odepnij główne" : "Ustaw jako główne"}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onPin!(pinnedUrl === url ? null : url);
+              }}
+              className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 ${pinnedUrl === url ? "bg-primary text-primary-foreground opacity-100" : "bg-background border"}`}
+            >
+              {pinnedUrl === url ? <PinOff className="h-2.5 w-2.5" /> : <Pin className="h-2.5 w-2.5" />}
+            </button>
+          )}
           <button
             type="button"
             title="Ukryj zdjęcie"
