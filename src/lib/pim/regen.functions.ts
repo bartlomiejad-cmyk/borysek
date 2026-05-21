@@ -48,7 +48,7 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
       {
         image_urls: [data.imageUrl],
         prompt:
-          "Place the product on a clean pure white seamless studio background with a soft natural shadow underneath. Keep the product centered, occupying about 70% of the frame with even margins around it. Professional e-commerce product photography, sharp focus, high detail, accurate colors, no text, no extra objects.",
+          "Move the exact same product onto a pure white seamless studio background. The background color must be #FFFFFF, RGB 255,255,255 — no warm tint, no gradient, no paper texture. Keep the product identical to the input image: preserve every printed label, logo, brand name, illustration, color, material and proportions exactly as in the source — do NOT redraw, restyle or remove any packaging text or graphics. Add a soft realistic contact shadow directly under the product. Center the product, occupying about 70 percent of the frame with even margins. Sharp focus, professional e-commerce product photography, accurate colors. Avoid: cream background, beige, off-white, missing labels, blurred text, regenerated artwork.",
         image_size: { width: 2560, height: 2560 },
         num_images: 1,
         sync_mode: true,
