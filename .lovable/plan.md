@@ -1,35 +1,41 @@
-# Plan naprawy błędu regenerowania zdjęcia
+# Plan: podgląd miniatur + masowy wybór produktów
 
-## Co się dzieje
-Regeneracja zwraca pełny HTML strony błędu (`This page didn't load`), czyli po stronie serwera dochodzi do awarii zanim aplikacja zdąży zwrócić normalny komunikat błędu. Najbardziej podejrzany fragment to obecna konwersja WebP oparta o importy `.wasm` w `src/lib/pim/regen.functions.ts` — takie importy są wykonywane przy ładowaniu modułu funkcji serwerowej i mogą wysadzić cały endpoint regeneracji.
+## 1. Podgląd miniaturki bliżej kursora
 
-## Zakres naprawy
+W tabeli produktów po najechaniu na pierwsze zdjęcie podgląd otwiera się daleko od miniaturki (efekt „wisi pośrodku ekranu”).
 
-1. **Usunąć ryzykowne importy WASM z modułu regeneracji**
-   - Nie importować `.wasm` na górze `regen.functions.ts`.
-   - Nie ładować `@jsquash/*` przy starcie modułu funkcji serwerowej.
-   - Dzięki temu błąd konwersji obrazu nie będzie zamieniał całego requestu w stronę `This page didn't load`.
+Zmiana w `src/routes/_auth/projects.$id.index.tsx` w komponencie galerii miniaturek:
 
-2. **Rozdzielić regenerację od konwersji**
-   - Regeneracja przez FAL/Seedream zostaje głównym krokiem.
-   - Pobranie wygenerowanego pliku, upload do storage i zapis `regenerated_main_image` oraz `pinned_main_url` mają działać niezależnie od konwersji WebP.
-   - Jeśli konwersja nie powiedzie się, użytkownik dostanie czytelny błąd albo bezpieczny fallback, a nie HTML strony awarii.
+- Anker podglądu zostaje przy prawej krawędzi miniaturki, ale przed pokazaniem doliczamy realne wymiary kafelka (ok. 320 px max) i zaciskamy pozycję do widocznego obszaru okna (`window.innerWidth/innerHeight`).
+- Jeśli po prawej brakuje miejsca, otwieramy podgląd po lewej stronie miniaturki (`left = r.left − width − 8`).
+- Jeśli po dole brakuje miejsca, przesuwamy `top` do góry, żeby cały podgląd mieścił się w viewport.
+- Odstęp zmniejszamy z 8 px do 4 px, żeby podgląd wizualnie „kleił się” do miniatury.
 
-3. **Przywrócić WebP w bezpieczniejszy sposób**
-   - Zamiast lokalnej konwersji WASM w funkcji serwerowej użyć zewnętrznej konwersji po wygenerowaniu obrazu.
-   - Wynik walidować po `Content-Type` i nagłówku pliku (`RIFF....WEBP`).
-   - Tylko prawdziwy WebP zapisujemy jako `.webp`; jeśli konwerter zwróci inny format, zapisujemy fallback i logujemy przyczynę.
+Efekt: podgląd pojawia się tuż obok kafelka, niezależnie od pozycji w wierszu i bez wypadania poza ekran.
 
-4. **Poprawić komunikat błędu w UI**
-   - Jeśli serwer zwróci HTML zamiast JSON/normalnego błędu, pokazać krótki komunikat po polsku typu: „Regeneracja nie powiodła się po stronie serwera”, bez wklejania całego HTML-a w toast.
+## 2. Zaznaczanie produktów i pasek akcji masowych
 
-5. **Weryfikacja**
-   - Sprawdzić, że funkcja regeneracji nie ładuje już WASM przy imporcie.
-   - Uruchomić kontrolę TypeScript.
-   - Zweryfikować, że udana regeneracja nadal automatycznie ustawia wygenerowane zdjęcie jako główne w produkcie i na liście produktów.
+Na liście „Produkty” dodajemy mechanizm zaznaczania wielu wierszy i wspólny pasek akcji.
+
+Zakres w `src/routes/_auth/projects.$id.index.tsx`:
+
+- Stan `selectedIds: Set<string>` w komponencie strony.
+- Nowa kolumna z lewej w tabeli z `Checkbox` (`src/components/ui/checkbox.tsx`) na każdy wiersz; w nagłówku checkbox „zaznacz wszystkie widoczne” (z filtrowaną listą `filtered`).
+- Zaznaczenie/odznaczenie aktualizuje `selectedIds`; zmiana filtra/wyszukiwarki nie kasuje zaznaczeń, ale checkbox „zaznacz wszystkie” odnosi się tylko do widocznych pozycji.
+- Sticky pasek akcji nad tabelą (widoczny tylko gdy `selectedIds.size > 0`):
+  - tekst „Zaznaczono N produktów”,
+  - „Wyczyść”,
+  - „Generuj złote rekordy (zaznaczone)” — wywołuje istniejący `generateAll` ograniczony do zaznaczonych id (refaktor: `generateAll(productIds?: string[])`),
+  - „Regeneruj tła (zaznaczone)” — analogicznie dla `regenerateAll`,
+  - „Eksport zaznaczonych do CSV/XLSX” (filtrowanie wyniku `exportProject` po `id`).
+- Istniejące przyciski u góry strony (Generuj/Regeneruj/Eksport) działają dalej dla całej listy, gdy nic nie jest zaznaczone.
 
 ## Pliki do zmiany
 
-- `src/lib/pim/regen.functions.ts`
-- `src/routes/_auth/projects.$id.products.$pid.tsx`
 - `src/routes/_auth/projects.$id.index.tsx`
+
+## Szczegóły techniczne
+
+- Pozycjonowanie podglądu liczone po `getBoundingClientRect()` miniaturki + stałe `PREVIEW_W = 320`, `PREVIEW_H = 360` (uwzględnia pasek z wymiarami), `GAP = 4`. Wybór strony (prawo/lewo) i clamp do `[8, window.innerWidth − PREVIEW_W − 8]` / analogicznie dla pionu.
+- `selectedIds` trzymane w `useState<Set<string>>`; helper `toggleSelected(id)`, `toggleAll(visibleIds)`, `clearSelected()`. Pasek renderowany jako `sticky top-0 z-20` w obrębie karty „Produkty”.
+- Refaktor `generateAll` i `regenerateAll`: przyjmują opcjonalną listę `productIds`; bez argumentu działają na `filtered` jak dotychczas.
