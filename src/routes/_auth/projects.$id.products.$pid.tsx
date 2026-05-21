@@ -175,6 +175,19 @@ function ProductDetail() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
+  const regenMut = useMutation({
+    mutationFn: (vars: { enrichmentId: string; imageUrl: string }) =>
+      regenFn({ data: vars }),
+    onSuccess: () => { toast.success("Zdjęcie zregenerowane"); invalidate(); },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd FAL.ai"),
+  });
+
+  const clearRegenMut = useMutation({
+    mutationFn: (enrichmentId: string) => clearRegenFn({ data: { enrichmentId } }),
+    onSuccess: () => { toast.success("Cofnięto regenerację"); invalidate(); },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
   if (isLoading || !data) return <main className="p-6">Ładowanie...</main>;
   const { product, enrichment, sources } = data;
   const hiddenImages = ((data as { hidden_images?: string[] }).hidden_images ?? []) as string[];
