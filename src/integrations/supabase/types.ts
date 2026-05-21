@@ -32,6 +32,7 @@ export type Database = {
           previous: Json | null
           project_id: string
           quality: Json | null
+          regenerated_main_image: string | null
           source_product_id: string
           status: Database["public"]["Enums"]["enrichment_status"]
           updated_at: string
@@ -53,6 +54,7 @@ export type Database = {
           previous?: Json | null
           project_id: string
           quality?: Json | null
+          regenerated_main_image?: string | null
           source_product_id: string
           status?: Database["public"]["Enums"]["enrichment_status"]
           updated_at?: string
@@ -74,6 +76,7 @@ export type Database = {
           previous?: Json | null
           project_id?: string
           quality?: Json | null
+          regenerated_main_image?: string | null
           source_product_id?: string
           status?: Database["public"]["Enums"]["enrichment_status"]
           updated_at?: string
