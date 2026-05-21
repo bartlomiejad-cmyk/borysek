@@ -306,6 +306,9 @@ function ProjectPage() {
           <Button onClick={generateAll} disabled={!!genProgress}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
+          <Button variant="outline" onClick={regenerateAll} disabled={!!regenProgress}>
+            <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
+          </Button>
           <Button asChild variant="outline">
             <Link to="/projects/$id/verify" params={{ id }}>
               <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
@@ -328,6 +331,18 @@ function ProjectPage() {
               <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
             </div>
             <Progress value={(genProgress.done / genProgress.total) * 100} />
+          </CardContent>
+        </Card>
+      )}
+
+      {regenProgress && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>Regeneracja teł {regenProgress.done}/{regenProgress.total}</span>
+              <span className="text-muted-foreground">{Math.round((regenProgress.done / regenProgress.total) * 100)}%</span>
+            </div>
+            <Progress value={(regenProgress.done / regenProgress.total) * 100} />
           </CardContent>
         </Card>
       )}
