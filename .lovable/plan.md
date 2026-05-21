@@ -1,3 +1,45 @@
+# Lista produktów — więcej zdjęć, przypinanie głównego (drag&drop), regeneracja (też masowo)
+
+## Problem
+
+Na liście produktów (`/projects/$id`) w kolumnie „Zdjęcia" często widać tylko 1 miniaturkę zamiast nawet 8. Powód: `queries.functions.ts → listProductsWithEnrichment` przepuszcza zdjęcia przez `pickImages(...)`, który twardo odrzuca wszystko poniżej 600×600 i — jeśli żadne zdjęcie nie ma wymiarów w `image_meta` (czyli zanim odpalimy „Generuj złote rekordy" / verifySources) — zwraca tylko jedno najlepsze zdjęcie. Dla bardzo wielu produktów `image_meta` jest puste, więc lista pokazuje pojedyncze miniaturki.
+
+Dodatkowo dziś nie da się z poziomu listy:
+- ustawić zdjęcia głównego (działa tylko na stronie produktu),
+- zlecić regeneracji tła (działa tylko na stronie produktu i tylko 1 na 1).
+
+## Co zrobimy
+
+### 1. Więcej zdjęć na liście
+W `listProductsWithEnrichment` przestajemy ograniczać miniaturki listy filtrem 600px. Zwracamy wszystkie nie-ukryte zdjęcia z dopasowanych źródeł, posortowane: najpierw te które przeszłyby próg (`>=600px` wg `image_meta`), potem reszta wg powierzchni / kolejności, do `MAX = 12`. `hidden_images` dalej obowiązuje. Strona produktu pozostaje bez zmian (tam filtr jakości ma sens).
+
+### 2. Przypinanie głównego zdjęcia z listy (drag & drop)
+Komponent `ProductThumbs` na liście pokazuje gwiazdkę/badge „Główne" na zdjęciu które jest aktualnie przypięte (`enrichments.pinned_main_url`). Pierwszy slot listy renderujemy jako „strefę docelową": użytkownik przeciąga dowolną miniaturkę produktu na ten slot → wywołujemy istniejący `setPinnedMainImage({ enrichmentId, url })`. Bez enrichmentu (brak dopasowania) drag jest wyłączony z tooltipem „Najpierw dopasuj i wygeneruj". Każda miniaturka dodatkowo ma mały przycisk „pin/odepnij" (jak na stronie produktu), żeby działało też bez drag.
+
+`listProductsWithEnrichment` zaczyna zwracać `pinned_main_url` oraz upewnia się że zawsze zwraca `enrichment_id` (już istnieje, ale dziś tylko czytane jako `id` z rozszerzenia typu — wczytujemy `id` jawnie w SELECT). Sortowanie miniaturek na liście: przypięte zawsze pierwsze.
+
+### 3. Regeneracja z listy (per produkt + masowo)
+Per wiersz: ikonka „Regeneruj tło" obok strzałki → wywołuje `regenerateMainImage({ enrichmentId, imageUrl: pinned_main_url ?? thumbnail })`. Disable kiedy brak enrichmentu lub brak zdjęcia.
+
+Masowo: nowy przycisk w nagłówku „Regeneruj tła" obok „Generuj złote rekordy". Cele = przefiltrowana lista (`filtered`) z `enrichment_id` i jakimkolwiek zdjęciem. Pętla z `CONCURRENCY = 5` (jak `generateAll`), pasek postępu w istniejącym slocie `genProgress` (albo równoległy `regenProgress`). Po każdej udanej regeneracji invalidate `["project", id, "products"]`. Domyślnie regenerujemy zdjęcie przypięte; jeśli brak — pierwsze widoczne.
+
+## Szczegóły techniczne
+
+- `src/lib/pim/queries.functions.ts`
+  - `listProductsWithEnrichment`: dołożyć `id, pinned_main_url, regenerated_main_image` do SELECT enrichmentów; w mapowaniu wynikowym zwrócić `pinned_main_url`, `regenerated_main_image`, `enrichment_id` (z prawdziwego `id`). Zastąpić `pickImages(...).slice(0, 8)` lokalną funkcją `pickThumbsForList(urls, meta, hidden, pinned)` która: usuwa `hidden`, sortuje (pinned → big≥600 desc area → rest desc area → kolejność), zwraca top 12.
+- `src/routes/_auth/projects.$id.index.tsx`
+  - Import `setPinnedMainImage` z `@/lib/pim/enrichments.functions` i `regenerateMainImage` z `@/lib/pim/regen.functions`.
+  - `ProductThumbs` dostaje `pinnedUrl`, `enrichmentId`, `onPin(url)`, `onRegen()`. Obsługa HTML5 DnD: `draggable` na każdej miniaturce, slot „Główne" z `onDragOver` + `onDrop`. Mały przycisk pinezki w rogu miniaturki (toggle).
+  - Nowy przycisk nagłówka „Regeneruj tła" + pasek postępu (osobny stan `regenProgress`).
+  - Per-wiersz przycisk „Regeneruj" w kolumnie akcji.
+- Bez zmian: schemat DB, RLS, `regen.functions.ts`, `enrichments.functions.ts`, prompt FAL, strona produktu.
+
+## Test akceptacyjny
+
+1. Otwórz listę projektu, w którym wcześniej widać było tylko 1 miniaturkę → teraz widać do 12.
+2. Przeciągnij dowolne zdjęcie z wiersza na slot „Główne" → pojawia się badge „Główne", a na stronie produktu to samo zdjęcie jest oznaczone jako przypięte.
+3. Klik „Regeneruj" w wierszu → po chwili miniaturka się odświeża (regenerated_main_image używany przez stronę produktu).
+4. Klik „Regeneruj tła" w nagłówku → pasek postępu, leci po liście, po zakończeniu lista odświeżona.
 # Naprawa promptu regeneracji FAL.ai
 
 ## Problem
