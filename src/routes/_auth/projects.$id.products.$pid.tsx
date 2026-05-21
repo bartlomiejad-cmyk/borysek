@@ -351,6 +351,18 @@ function ProductDetail() {
                   />
                 </a>
               )}
+              {!regeneratedUrl && mainUrl && (
+                <a href={mainUrl} target="_blank" rel="noreferrer" className="block">
+                  <img
+                    src={mainUrl}
+                    alt="Oryginalne zdjęcie ze źródła"
+                    className="w-full max-h-72 object-contain rounded border bg-white"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1 italic">
+                    Oryginał (źródło) — kliknij Regeneruj, aby przerobić na czystą miniaturę.
+                  </p>
+                </a>
+              )}
               {!mainUrl && !regeneratedUrl && (
                 <p className="text-[11px] text-muted-foreground italic">
                   Brak zdjęcia głównego do regeneracji.
