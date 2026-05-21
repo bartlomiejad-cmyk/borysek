@@ -1,4 +1,24 @@
-# Poprawki w widoku projektu
+# Naprawa regeneracji teł dla URL-i ze spacjami/UTF-8
+
+## Problem
+
+FAL `fal-ai/bytedance/seedream/v4/edit` zwraca 422 `file_download_error`
+dla URL-i ze spacjami i polskimi znakami, np.
+`https://e-militaria.pl/133977-large_default/Spłonki Pistoletowe Fiocchi małe BRASS - 150szt.jpg`.
+FAL nie potrafi pobrać pliku, bo URL nie jest poprawnie zakodowany.
+
+## Rozwiązanie
+
+Plik: `src/lib/pim/regen.functions.ts`
+
+- Dodaję helper `encodeImageUrl(url)`, który koduje per-segment ścieżki
+  (`URL` API + `encodeURIComponent` na każdym segmencie po dekodowaniu),
+  bez podwójnego enkodowania już zakodowanych URL-i.
+- Stosuję go do `data.imageUrl` przed wysyłką do `seedream/v4/edit`
+  i do `image-conversion`.
+- W `callFal` wykrywam `422` z `file_download_error` i rzucam czytelny
+  komunikat: „FAL nie mógł pobrać źródłowego zdjęcia (zły URL)".
+- Pozostawiam resztę logiki bez zmian.
 
 Plik: `src/routes/_auth/projects.$id.index.tsx`
 
