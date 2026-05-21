@@ -18,6 +18,8 @@ import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
+import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
+import { regenerateMainImage } from "@/lib/pim/regen.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,6 +63,9 @@ import {
   ChevronRight,
   ShieldCheck,
   X as XIcon,
+  Pin,
+  PinOff,
+  RefreshCw,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
@@ -83,6 +88,8 @@ function ProjectPage() {
   const verifyFn = useServerFn(verifySources);
   const exportFn = useServerFn(exportProject);
   const hideImgFn = useServerFn(hideImageByProduct);
+  const pinFn = useServerFn(setPinnedMainImage);
+  const regenFn = useServerFn(regenerateMainImage);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -96,6 +103,7 @@ function ProjectPage() {
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
   const [search, setSearch] = useState("");
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  const [regenProgress, setRegenProgress] = useState<{ done: number; total: number } | null>(null);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
 
@@ -219,6 +227,44 @@ function ProjectPage() {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     setGenProgress(null);
     toast.success(`Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    refetchProducts();
+  };
+
+  const regenerateAll = async () => {
+    const targets = filtered
+      .map((p) => ({
+        enrichmentId: (p as { enrichment_id?: string | null }).enrichment_id ?? null,
+        url:
+          (p as { pinned_main_url?: string | null }).pinned_main_url ??
+          ((p.images ?? [])[0] ?? null),
+      }))
+      .filter((t): t is { enrichmentId: string; url: string } => !!t.enrichmentId && !!t.url);
+    if (!targets.length) {
+      toast.info("Brak produktów do regeneracji");
+      return;
+    }
+    if (!confirm(`Zregenerować tła dla ${targets.length} produktów? To zużyje kredyty FAL.`)) return;
+    setRegenProgress({ done: 0, total: targets.length });
+    let done = 0;
+    let failed = 0;
+    const queue = [...targets];
+    const worker = async () => {
+      while (queue.length) {
+        const t = queue.shift();
+        if (!t) break;
+        try {
+          await regenFn({ data: { enrichmentId: t.enrichmentId, imageUrl: t.url } });
+        } catch (e) {
+          console.warn("regen failed", t, e);
+          failed++;
+        }
+        done++;
+        setRegenProgress({ done, total: targets.length });
+      }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    setRegenProgress(null);
+    toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
     refetchProducts();
   };
 
