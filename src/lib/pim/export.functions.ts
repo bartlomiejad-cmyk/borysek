@@ -25,7 +25,7 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, model, generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, regenerated_main_image, model, generated_at",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
@@ -65,7 +65,11 @@ export const exportProject = createServerFn({ method: "GET" })
           if (!all.includes(img)) all.push(img);
         }
       }
-      const images = pickImages(all, meta, hidden);
+      let images = pickImages(all, meta, hidden);
+      const regen = (e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image;
+      if (regen) {
+        images = [regen, ...images.filter((u) => u !== regen)];
+      }
       const features = ((e as unknown as { golden_features?: Array<{ key: string; value: string }> } | undefined)?.golden_features ?? []);
       return {
         id: p.ext_id ?? "",
