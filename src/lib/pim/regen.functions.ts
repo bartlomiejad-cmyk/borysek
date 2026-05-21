@@ -2,19 +2,23 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { simd } from "wasm-feature-detect";
 // WASM modules — imported directly so workerd bundles them at build time.
 // (Dynamic fetch of .wasm at runtime is not supported in the Worker.)
-// @ts-expect-error — .wasm imports return WebAssembly.Module under the CF Vite plugin.
+// @ts-expect-error — Vite may return either a URL string or WebAssembly.Module depending on runtime.
 import JPEG_DEC_WASM from "@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm";
 // @ts-expect-error
 import PNG_WASM from "@jsquash/png/codec/pkg/squoosh_png_bg.wasm";
 // @ts-expect-error
 import WEBP_ENC_WASM from "@jsquash/webp/codec/enc/webp_enc.wasm";
+// @ts-expect-error
+import WEBP_ENC_SIMD_WASM from "@jsquash/webp/codec/enc/webp_enc_simd.wasm";
 
 const FAL_BASE = "https://fal.run";
 
 type FalImage = { url: string; content_type?: string };
 type FalResp = { images?: FalImage[]; image?: FalImage };
+type WasmImport = WebAssembly.Module | string;
 
 async function callFal(path: string, body: unknown, apiKey: string): Promise<FalResp> {
   const res = await fetch(`${FAL_BASE}/${path}`, {
@@ -44,10 +48,17 @@ async function convertToWebp(
     import("@jsquash/png/decode"),
     import("@jsquash/webp/encode"),
   ]);
+  const [jpegWasm, pngWasm, webpWasm] = await Promise.all([
+    resolveWasmModule(JPEG_DEC_WASM as WasmImport),
+    resolveWasmModule(PNG_WASM as WasmImport),
+    simd().then((supported) =>
+      resolveWasmModule((supported ? WEBP_ENC_SIMD_WASM : WEBP_ENC_WASM) as WasmImport),
+    ),
+  ]);
   await Promise.all([
-    jpegMod.init(JPEG_DEC_WASM as WebAssembly.Module),
-    pngMod.init(PNG_WASM as WebAssembly.Module),
-    webpMod.init(WEBP_ENC_WASM as WebAssembly.Module),
+    jpegMod.init(jpegWasm),
+    pngMod.init(pngWasm),
+    webpMod.init(webpWasm),
   ]);
 
   const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -62,6 +73,26 @@ async function convertToWebp(
 
   const out = await webpMod.default(img, { quality: 88 });
   return new Uint8Array(out);
+}
+
+async function resolveWasmModule(wasm: WasmImport): Promise<WebAssembly.Module> {
+  if (wasm instanceof WebAssembly.Module) return wasm;
+  if (wasm.startsWith("data:")) return new WebAssembly.Module(dataUrlToArrayBuffer(wasm));
+
+  const base = wasm.startsWith("http")
+    ? undefined
+    : `http://localhost:${process.env.PORT ?? "8080"}`;
+  const res = await fetch(base ? new URL(wasm, base) : wasm);
+  if (!res.ok) throw new Error(`Nie udało się załadować WASM (${res.status})`);
+  return new WebAssembly.Module(await res.arrayBuffer());
+}
+
+function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
+  const [, payload = ""] = dataUrl.split(",", 2);
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
 }
 
 export const regenerateMainImage = createServerFn({ method: "POST" })
