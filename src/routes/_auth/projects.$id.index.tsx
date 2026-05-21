@@ -887,18 +887,18 @@ function ProductThumbs({
       )}
       {hovered ? (
         <div
-          className="fixed z-50 pointer-events-none rounded-lg border bg-background shadow-xl p-1"
+          className="fixed z-50 pointer-events-none rounded-lg border bg-background shadow-xl overflow-hidden"
           style={{ left: hovered.x, top: hovered.y }}
         >
+          <div className="px-2 py-1 bg-foreground text-background text-xs font-mono text-center">
+            {dims ? `${dims.w} × ${dims.h} px` : "ładuję…"}
+          </div>
           <img
             src={hovered.url}
             alt=""
-            className="block rounded"
+            className="block"
             style={{ maxWidth: 320, maxHeight: 320 }}
           />
-          <div className="absolute bottom-2 right-2 rounded bg-black/70 text-white text-[10px] px-1.5 py-0.5 font-mono">
-            {dims ? `${dims.w} × ${dims.h}` : "…"}
-          </div>
         </div>
       ) : null}
     </div>
