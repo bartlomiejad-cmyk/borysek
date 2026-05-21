@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { pickImages, type ImageMeta } from "./images";
+import { type ImageMeta } from "./images";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -183,8 +183,12 @@ export const getProductDetail = createServerFn({ method: "GET" })
         const ex = Array.isArray((s as { extra_images?: unknown }).extra_images) ? ((s as { extra_images: string[] }).extra_images) : [];
         for (const u of ex) if (!allExtra.includes(u)) allExtra.push(u);
       }
-      const allowedMain = new Set(pickImages(allMain, meta, hidden));
-      const allowedExtra = new Set(includeExtra ? pickImages(allExtra, meta, hidden) : []);
+      // Gallery shows everything the list shows: drop only hidden URLs.
+      // Strict size filtering is reserved for export.
+      const allowedMain = new Set(allMain.filter((u) => !hidden.has(u)));
+      const allowedExtra = new Set(
+        includeExtra ? allExtra.filter((u) => !hidden.has(u)) : [],
+      );
       sources = picked.map((u) => {
         const s = byUrl.get(u);
         const main = Array.isArray(s?.images) ? (s!.images as string[]) : [];
