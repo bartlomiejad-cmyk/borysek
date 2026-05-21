@@ -29,6 +29,7 @@ export type Database = {
           matched_term: string | null
           model: string | null
           picked_urls: string[]
+          pinned_main_url: string | null
           previous: Json | null
           project_id: string
           quality: Json | null
@@ -51,6 +52,7 @@ export type Database = {
           matched_term?: string | null
           model?: string | null
           picked_urls?: string[]
+          pinned_main_url?: string | null
           previous?: Json | null
           project_id: string
           quality?: Json | null
@@ -73,6 +75,7 @@ export type Database = {
           matched_term?: string | null
           model?: string | null
           picked_urls?: string[]
+          pinned_main_url?: string | null
           previous?: Json | null
           project_id?: string
           quality?: Json | null
