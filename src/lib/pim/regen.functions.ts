@@ -8,6 +8,28 @@ const FAL_BASE = "https://fal.run";
 type FalImage = { url: string; content_type?: string };
 type FalResp = { images?: FalImage[]; image?: FalImage };
 
+function encodeImageUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.pathname = u.pathname
+      .split("/")
+      .map((seg) => {
+        if (!seg) return seg;
+        let decoded = seg;
+        try {
+          decoded = decodeURIComponent(seg);
+        } catch {
+          decoded = seg;
+        }
+        return encodeURIComponent(decoded);
+      })
+      .join("/");
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
 async function callFal(path: string, body: unknown, apiKey: string): Promise<FalResp> {
   const res = await fetch(`${FAL_BASE}/${path}`, {
     method: "POST",
@@ -22,6 +44,9 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   if (res.status === 429) throw new Error("FAL: limit zapytań — spróbuj za chwilę");
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
+    if (res.status === 422 && txt.includes("file_download_error")) {
+      throw new Error("FAL nie mógł pobrać źródłowego zdjęcia (zły lub niedostępny URL)");
+    }
     throw new Error(`FAL ${path} ${res.status}: ${txt.slice(0, 400)}`);
   }
   return (await res.json()) as FalResp;
@@ -43,7 +68,7 @@ async function tryConvertToWebpViaFal(
   try {
     const conv = await callFal(
       "fal-ai/imageutils/image-conversion",
-      { image_url: srcUrl, output_format: "webp" },
+      { image_url: encodeImageUrl(srcUrl), output_format: "webp" },
       apiKey,
     );
     const outUrl = conv.image?.url ?? conv.images?.[0]?.url;
