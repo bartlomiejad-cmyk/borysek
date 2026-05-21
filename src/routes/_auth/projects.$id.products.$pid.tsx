@@ -125,12 +125,13 @@ function ProductDetail() {
   // Najpierw najlepszy wg rankingu; jeśli ranking nic nie daje, pierwsze niezukrytych zdjęcie ze źródeł.
   const hiddenSet = new Set((((data as { hidden_images?: string[] } | undefined)?.hidden_images) ?? []) as string[]);
   const pinnedMainUrl = (((data as { pinned_main_url?: string | null } | undefined)?.pinned_main_url) ?? null) as string | null;
+  const regeneratedMainUrl = (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null;
   const autoMainUrl =
     sortedGlobal.find((u) => scoreFor(u) > 0 && !hiddenSet.has(u)) ??
     allVisible.find((u) => !hiddenSet.has(u)) ??
     null;
   const mainUrl =
-    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && allVisible.includes(pinnedMainUrl))
+    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && (allVisible.includes(pinnedMainUrl) || pinnedMainUrl === regeneratedMainUrl))
       ? pinnedMainUrl
       : autoMainUrl;
 
