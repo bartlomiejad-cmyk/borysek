@@ -1,3 +1,41 @@
+# Poprawki w widoku projektu
+
+Plik: `src/routes/_auth/projects.$id.index.tsx`
+
+## 1. Podgląd miniaturki zbyt daleko
+
+W `ProductThumbs` podgląd na hover otwiera się przy `r.right + 8, r.top`, ale
+wizualnie „odjeżdża" od kciuka. Zmiany:
+
+- zmniejszam odstęp do 4 px,
+- jeśli z prawej brakuje miejsca (`r.right + 320 > window.innerWidth`), otwieram
+  podgląd po lewej (`left = r.left − 320 − 4`),
+- clamp `top` do widocznego ekranu (żeby nie wychodził pod fold),
+- nasłuchuję `scroll`/`resize` na czas hovera i zamykam podgląd, żeby nie
+  „pływał" po przewinięciu.
+
+## 2. Zaznaczanie produktów + belka akcji masowych
+
+- nowy stan `selectedIds: Set<string>` + helpery `toggleSelected`, `toggleAll`,
+  `clearSelected`,
+- kolumna `Checkbox` w każdym wierszu tabeli + checkbox „zaznacz wszystkie
+  widoczne" w nagłówku (stan `indeterminate`, działa na aktualnie
+  przefiltrowanej liście),
+- sticky belka nad tabelą widoczna tylko gdy `selectedIds.size > 0`:
+  „Zaznaczono N produktów", „Wyczyść", „Generuj złote rekordy",
+  „Regeneruj tła", „Eksport CSV/XLSX",
+- refaktor `generateAll(productIds?)` i `regenerateAll(productIds?)` —
+  gdy podany ID-set, działa tylko na zaznaczonych (z pominięciem filtra
+  „status !== GENERATED", żeby można było wymusić regenerację),
+- `exportFile` przy zaznaczeniu filtruje wynik eksportu po `selectedIds`,
+- istniejące przyciski na górze strony działają dalej dla całej listy
+  (gdy nic nie jest zaznaczone).
+
+## Szczegóły techniczne
+
+- używam istniejącego `@/components/ui/checkbox` (shadcn),
+- belka: `sticky top-0 z-20 bg-primary/10 border-y border-primary/30`,
+- `colSpan` w pustym stanie tabeli zmienia się z 6 na 7.
 # Plan: podgląd miniatur + masowy wybór produktów
 
 ## 1. Podgląd miniaturki bliżej kursora
