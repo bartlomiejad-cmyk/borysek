@@ -2,23 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { simd } from "wasm-feature-detect";
-// WASM modules — imported directly so workerd bundles them at build time.
-// (Dynamic fetch of .wasm at runtime is not supported in the Worker.)
-// @ts-expect-error — Vite may return either a URL string or WebAssembly.Module depending on runtime.
-import JPEG_DEC_WASM from "@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm";
-// @ts-expect-error
-import PNG_WASM from "@jsquash/png/codec/pkg/squoosh_png_bg.wasm";
-// @ts-expect-error
-import WEBP_ENC_WASM from "@jsquash/webp/codec/enc/webp_enc.wasm";
-// @ts-expect-error
-import WEBP_ENC_SIMD_WASM from "@jsquash/webp/codec/enc/webp_enc_simd.wasm";
 
 const FAL_BASE = "https://fal.run";
 
 type FalImage = { url: string; content_type?: string };
 type FalResp = { images?: FalImage[]; image?: FalImage };
-type WasmImport = WebAssembly.Module | string;
 
 async function callFal(path: string, body: unknown, apiKey: string): Promise<FalResp> {
   const res = await fetch(`${FAL_BASE}/${path}`, {
@@ -39,60 +27,40 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   return (await res.json()) as FalResp;
 }
 
-async function convertToWebp(
-  bytes: Uint8Array,
-  contentType: string,
-): Promise<Uint8Array> {
-  const [jpegMod, pngMod, webpMod] = await Promise.all([
-    import("@jsquash/jpeg/decode"),
-    import("@jsquash/png/decode"),
-    import("@jsquash/webp/encode"),
-  ]);
-  const [jpegWasm, pngWasm, webpWasm] = await Promise.all([
-    resolveWasmModule(JPEG_DEC_WASM as WasmImport),
-    resolveWasmModule(PNG_WASM as WasmImport),
-    simd().then((supported) =>
-      resolveWasmModule((supported ? WEBP_ENC_SIMD_WASM : WEBP_ENC_WASM) as WasmImport),
-    ),
-  ]);
-  await Promise.all([
-    jpegMod.init(jpegWasm),
-    pngMod.init(pngWasm),
-    webpMod.init(webpWasm),
-  ]);
+function isWebpBytes(bytes: Uint8Array): boolean {
+  // RIFF....WEBP
+  return (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  );
+}
 
-  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  let img: ImageData;
-  const isPng = contentType.includes("png");
+async function tryConvertToWebpViaFal(
+  srcUrl: string,
+  apiKey: string,
+): Promise<{ bytes: Uint8Array; contentType: string } | null> {
   try {
-    img = isPng ? await pngMod.default(ab) : await jpegMod.default(ab);
-  } catch {
-    // Try the other decoder as a fallback.
-    img = isPng ? await jpegMod.default(ab) : await pngMod.default(ab);
+    const conv = await callFal(
+      "fal-ai/imageutils/image-conversion",
+      { image_url: srcUrl, output_format: "webp" },
+      apiKey,
+    );
+    const outUrl = conv.image?.url ?? conv.images?.[0]?.url;
+    if (!outUrl) return null;
+    const res = await fetch(outUrl);
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") ?? "";
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (!isWebpBytes(bytes)) {
+      console.warn("[regen] image-conversion returned non-webp bytes, content-type:", ct);
+      return null;
+    }
+    return { bytes, contentType: "image/webp" };
+  } catch (e) {
+    console.warn("[regen] fal image-conversion failed", e);
+    return null;
   }
-
-  const out = await webpMod.default(img, { quality: 88 });
-  return new Uint8Array(out);
-}
-
-async function resolveWasmModule(wasm: WasmImport): Promise<WebAssembly.Module> {
-  if (wasm instanceof WebAssembly.Module) return wasm;
-  if (wasm.startsWith("data:")) return new WebAssembly.Module(dataUrlToArrayBuffer(wasm));
-
-  const base = wasm.startsWith("http")
-    ? undefined
-    : `http://localhost:${process.env.PORT ?? "8080"}`;
-  const res = await fetch(base ? new URL(wasm, base) : wasm);
-  if (!res.ok) throw new Error(`Nie udało się załadować WASM (${res.status})`);
-  return new WebAssembly.Module(await res.arrayBuffer());
-}
-
-function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
-  const [, payload = ""] = dataUrl.split(",", 2);
-  const binary = atob(payload);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
 }
 
 export const regenerateMainImage = createServerFn({ method: "POST" })
@@ -127,23 +95,22 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const generatedUrl = shot.images?.[0]?.url;
     if (!generatedUrl) throw new Error("FAL nie zwróciło zdjęcia");
 
-    // Step 2 — pobierz oryginał z FAL.
-    const fileRes = await fetch(generatedUrl);
-    if (!fileRes.ok) throw new Error(`Pobranie pliku FAL nieudane (${fileRes.status})`);
-    const srcContentType = fileRes.headers.get("content-type") ?? "image/jpeg";
-    const srcBytes = new Uint8Array(await fileRes.arrayBuffer());
-
-    // Step 3 — konwersja do WebP 2560x2560 po naszej stronie (WASM).
-    // W razie awarii WASM wracamy do surowego JPEG, żeby nie blokować użytkownika.
-    let bytes: Uint8Array = srcBytes;
+    // Step 2 — spróbuj konwersji do WebP po stronie FAL (image-conversion).
+    // Jeśli się nie uda lub zwróci inny format, zapisujemy oryginał jako JPG.
+    let bytes: Uint8Array;
     let ext: "webp" | "jpg" = "jpg";
-    let contentType = srcContentType;
-    try {
-      bytes = await convertToWebp(srcBytes, srcContentType);
+    let contentType = "image/jpeg";
+    const webp = await tryConvertToWebpViaFal(generatedUrl, FAL_KEY);
+    if (webp) {
+      bytes = webp.bytes;
       ext = "webp";
-      contentType = "image/webp";
-    } catch (e) {
-      console.warn("[regen] local webp conversion failed, uploading source bytes", e);
+      contentType = webp.contentType;
+    } else {
+      const fileRes = await fetch(generatedUrl);
+      if (!fileRes.ok) throw new Error(`Pobranie pliku FAL nieudane (${fileRes.status})`);
+      contentType = fileRes.headers.get("content-type") ?? "image/jpeg";
+      bytes = new Uint8Array(await fileRes.arrayBuffer());
+      ext = contentType.includes("png") ? "jpg" : "jpg";
     }
 
     const path = `${data.enrichmentId}.${ext}`;
