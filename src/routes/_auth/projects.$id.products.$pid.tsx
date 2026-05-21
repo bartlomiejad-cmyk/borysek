@@ -610,9 +610,16 @@ function ProductDetail() {
                   onOpenChange={(o) => setOpenSources((m) => ({ ...m, [s.url]: o }))}
                 >
                   <CollapsibleTrigger asChild>
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setOpenSources((m) => ({ ...m, [s.url]: !isOpen }));
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors cursor-pointer"
                     >
                       {headThumb ? (
                         <img
@@ -631,10 +638,17 @@ function ProductDetail() {
                           <span className="text-muted-foreground mr-2">#{i + 1}</span>
                           {s.title ?? "(brak tytułu)"}
                         </div>
-                        <div className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-full">
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-full hover:text-foreground hover:underline relative z-10"
+                        >
                           <ExternalLink className="h-3 w-3 shrink-0" />
                           <span className="truncate">{s.url}</span>
-                        </div>
+                        </a>
                       </div>
                       <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
                         {combined.length} zdj.
@@ -645,7 +659,7 @@ function ProductDetail() {
                           isOpen && "rotate-180",
                         )}
                       />
-                    </button>
+                    </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <CardContent className="space-y-3 pt-0">
