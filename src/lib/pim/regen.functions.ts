@@ -41,20 +41,18 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const FAL_KEY = process.env.FAL_KEY;
     if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
 
-    // Step 1 — bria/product-shot: biały seamless background, miękki cień,
-    // produkt ~70% kadru (padding ~15% z każdej strony), kwadrat 2500x2500
-    // (maksymalny rozmiar wspierany przez model — bardzo blisko 2560).
+    // Step 1 — bytedance/seedream v4 edit: biały seamless background,
+    // miękki cień, produkt ~70% kadru, kwadrat 2560x2560.
     const shot = await callFal(
-      "fal-ai/bria/product-shot",
+      "fal-ai/bytedance/seedream/v4/edit",
       {
-        image_url: data.imageUrl,
-        scene_description:
-          "clean pure white seamless studio background with a soft subtle natural shadow under the product, professional product photography",
-        placement_type: "manual_padding",
-        manual_padding_inches: [0.6, 0.6, 0.6, 0.6],
-        shot_size: [2500, 2500],
-        num_results: 1,
+        image_urls: [data.imageUrl],
+        prompt:
+          "Place the product on a clean pure white seamless studio background with a soft natural shadow underneath. Keep the product centered, occupying about 70% of the frame with even margins around it. Professional e-commerce product photography, sharp focus, high detail, accurate colors, no text, no extra objects.",
+        image_size: { width: 2560, height: 2560 },
+        num_images: 1,
         sync_mode: true,
+        enable_safety_checker: true,
       },
       FAL_KEY,
     );
