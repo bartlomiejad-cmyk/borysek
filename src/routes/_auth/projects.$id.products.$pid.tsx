@@ -6,13 +6,14 @@ import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
+import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2 } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
@@ -39,6 +40,8 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const regenFn = useServerFn(regenerateMainImage);
+  const clearRegenFn = useServerFn(clearRegeneratedImage);
 
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
@@ -177,6 +180,7 @@ function ProductDetail() {
   const hiddenImages = ((data as { hidden_images?: string[] }).hidden_images ?? []) as string[];
   const includeExtra = (data as { include_extra_images?: boolean }).include_extra_images ?? false;
   const quality = (enrichment as { quality?: { watermark_urls?: string[]; name_mismatch?: boolean; feature_mismatches?: string[]; notes?: string } | null } | null)?.quality ?? null;
+  const regeneratedUrl = (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null;
 
   const renderThumb = (u: string, extra: boolean) => {
     const s = imageScores[u];
@@ -271,6 +275,69 @@ function ProductDetail() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {/* Regeneracja zdjęcia głównego przez FAL.ai */}
+            <div className="rounded border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium flex items-center gap-1">
+                    <Wand2 className="h-3.5 w-3.5 text-violet-500" /> Zdjęcie główne (FAL.ai)
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Białe tło, miękki cień, produkt ~70% kadru, WebP 2560×2560.
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  {regeneratedUrl && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!enrichment}
+                      onClick={() => {
+                        if (!enrichment) return;
+                        clearRegenMut.mutate(enrichment.id);
+                      }}
+                    >
+                      <Undo2 className="h-3 w-3 mr-1" /> Cofnij
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    disabled={!enrichment || !mainUrl || regenMut.isPending}
+                    onClick={() => {
+                      if (!enrichment || !mainUrl) return;
+                      regenMut.mutate({ enrichmentId: enrichment.id, imageUrl: mainUrl });
+                    }}
+                  >
+                    {regenMut.isPending ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <Wand2 className="h-3 w-3 mr-1" />
+                    )}
+                    {regenMut.isPending ? "Generuję…" : regeneratedUrl ? "Regeneruj ponownie" : "Regeneruj"}
+                  </Button>
+                </div>
+              </div>
+              {regenMut.isPending && (
+                <p className="text-[11px] text-muted-foreground italic">
+                  Generuję zdjęcie produktowe… (10–40 s)
+                </p>
+              )}
+              {regeneratedUrl && (
+                <a href={regeneratedUrl} target="_blank" rel="noreferrer" className="block">
+                  <img
+                    src={regeneratedUrl}
+                    alt="Regenerowane zdjęcie produktu"
+                    className="w-full max-h-72 object-contain rounded border bg-white"
+                  />
+                </a>
+              )}
+              {!mainUrl && !regeneratedUrl && (
+                <p className="text-[11px] text-muted-foreground italic">
+                  Brak zdjęcia głównego do regeneracji.
+                </p>
+              )}
+            </div>
+
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nazwa</label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Wygeneruj lub wpisz nazwę" />
