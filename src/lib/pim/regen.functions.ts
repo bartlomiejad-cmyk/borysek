@@ -77,7 +77,7 @@ async function convertToWebp(
 
 async function resolveWasmModule(wasm: WasmImport): Promise<WebAssembly.Module> {
   if (wasm instanceof WebAssembly.Module) return wasm;
-  if (wasm.startsWith("data:")) return new WebAssembly.Module(dataUrlToBytes(wasm));
+  if (wasm.startsWith("data:")) return new WebAssembly.Module(dataUrlToArrayBuffer(wasm));
 
   const base = wasm.startsWith("http")
     ? undefined
@@ -87,12 +87,12 @@ async function resolveWasmModule(wasm: WasmImport): Promise<WebAssembly.Module> 
   return new WebAssembly.Module(await res.arrayBuffer());
 }
 
-function dataUrlToBytes(dataUrl: string): Uint8Array {
+function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
   const [, payload = ""] = dataUrl.split(",", 2);
   const binary = atob(payload);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  return bytes.buffer;
 }
 
 export const regenerateMainImage = createServerFn({ method: "POST" })
