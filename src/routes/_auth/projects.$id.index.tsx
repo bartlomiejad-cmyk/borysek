@@ -497,7 +497,7 @@ function ProjectPage() {
                               toast.success("Wygenerowano", { id });
                               refetchProducts();
                             } catch (e) {
-                              toast.error(e instanceof Error ? e.message : "Błąd", { id });
+                              toast.error(friendlyError(e, "Regeneracja nie powiodła się"), { id });
                             }
                           }}
                         >
