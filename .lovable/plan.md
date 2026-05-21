@@ -1,3 +1,35 @@
+# Galeria wybranych zdjęć w karcie „Złoty Rekord"
+
+## Co dodajemy
+
+Pod sekcją „Zdjęcie główne (FAL.ai)" w karcie „Złoty Rekord" (strona produktu) pojawia się nowy blok **„Wybrane zdjęcia"** — galeria wszystkich nie-ukrytych zdjęć z dopasowanych źródeł (czyli to, co tak naprawdę „wchodzi" do złotego rekordu i co trafi na export). Dziś te zdjęcia są widoczne tylko w prawej kolumnie podzielone per źródło — brakuje jednego, scalonego widoku.
+
+## Jak to wygląda
+
+- Grid 4 kolumny (na mobile 2): kwadratowe miniaturki ~h-24 z `object-contain` na białym tle, zaokrąglone, z borderem.
+- Pierwsza miniaturka = aktualne `mainUrl` (przypięte lub auto-wybrane), oznaczona obwódką primary i badgem „Główne". Pozostałe sortowane przez istniejący `scoreFor()` — czyli ta sama logika rankingu, której używa `top4`.
+- Na każdej miniaturce w rogu:
+  - mała pinezka (`Pin`/`PinOff`) → wywołuje istniejący `pinFn({ enrichmentId, url })`, toggle przypięcia,
+  - krzyżyk → wywołuje istniejący `hideFn({ enrichmentId, url })` (ukrywa zdjęcie z wybranych).
+- Klik w miniaturkę otwiera ten sam `Dialog` z dużym podglądem co reszta strony.
+- Pod galerią mały licznik: „N zdjęć · M ukrytych" + link „Pokaż ukryte" (opcjonalne — jeśli `hidden_images.length > 0`), który pokazuje dodatkowy rząd ukrytych miniaturek z przyciskiem `unhideFn`. Jeśli już dziś istnieje gdzieś przycisk „przywróć ukryte" na stronie, nie duplikujemy — sprawdzimy podczas implementacji.
+- Stan pusty: „Brak zdjęć z dopasowanych źródeł." gdy `allVisible.length === 0`.
+
+## Szczegóły techniczne
+
+- Plik: `src/routes/_auth/projects.$id.products.$pid.tsx`. Bez zmian w server functions ani DB.
+- Dane wejściowe są już w komponencie: `allVisible`, `hiddenSet`, `mainUrl`, `pinnedMainUrl`, `imageMeta`, `imageScores`, `scoreFor`, `enrichment.id`, mutacje `pinFn`/`hideFn`/`unhideFn`.
+- Nowy sub-komponent (inline w pliku) `SelectedGallery` renderowany w karcie „Złoty Rekord" zaraz po bloku „Zdjęcie główne (FAL.ai)", przed polem „Nazwa".
+- Sortowanie: `[...allVisible].sort((a,b) => (b===mainUrl?1:0)-(a===mainUrl?1:0) || scoreFor(b)-scoreFor(a))`.
+- Drag&drop pomijamy — pinezka wystarcza, lista produktów już ma DnD.
+
+## Test akceptacyjny
+
+Na stronie produktu „TAC-22 kal.22LR NORMA":
+1. Pod sekcją FAL.ai widać siatkę miniaturek wszystkich nie-ukrytych zdjęć z 10 źródeł.
+2. Aktualne zdjęcie główne ma obwódkę i badge „Główne".
+3. Klik pinezki na innej miniaturce zmienia „Główne" i odświeża `mainUrl` powyżej.
+4. Klik X ukrywa zdjęcie — znika z galerii i z listy źródeł po prawej.
 # Lista produktów — więcej zdjęć, przypinanie głównego (drag&drop), regeneracja (też masowo)
 
 ## Problem
