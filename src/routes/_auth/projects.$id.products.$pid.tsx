@@ -109,13 +109,20 @@ function ProductDetail() {
     const m = imageMeta[url];
     const area = (m?.w ?? 0) * (m?.h ?? 0);
     const s = imageScores[url];
+    // Fallback gdy brak wymiarów (image_meta puste) — oceniaj tylko po AI.
+    const effectiveArea = area > 0 ? area : 1;
     if (!s) return area;
     if (s.is_banner_or_trash) return 0;
-    return (s.is_central + s.is_clean) * area;
+    return (s.is_central + s.is_clean) * effectiveArea;
   };
 
   const sortedGlobal = [...allVisible].sort((a, b) => scoreFor(b) - scoreFor(a));
-  const mainUrl = sortedGlobal.find((u) => scoreFor(u) > 0) ?? null;
+  // Najpierw najlepszy wg rankingu; jeśli ranking nic nie daje, pierwsze niezukrytych zdjęcie ze źródeł.
+  const hiddenSet = new Set(((data as { hidden_images?: string[] }).hidden_images ?? []) as string[]);
+  const mainUrl =
+    sortedGlobal.find((u) => scoreFor(u) > 0 && !hiddenSet.has(u)) ??
+    allVisible.find((u) => !hiddenSet.has(u)) ??
+    null;
 
   const regenAll = useMutation({
     mutationFn: () => genFn({ data: { productId: pid, mode: "all" } }),
@@ -342,6 +349,18 @@ function ProductDetail() {
                     alt="Regenerowane zdjęcie produktu"
                     className="w-full max-h-72 object-contain rounded border bg-white"
                   />
+                </a>
+              )}
+              {!regeneratedUrl && mainUrl && (
+                <a href={mainUrl} target="_blank" rel="noreferrer" className="block">
+                  <img
+                    src={mainUrl}
+                    alt="Oryginalne zdjęcie ze źródła"
+                    className="w-full max-h-72 object-contain rounded border bg-white"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1 italic">
+                    Oryginał (źródło) — kliknij Regeneruj, aby przerobić na czystą miniaturę.
+                  </p>
                 </a>
               )}
               {!mainUrl && !regeneratedUrl && (
