@@ -1,3 +1,91 @@
+# Regeneracja zdjęcia głównego przez FAL.ai
+
+## Co dostajemy
+
+W panelu produktu pojawia się nowy przycisk **„Regeneruj zdjęcie główne (FAL.ai)"** obok kafelka oznaczonego koroną *Główne*. Po kliknięciu:
+
+1. Bierzemy aktualnie wyłonione zdjęcie główne (`mainUrl` — to samo, które AI oznaczyło koroną).
+2. Wysyłamy je do FAL.ai. Model otrzymuje instrukcję:
+   - usunąć tło, jeśli nie jest białe,
+   - umieścić produkt na czystym białym tle z delikatnym, miękkim cieniem pod produktem,
+   - wykadrować tak, aby produkt zajmował ok. 70% powierzchni,
+   - wyjście: kwadrat 2560×2560 px, format **WebP**.
+3. Wynik zapisujemy w buckecie Supabase Storage i podpinamy do produktu jako „zdjęcie główne po regeneracji".
+4. W UI nowy obraz pojawia się jako pierwszy kafelek (z plakietką *Regenerowane*), z opcją *Cofnij* (usuwa regenerowaną wersję i wraca do oryginału).
+5. Regenerowana wersja jest też używana w eksporcie CSV — trafia na pierwszą pozycję listy zdjęć produktu.
+
+## Wymagany sekret
+
+- `FAL_KEY` — klucz API z [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys). Po zatwierdzeniu planu poproszę o niego osobnym promptem (bezpieczny formularz). Trzymany wyłącznie po stronie serwera.
+
+## Bucket na regenerowane zdjęcia
+
+- Nowy publiczny bucket `regenerated-images` (publiczny tylko do odczytu — żeby URL działał w eksporcie i podglądzie). Zapis tylko z serwera (service role).
+
+## Zmiany w bazie
+
+Migracja dodaje do tabeli `enrichments` jedną kolumnę:
+
+- `regenerated_main_image` (tekst, opcjonalna) — publiczny URL pliku WebP w buckecie `regenerated-images`. `NULL` = brak regeneracji.
+
+Nie zmieniamy istniejących polityk dostępu — kolumna dziedziczy obecne RLS na `enrichments`.
+
+## Szczegóły techniczne (dla mnie)
+
+### Endpoint FAL
+
+Używamy **`fal-ai/bria/product-shot`** (dedykowany model „product photography" — sam usuwa tło, dodaje białe tło + delikatny cień, kadruje produkt). Wywołanie HTTP REST przez kolejkę FAL:
+
+```text
+POST https://queue.fal.run/fal-ai/bria/product-shot
+Authorization: Key ${FAL_KEY}
+{
+  "image_url": "<mainUrl>",
+  "scene_description": "clean pure white studio background with a soft subtle shadow under the product",
+  "placement_type": "manual_padding",
+  "manual_padding_inches": [0.6, 0.6, 0.6, 0.6],   // produkt ~70% kadru
+  "num_results": 1,
+  "sync_mode": true
+}
+```
+
+Fallback gdy `bria/product-shot` zwróci błąd / pusty wynik: **`fal-ai/nano-banana/edit`** z promptem opisującym efekt (białe tło, miękki cień, produkt 70% kadru).
+
+### Normalizacja do 2560×2560 WebP
+
+FAL nie gwarantuje dokładnych 2560×2560 ani WebP. Po otrzymaniu URL-a wyniku:
+
+1. Pobieramy bajty (`fetch`) w server function.
+2. Konwersja + resize przez **`fal-ai/imageutils/image-conversion`** (lub `imageutils/resize`) z parametrami `width: 2560, height: 2560, format: "webp", fit: "contain", background: "#ffffff"`. To trzyma nas w środowisku Workerów (brak `sharp`).
+3. Pobieramy znormalizowany plik i wgrywamy do bucketu `regenerated-images` jako `{enrichmentId}.webp` (nadpisujemy przy ponownej regeneracji).
+4. Zapisujemy publiczny URL w `enrichments.regenerated_main_image`.
+
+### Server functions (`src/lib/pim/regen.functions.ts`)
+
+- `regenerateMainImage({ productId })` — middleware `requireSupabaseAuth`. Wykonuje krok FAL → normalizacja → upload → update DB. Zwraca `{ url }`. Obsługuje błędy FAL (401, 429, 5xx) — czytelne komunikaty po polsku przez `toast`.
+- `clearRegeneratedImage({ enrichmentId })` — usuwa plik z bucketu i czyści kolumnę.
+
+### UI (`src/routes/_auth/projects.$id.products.$pid.tsx`)
+
+- Nowy przycisk *„Regeneruj zdjęcie główne"* w sekcji *Złoty Rekord*, aktywny gdy `mainUrl` istnieje. Spinner „Generuję zdjęcie produktowe…" podczas trwania (model bywa wolny — 10–40 s).
+- Jeżeli `enrichment.regenerated_main_image` jest ustawiony: dodatkowy duży kafelek na samej górze listy źródeł z plakietką *Regenerowane (FAL)* + przyciskiem *Cofnij*. Ten URL otrzymuje też koronę *Główne* zamiast oryginału.
+
+### Eksport
+
+W `export.functions.ts` (funkcja składająca listę zdjęć): jeżeli `regenerated_main_image` jest ustawiony, wstawiamy go na pozycję 0 listy `images` w CSV; oryginał zostaje na dalszych pozycjach.
+
+### Co NIE wchodzi w zakres
+
+- Regeneracja zdjęć innych niż główne.
+- Batch / „regeneruj wszystkie produkty" — pojedynczy produkt na raz.
+- Edycja promptu z UI — prompt jest stały (zgodny z wymaganiami).
+
+## Kolejność wykonania
+
+1. Migracja DB + bucket Storage (po Twojej akceptacji).
+2. Poproszę o `FAL_KEY`.
+3. Server functions + UI + integracja z eksportem.
+4. Test ręczny na 1 produkcie.
 # Ocena kompozycji zdjęć przez AI (Gemini vision)
 
 Cel: zanim weryfikator zobaczy zdjęcia produktu, AI ocenia kompozycję 4 największych zdjęć, liczymy `Score` łączący ocenę z rozdzielczością, sortujemy listę, podświetlamy najlepsze jako "Zdjęcie Główne" i pokazujemy badge'y `is_central` / `is_clean`. Fallback bez blokady: sort po pikselach.
