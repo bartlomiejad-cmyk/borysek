@@ -118,7 +118,7 @@ function ProductDetail() {
 
   const sortedGlobal = [...allVisible].sort((a, b) => scoreFor(b) - scoreFor(a));
   // Najpierw najlepszy wg rankingu; jeśli ranking nic nie daje, pierwsze niezukrytych zdjęcie ze źródeł.
-  const hiddenSet = new Set(((data as { hidden_images?: string[] }).hidden_images ?? []) as string[]);
+  const hiddenSet = new Set((((data as { hidden_images?: string[] } | undefined)?.hidden_images) ?? []) as string[]);
   const mainUrl =
     sortedGlobal.find((u) => scoreFor(u) > 0 && !hiddenSet.has(u)) ??
     allVisible.find((u) => !hiddenSet.has(u)) ??
