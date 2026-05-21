@@ -8,6 +8,8 @@ const FAL_BASE = "https://fal.run";
 type FalImage = { url: string; content_type?: string };
 type FalResp = { images?: FalImage[]; image?: FalImage };
 
+type ImageExt = "webp" | "jpg" | "png";
+
 function encodeImageUrl(raw: string): string {
   try {
     const u = new URL(raw);
@@ -61,31 +63,48 @@ function isWebpBytes(bytes: Uint8Array): boolean {
   );
 }
 
-async function tryConvertToWebpViaFal(
-  srcUrl: string,
-  apiKey: string,
-): Promise<{ bytes: Uint8Array; contentType: string } | null> {
-  try {
-    const conv = await callFal(
-      "fal-ai/imageutils/image-conversion",
-      { image_url: encodeImageUrl(srcUrl), output_format: "webp" },
-      apiKey,
-    );
-    const outUrl = conv.image?.url ?? conv.images?.[0]?.url;
-    if (!outUrl) return null;
-    const res = await fetch(outUrl);
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") ?? "";
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (!isWebpBytes(bytes)) {
-      console.warn("[regen] image-conversion returned non-webp bytes, content-type:", ct);
-      return null;
-    }
-    return { bytes, contentType: "image/webp" };
-  } catch (e) {
-    console.warn("[regen] fal image-conversion failed", e);
-    return null;
-  }
+function isPngBytes(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  );
+}
+
+function detectImageFormat(bytes: Uint8Array, contentType: string): { ext: ImageExt; contentType: string } {
+  const ct = contentType.toLowerCase();
+  if (isWebpBytes(bytes) || ct.includes("webp")) return { ext: "webp", contentType: "image/webp" };
+  if (isPngBytes(bytes) || ct.includes("png")) return { ext: "png", contentType: "image/png" };
+  return { ext: "jpg", contentType: ct.includes("jpeg") || ct.includes("jpg") ? contentType : "image/jpeg" };
+}
+
+async function fetchImageBytes(srcUrl: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const safeUrl = encodeImageUrl(srcUrl);
+  const res = await fetch(safeUrl, {
+    headers: {
+      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0 (compatible; LovableProductImageBot/1.0)",
+    },
+  });
+  if (!res.ok) throw new Error(`Nie udało się pobrać zdjęcia źródłowego (${res.status})`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.length) throw new Error("Zdjęcie źródłowe jest puste");
+  return { bytes, contentType: res.headers.get("content-type") ?? "image/jpeg" };
+}
+
+async function prepareFalSourceImage(enrichmentId: string, srcUrl: string): Promise<{ url: string; path: string }> {
+  const source = await fetchImageBytes(srcUrl);
+  const format = detectImageFormat(source.bytes, source.contentType);
+  const path = `fal-sources/${enrichmentId}-${Date.now()}.${format.ext}`;
+  const { error } = await supabaseAdmin.storage
+    .from("regenerated-images")
+    .upload(path, source.bytes, { contentType: format.contentType, upsert: true });
+  if (error) throw new Error(`Przygotowanie zdjęcia dla FAL nieudane: ${error.message}`);
+
+  const { data: pub } = supabaseAdmin.storage
+    .from("regenerated-images")
+    .getPublicUrl(path);
+  return { url: pub.publicUrl, path };
 }
 
 export const regenerateMainImage = createServerFn({ method: "POST" })
@@ -104,19 +123,28 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
 
     // Step 1 — bytedance/seedream v4 edit: biały seamless background,
     // miękki cień, produkt ~70% kadru, kwadrat 2560x2560.
-    const shot = await callFal(
-      "fal-ai/bytedance/seedream/v4/edit",
-      {
-        image_urls: [encodeImageUrl(data.imageUrl)],
-        prompt:
-          "Move the exact same product onto a pure white seamless studio background. The background color must be #FFFFFF, RGB 255,255,255 — no warm tint, no gradient, no paper texture. Keep the product identical to the input image: preserve every printed label, logo, brand name, illustration, color, material and proportions exactly as in the source — do NOT redraw, restyle or remove any packaging text or graphics. Add a soft realistic contact shadow directly under the product. Center the product, occupying about 70 percent of the frame with even margins. Sharp focus, professional e-commerce product photography, accurate colors. Avoid: cream background, beige, off-white, missing labels, blurred text, regenerated artwork.",
-        image_size: { width: 2560, height: 2560 },
-        num_images: 1,
-        sync_mode: true,
-        enable_safety_checker: true,
-      },
-      FAL_KEY,
-    );
+    const sourceForFal = await prepareFalSourceImage(data.enrichmentId, data.imageUrl);
+    let shot: FalResp;
+    try {
+      shot = await callFal(
+        "fal-ai/bytedance/seedream/v4/edit",
+        {
+          image_urls: [sourceForFal.url],
+          prompt:
+            "Move the exact same product onto a pure white seamless studio background. The background color must be #FFFFFF, RGB 255,255,255 — no warm tint, no gradient, no paper texture. Keep the product identical to the input image: preserve every printed label, logo, brand name, illustration, color, material and proportions exactly as in the source — do NOT redraw, restyle or remove any packaging text or graphics. Add a soft realistic contact shadow directly under the product. Center the product, occupying about 70 percent of the frame with even margins. Sharp focus, professional e-commerce product photography, accurate colors. Avoid: cream background, beige, off-white, missing labels, blurred text, regenerated artwork.",
+          image_size: { width: 2560, height: 2560 },
+          num_images: 1,
+          sync_mode: true,
+          enable_safety_checker: true,
+        },
+        FAL_KEY,
+      );
+    } finally {
+      await supabaseAdmin.storage
+        .from("regenerated-images")
+        .remove([sourceForFal.path])
+        .catch(() => undefined);
+    }
     const generatedUrl = shot.images?.[0]?.url;
     if (!generatedUrl) throw new Error("FAL nie zwróciło zdjęcia");
 
