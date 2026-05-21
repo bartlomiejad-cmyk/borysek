@@ -1,4 +1,50 @@
-# Naprawa regeneracji teł dla URL-i ze spacjami/UTF-8
+# Poprawa promptu FAL: kadrowanie ~70% + usuwanie znaków wodnych
+
+## Problem
+
+`fal-ai/bytedance/seedream/v4/edit` ignoruje instrukcję, że produkt ma
+zajmować ~70% kadru — w wyniku produkt jest mały, zepchnięty w dół,
+z dużą pustą przestrzenią. Dodatkowo na źródłowych zdjęciach bywają
+znaki wodne sklepów (np. „bestgun.pl", „militaria"), które model
+przenosi do wygenerowanego zdjęcia.
+
+## Rozwiązanie
+
+Plik: `src/lib/pim/regen.functions.ts` — modyfikacja samego promptu
+w `regenerateMainImage` (`fal-ai/bytedance/seedream/v4/edit`):
+
+1. Mocniejsze, bardziej dosłowne instrukcje dotyczące kadrowania:
+   - „product must fill 70–75% of the frame height AND width",
+   - „scale the product UP so its longest edge spans ~75% of the canvas",
+   - „equal small margins on all four sides (~12–15% of canvas)",
+   - „centered both horizontally and vertically",
+   - „do NOT leave large empty space around the product",
+   - sekcja `Avoid:` rozszerzona o „tiny product, product smaller than
+     50% of frame, excessive whitespace, off-center composition,
+     product pushed to bottom/top".
+2. Dodanie instrukcji usuwania znaków wodnych:
+   - „Remove any watermarks, store logos, website URLs, photo
+     credits or overlay text that are NOT part of the physical product
+     packaging (e.g. shop names like 'bestgun.pl', 'militaria',
+     'gun-center', semi-transparent text across the image).",
+   - „Keep only the printed graphics that physically exist on the
+     product/packaging itself.",
+   - w `Avoid:` dopisać „visible watermarks, shop URLs, overlay text,
+     photo credits".
+
+Reszta logiki (`image_size` 2560×2560, `prepareFalSourceImage`,
+obsługa błędów 422, format wyjściowy) bez zmian.
+
+## Pliki do zmiany
+
+- `src/lib/pim/regen.functions.ts` — tylko ciąg `prompt` w wywołaniu
+  `seedream/v4/edit`.
+
+---
+
+# (Poprzednie ustalenia — bez zmian)
+
+## Naprawa regeneracji teł dla URL-i ze spacjami/UTF-8
 
 ## Problem
 
