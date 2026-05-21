@@ -30,7 +30,7 @@ function AuthLayout() {
   }, [navigate]);
 
   return (
-    <div className="relative min-h-screen flex w-full bg-background overflow-hidden">
+    <div className="relative min-h-screen flex w-full bg-background">
       {/* dekoracyjny glow */}
       <div
         aria-hidden
@@ -43,8 +43,8 @@ function AuthLayout() {
         style={{ background: "radial-gradient(closest-side, var(--accent), transparent)" }}
       />
 
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex sticky top-0 h-screen w-[260px] shrink-0 flex-col gap-2 border-r border-border/40 bg-card/40 backdrop-blur-xl px-4 py-5">
+      {/* Desktop sidebar (fixed, zawsze widoczny) */}
+      <aside className="hidden md:flex fixed left-0 top-0 z-30 h-screen w-[260px] flex-col gap-2 border-r border-border/40 bg-card/60 backdrop-blur-xl px-4 py-5">
         <SidebarBrand />
         <SidebarNav onNavigate={() => setMobileOpen(false)} />
         <div className="mt-auto">
@@ -56,7 +56,7 @@ function AuthLayout() {
       </aside>
 
       {/* Main column */}
-      <div className="relative flex-1 min-w-0 flex flex-col">
+      <div className="relative flex-1 min-w-0 flex flex-col md:ml-[260px]">
         {/* Mobile topbar */}
         <header className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-border/40 bg-background/70 backdrop-blur-xl px-4 h-14">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
