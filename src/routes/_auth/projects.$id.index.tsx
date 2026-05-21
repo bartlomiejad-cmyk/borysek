@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
+import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
   Download,
@@ -496,7 +497,7 @@ function ProjectPage() {
                               toast.success("Wygenerowano", { id });
                               refetchProducts();
                             } catch (e) {
-                              toast.error(e instanceof Error ? e.message : "Błąd", { id });
+                              toast.error(friendlyError(e, "Regeneracja nie powiodła się"), { id });
                             }
                           }}
                         >

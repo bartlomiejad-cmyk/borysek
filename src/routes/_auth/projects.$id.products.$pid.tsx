@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, friendlyError } from "@/lib/utils";
 import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff } from "lucide-react";
 import { ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -199,7 +199,7 @@ function ProductDetail() {
     mutationFn: (vars: { enrichmentId: string; imageUrl: string }) =>
       regenFn({ data: vars }),
     onSuccess: () => { toast.success("Zdjęcie zregenerowane"); invalidate(); },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd FAL.ai"),
+    onError: (e) => toast.error(friendlyError(e, "Regeneracja nie powiodła się")),
   });
 
   const clearRegenMut = useMutation({
