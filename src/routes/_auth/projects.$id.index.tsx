@@ -441,6 +441,18 @@ function ProjectPage() {
                         productId={p.id}
                         images={p.images ?? []}
                         extraImages={(p as { extra_image_urls?: string[] }).extra_image_urls ?? []}
+                        pinnedUrl={(p as { pinned_main_url?: string | null }).pinned_main_url ?? null}
+                        enrichmentId={(p as { enrichment_id?: string | null }).enrichment_id ?? null}
+                        onPin={async (url) => {
+                          const enId = (p as { enrichment_id?: string | null }).enrichment_id;
+                          if (!enId) {
+                            toast.error("Najpierw dopasuj i wygeneruj");
+                            return;
+                          }
+                          await pinFn({ data: { enrichmentId: enId, url } });
+                          toast.success(url ? "Ustawiono główne zdjęcie" : "Odpięto główne zdjęcie");
+                          refetchProducts();
+                        }}
                         onHide={async (url) => {
                           await hideImgFn({ data: { productId: p.id, url } });
                           toast.success("Zdjęcie ukryte");
@@ -465,11 +477,37 @@ function ProjectPage() {
                       <StatusBadge status={p.status as string} error={p.error} />
                     </TableCell>
                     <TableCell>
-                      <Button asChild size="sm" variant="ghost">
-                        <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }}>
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Regeneruj tło"
+                          disabled={
+                            !((p as { enrichment_id?: string | null }).enrichment_id) ||
+                            !(((p as { pinned_main_url?: string | null }).pinned_main_url) || (p.images ?? [])[0])
+                          }
+                          onClick={async () => {
+                            const enId = (p as { enrichment_id?: string | null }).enrichment_id;
+                            const url = (p as { pinned_main_url?: string | null }).pinned_main_url ?? (p.images ?? [])[0];
+                            if (!enId || !url) return;
+                            const id = toast.loading("Regeneruję tło...");
+                            try {
+                              await regenFn({ data: { enrichmentId: enId, imageUrl: url } });
+                              toast.success("Wygenerowano", { id });
+                              refetchProducts();
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : "Błąd", { id });
+                            }
+                          }}
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                        <Button asChild size="sm" variant="ghost">
+                          <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }}>
+                            <ArrowRight className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
