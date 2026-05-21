@@ -28,17 +28,20 @@ function AuthLayout() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-card">
-        <div className="container mx-auto flex items-center justify-between h-14 px-4">
-          <Link to="/projects" className="flex items-center gap-2 font-semibold">
-            <Boxes className="h-5 w-5" />
-            <span>AI Product Enricher</span>
+      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/70 backdrop-blur-xl">
+        <div className="container mx-auto flex items-center justify-between h-16 px-4">
+          <Link to="/projects" className="flex items-center gap-2.5 group">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform group-hover:scale-105">
+              <Boxes className="h-4 w-4" />
+            </span>
+            <span className="font-serif text-xl tracking-tight">AI Product Enricher</span>
           </Link>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-muted-foreground hidden sm:inline">{email}</span>
             <Button
               variant="ghost"
               size="sm"
+              className="rounded-full"
               onClick={async () => {
                 await supabase.auth.signOut();
                 navigate({ to: "/login" });
@@ -49,7 +52,9 @@ function AuthLayout() {
           </div>
         </div>
       </header>
-      <Outlet />
+      <main className="animate-fade-in">
+        <Outlet />
+      </main>
       <Toaster richColors />
     </div>
   );
