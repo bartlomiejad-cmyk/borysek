@@ -294,7 +294,7 @@ function ProductDetail() {
 
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold">{product.nazwa}</h1>
+          <h1 className="font-serif text-4xl tracking-tight">{product.nazwa}</h1>
           <p className="text-sm text-muted-foreground">
             EAN: {product.ean ?? "—"} · Kod: {product.kod ?? "—"} · ID: {product.ext_id ?? "—"}
           </p>

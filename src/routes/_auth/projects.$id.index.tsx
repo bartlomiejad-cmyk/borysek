@@ -293,7 +293,7 @@ function ProjectPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{meta?.project.name ?? "..."}</h1>
+          <h1 className="font-serif text-5xl tracking-tight">{meta?.project.name ?? "..."}</h1>
           <p className="text-sm text-muted-foreground">
             {meta?.counts.source_products ?? 0} produktów · {meta?.counts.search_results ?? 0} zapytań ·{" "}
             {meta?.counts.product_sources ?? 0} stron źródłowych · {meta?.counts.enrichments_done ?? 0} złotych rekordów
