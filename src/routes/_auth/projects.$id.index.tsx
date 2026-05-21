@@ -915,7 +915,22 @@ function ProductThumbs({
                 onMouseEnter={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
                   ensureDims(url);
-                  setHovered({ url, x: r.right + 8, y: r.top });
+                  const PREVIEW_W = 320;
+                  const PREVIEW_H = 360;
+                  const GAP = 4;
+                  const vw = window.innerWidth;
+                  const vh = window.innerHeight;
+                  let x = r.right + GAP;
+                  if (x + PREVIEW_W + 8 > vw) {
+                    x = r.left - PREVIEW_W - GAP;
+                  }
+                  x = Math.max(8, Math.min(x, vw - PREVIEW_W - 8));
+                  let y = r.top;
+                  if (y + PREVIEW_H + 8 > vh) {
+                    y = vh - PREVIEW_H - 8;
+                  }
+                  y = Math.max(8, y);
+                  setHovered({ url, x, y });
                 }}
                 onMouseLeave={() => setHovered((h) => (h?.url === url ? null : h))}
               >
