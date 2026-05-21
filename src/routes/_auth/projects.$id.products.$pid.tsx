@@ -57,6 +57,7 @@ function ProductDetail() {
   const [features, setFeatures] = useState<Array<{ key: string; value: string }>>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
   const analyzedKeyRef = useRef<string>("");
 
   useEffect(() => {
