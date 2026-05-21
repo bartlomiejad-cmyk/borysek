@@ -91,8 +91,6 @@ function ProjectPage() {
   const { data: products = [], refetch: refetchProducts } = useQuery({
     queryKey: ["project", id, "products"],
     queryFn: () => listFn({ data: { projectId: id } }),
-    staleTime: 0,
-    refetchOnMount: "always",
   });
 
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
