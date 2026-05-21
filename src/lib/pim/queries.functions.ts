@@ -184,8 +184,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
         for (const u of ex) if (!allExtra.includes(u)) allExtra.push(u);
       }
       // Gallery shows everything the list shows: drop only hidden URLs.
-      // Strict size filtering (pickImages) is reserved for export.
-      void meta;
+      // Strict size filtering is reserved for export.
       const allowedMain = new Set(allMain.filter((u) => !hidden.has(u)));
       const allowedExtra = new Set(
         includeExtra ? allExtra.filter((u) => !hidden.has(u)) : [],
