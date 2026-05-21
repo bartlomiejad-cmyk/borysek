@@ -2,6 +2,14 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+// WASM modules — imported directly so workerd bundles them at build time.
+// (Dynamic fetch of .wasm at runtime is not supported in the Worker.)
+// @ts-expect-error — .wasm imports return WebAssembly.Module under the CF Vite plugin.
+import JPEG_DEC_WASM from "@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm";
+// @ts-expect-error
+import PNG_WASM from "@jsquash/png/codec/pkg/squoosh_png_bg.wasm";
+// @ts-expect-error
+import WEBP_ENC_WASM from "@jsquash/webp/codec/enc/webp_enc.wasm";
 
 const FAL_BASE = "https://fal.run";
 
@@ -27,34 +35,32 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   return (await res.json()) as FalResp;
 }
 
-const TARGET_SIZE = 2560;
-
 async function convertToWebp(
   bytes: Uint8Array,
   contentType: string,
 ): Promise<Uint8Array> {
-  const [{ default: decodeJpeg }, { default: decodePng }, { default: encodeWebp }, { default: resize }] = await Promise.all([
+  const [jpegMod, pngMod, webpMod] = await Promise.all([
     import("@jsquash/jpeg/decode"),
     import("@jsquash/png/decode"),
     import("@jsquash/webp/encode"),
-    import("@jsquash/resize"),
+  ]);
+  await Promise.all([
+    jpegMod.init(JPEG_DEC_WASM as WebAssembly.Module),
+    pngMod.init(PNG_WASM as WebAssembly.Module),
+    webpMod.init(WEBP_ENC_WASM as WebAssembly.Module),
   ]);
 
   const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   let img: ImageData;
   const isPng = contentType.includes("png");
   try {
-    img = isPng ? await decodePng(ab) : await decodeJpeg(ab);
+    img = isPng ? await pngMod.default(ab) : await jpegMod.default(ab);
   } catch {
     // Try the other decoder as a fallback.
-    img = isPng ? await decodeJpeg(ab) : await decodePng(ab);
+    img = isPng ? await jpegMod.default(ab) : await pngMod.default(ab);
   }
 
-  if (img.width !== TARGET_SIZE || img.height !== TARGET_SIZE) {
-    img = await resize(img, { width: TARGET_SIZE, height: TARGET_SIZE, method: "lanczos3" });
-  }
-
-  const out = await encodeWebp(img, { quality: 88 });
+  const out = await webpMod.default(img, { quality: 88 });
   return new Uint8Array(out);
 }
 
