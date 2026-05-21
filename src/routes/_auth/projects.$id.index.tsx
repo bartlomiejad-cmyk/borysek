@@ -744,18 +744,28 @@ function downloadBlob(blob: Blob, name: string) {
 function ProductThumbs({
   images,
   extraImages,
+  pinnedUrl,
+  enrichmentId,
+  onPin,
   onHide,
 }: {
   productId: string;
   images: string[];
   extraImages?: string[];
+  pinnedUrl?: string | null;
+  enrichmentId?: string | null;
+  onPin?: (url: string | null) => void | Promise<void>;
   onHide: (url: string) => void | Promise<void>;
 }) {
   const MAX = 8;
-  const top = images.slice(0, MAX);
-  const overflow = Math.max(0, images.length - top.length);
+  const ordered = pinnedUrl && images.includes(pinnedUrl)
+    ? [pinnedUrl, ...images.filter((u) => u !== pinnedUrl)]
+    : images;
+  const top = ordered.slice(0, MAX);
+  const overflow = Math.max(0, ordered.length - top.length);
   const extraSet = new Set(extraImages ?? []);
   const [hovered, setHovered] = useState<{ url: string; x: number; y: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const dimsRef = useRef<Map<string, { w: number; h: number }>>(new Map());
   const [, force] = useState(0);
   const ensureDims = (url: string) => {
@@ -775,8 +785,25 @@ function ProductThumbs({
     );
   }
   const dims = hovered ? dimsRef.current.get(hovered.url) : undefined;
+  const canPin = !!enrichmentId && !!onPin;
   return (
-    <div className="flex flex-wrap gap-1 relative max-w-[260px]">
+    <div
+      className={`flex flex-wrap gap-1 relative max-w-[260px] rounded p-0.5 transition-colors ${dragOver ? "bg-primary/10 ring-2 ring-primary" : ""}`}
+      onDragOver={(e) => {
+        if (!canPin) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        setDragOver(false);
+        if (!canPin) return;
+        const url = e.dataTransfer.getData("text/plain");
+        if (!url || !top.includes(url)) return;
+        e.preventDefault();
+        void onPin!(url);
+      }}
+    >
       {top.map((url) => (
         <div key={url} className="relative group">
           <Dialog>
@@ -784,6 +811,12 @@ function ProductThumbs({
               <button
                 type="button"
                 className="block"
+                draggable={canPin}
+                onDragStart={(e) => {
+                  if (!canPin) return;
+                  e.dataTransfer.setData("text/plain", url);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
                 onMouseEnter={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
                   ensureDims(url);
@@ -795,8 +828,13 @@ function ProductThumbs({
                   src={url}
                   alt=""
                   loading="lazy"
-                  className={`h-10 w-10 object-cover rounded border hover:opacity-80 ${extraSet.has(url) ? "ring-2 ring-amber-400" : ""}`}
+                  className={`h-10 w-10 object-cover rounded border hover:opacity-80 ${pinnedUrl === url ? "ring-2 ring-primary" : extraSet.has(url) ? "ring-2 ring-amber-400" : ""}`}
                 />
+                {pinnedUrl === url && (
+                  <span className="absolute -top-1 -left-1 bg-primary text-primary-foreground text-[8px] font-bold px-1 rounded leading-tight">
+                    główne
+                  </span>
+                )}
                 {extraSet.has(url) && (
                   <span className="absolute -bottom-1 -left-1 bg-amber-400 text-[8px] font-bold text-black px-1 rounded leading-tight">
                     extra
@@ -816,6 +854,19 @@ function ProductThumbs({
               </a>
             </DialogContent>
           </Dialog>
+          {canPin && (
+            <button
+              type="button"
+              title={pinnedUrl === url ? "Odepnij główne" : "Ustaw jako główne"}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onPin!(pinnedUrl === url ? null : url);
+              }}
+              className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 ${pinnedUrl === url ? "bg-primary text-primary-foreground opacity-100" : "bg-background border"}`}
+            >
+              {pinnedUrl === url ? <PinOff className="h-2.5 w-2.5" /> : <Pin className="h-2.5 w-2.5" />}
+            </button>
+          )}
           <button
             type="button"
             title="Ukryj zdjęcie"
