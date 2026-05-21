@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
+import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
@@ -42,6 +43,7 @@ function ProductDetail() {
   const analyzeFn = useServerFn(analyzeProductImages);
   const regenFn = useServerFn(regenerateMainImage);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
+  const pinFn = useServerFn(setPinnedMainImage);
 
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
@@ -119,10 +121,15 @@ function ProductDetail() {
   const sortedGlobal = [...allVisible].sort((a, b) => scoreFor(b) - scoreFor(a));
   // Najpierw najlepszy wg rankingu; jeśli ranking nic nie daje, pierwsze niezukrytych zdjęcie ze źródeł.
   const hiddenSet = new Set((((data as { hidden_images?: string[] } | undefined)?.hidden_images) ?? []) as string[]);
-  const mainUrl =
+  const pinnedMainUrl = (((data as { pinned_main_url?: string | null } | undefined)?.pinned_main_url) ?? null) as string | null;
+  const autoMainUrl =
     sortedGlobal.find((u) => scoreFor(u) > 0 && !hiddenSet.has(u)) ??
     allVisible.find((u) => !hiddenSet.has(u)) ??
     null;
+  const mainUrl =
+    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && allVisible.includes(pinnedMainUrl))
+      ? pinnedMainUrl
+      : autoMainUrl;
 
   const regenAll = useMutation({
     mutationFn: () => genFn({ data: { productId: pid, mode: "all" } }),
@@ -195,6 +202,12 @@ function ProductDetail() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
+  const pinMut = useMutation({
+    mutationFn: (vars: { enrichmentId: string; url: string | null }) => pinFn({ data: vars }),
+    onSuccess: () => { invalidate(); },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
   if (isLoading || !data) return <main className="p-6">Ładowanie...</main>;
   const { product, enrichment, sources } = data;
   const hiddenImages = ((data as { hidden_images?: string[] }).hidden_images ?? []) as string[];
@@ -205,6 +218,7 @@ function ProductDetail() {
   const renderThumb = (u: string, extra: boolean) => {
     const s = imageScores[u];
     const isMain = u === mainUrl;
+    const isPinned = u === pinnedMainUrl;
     return (
       <div
         key={u}
@@ -216,10 +230,27 @@ function ProductDetail() {
         <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
         {isMain && (
           <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded shadow flex items-center gap-1">
-            <Crown className="h-2.5 w-2.5" /> Główne
+            <Crown className="h-2.5 w-2.5" /> Główne{isPinned ? " (przypięte)" : ""}
           </span>
         )}
         {extra && <Badge variant="outline" className="absolute top-0 left-0 text-[10px] px-1 py-0">extra</Badge>}
+        {enrichment && (
+          <button
+            onClick={() =>
+              pinMut.mutate({
+                enrichmentId: enrichment.id,
+                url: isPinned ? null : u,
+              })
+            }
+            className={cn(
+              "absolute bottom-0 left-0 rounded p-0.5 transition opacity-0 group-hover:opacity-100",
+              isPinned ? "bg-emerald-600 text-white opacity-100" : "bg-background/90 border",
+            )}
+            title={isPinned ? "Odepnij zdjęcie główne" : "Ustaw jako główne"}
+          >
+            {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+          </button>
+        )}
         <button
           onClick={() => hideMut.mutate(u)}
           className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded p-0.5 opacity-0 group-hover:opacity-100 transition"

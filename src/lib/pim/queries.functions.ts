@@ -172,6 +172,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       include_extra_images: includeExtra,
       image_meta: meta,
       image_scores,
+      pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
     };
   });
 
