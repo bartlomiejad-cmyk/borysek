@@ -101,3 +101,21 @@ export const hideImageByProduct = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+export const setPinnedMainImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      enrichmentId: z.string().uuid(),
+      url: z.string().url().nullable(),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { error } = await supabase
+      .from("enrichments")
+      .update({ pinned_main_url: data.url } as never)
+      .eq("id", data.enrichmentId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
