@@ -79,6 +79,8 @@ function ProductDetail() {
   const imageScores = (((data as { image_scores?: Record<string, ImgScore> } | undefined)?.image_scores) ?? {}) as Record<string, ImgScore>;
 
   const allVisible: string[] = [];
+  const regenUrlEarly = (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null;
+  if (regenUrlEarly) allVisible.push(regenUrlEarly);
   if (data?.sources) {
     for (const s of data.sources) {
       for (const u of s.images) if (!allVisible.includes(u)) allVisible.push(u);
@@ -125,7 +127,7 @@ function ProductDetail() {
   // Najpierw najlepszy wg rankingu; jeśli ranking nic nie daje, pierwsze niezukrytych zdjęcie ze źródeł.
   const hiddenSet = new Set((((data as { hidden_images?: string[] } | undefined)?.hidden_images) ?? []) as string[]);
   const pinnedMainUrl = (((data as { pinned_main_url?: string | null } | undefined)?.pinned_main_url) ?? null) as string | null;
-  const regeneratedMainUrl = (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null;
+  const regeneratedMainUrl = regenUrlEarly;
   const autoMainUrl =
     sortedGlobal.find((u) => scoreFor(u) > 0 && !hiddenSet.has(u)) ??
     allVisible.find((u) => !hiddenSet.has(u)) ??
