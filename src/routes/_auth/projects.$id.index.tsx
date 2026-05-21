@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
+import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
   Download,
