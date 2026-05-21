@@ -125,7 +125,7 @@ function pickThumbsForList(
     seen.add(u);
     out.push(u);
   };
-  if (pinned && candidates.includes(pinned)) push(pinned);
+  if (pinned && !hidden.has(pinned)) push(pinned);
   for (const u of big) push(u);
   for (const u of rest) push(u);
   return out;
