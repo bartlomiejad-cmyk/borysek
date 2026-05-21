@@ -27,6 +27,37 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   return (await res.json()) as FalResp;
 }
 
+const TARGET_SIZE = 2560;
+
+async function convertToWebp(
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<Uint8Array> {
+  const [{ default: decodeJpeg }, { default: decodePng }, { default: encodeWebp }, { default: resize }] = await Promise.all([
+    import("@jsquash/jpeg/decode"),
+    import("@jsquash/png/decode"),
+    import("@jsquash/webp/encode"),
+    import("@jsquash/resize"),
+  ]);
+
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  let img: ImageData;
+  const isPng = contentType.includes("png");
+  try {
+    img = isPng ? await decodePng(ab) : await decodeJpeg(ab);
+  } catch {
+    // Try the other decoder as a fallback.
+    img = isPng ? await decodeJpeg(ab) : await decodePng(ab);
+  }
+
+  if (img.width !== TARGET_SIZE || img.height !== TARGET_SIZE) {
+    img = await resize(img, { width: TARGET_SIZE, height: TARGET_SIZE, method: "lanczos3" });
+  }
+
+  const out = await encodeWebp(img, { quality: 88 });
+  return new Uint8Array(out);
+}
+
 export const regenerateMainImage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) =>
@@ -59,37 +90,25 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const generatedUrl = shot.images?.[0]?.url;
     if (!generatedUrl) throw new Error("FAL nie zwróciło zdjęcia");
 
-    // Step 2 — konwersja do WebP 2560x2560. Jeśli image-conversion nie zadziała,
-    // wracamy do surowego outputu bria (JPEG) — nie blokuje użytkownika.
-    let finalUrl = generatedUrl;
+    // Step 2 — pobierz oryginał z FAL.
+    const fileRes = await fetch(generatedUrl);
+    if (!fileRes.ok) throw new Error(`Pobranie pliku FAL nieudane (${fileRes.status})`);
+    const srcContentType = fileRes.headers.get("content-type") ?? "image/jpeg";
+    const srcBytes = new Uint8Array(await fileRes.arrayBuffer());
+
+    // Step 3 — konwersja do WebP 2560x2560 po naszej stronie (WASM).
+    // W razie awarii WASM wracamy do surowego JPEG, żeby nie blokować użytkownika.
+    let bytes: Uint8Array = srcBytes;
     let ext: "webp" | "jpg" = "jpg";
-    let contentType = "image/jpeg";
+    let contentType = srcContentType;
     try {
-      const conv = await callFal(
-        "fal-ai/imageutils/image-conversion",
-        {
-          image_url: generatedUrl,
-          format: "webp",
-          width: 2560,
-          height: 2560,
-          sync_mode: true,
-        },
-        FAL_KEY,
-      );
-      const convUrl = conv.image?.url ?? conv.images?.[0]?.url;
-      if (convUrl) {
-        finalUrl = convUrl;
-        ext = "webp";
-        contentType = "image/webp";
-      }
+      bytes = await convertToWebp(srcBytes, srcContentType);
+      ext = "webp";
+      contentType = "image/webp";
     } catch (e) {
-      console.warn("[regen] image-conversion failed, falling back to bria output", e);
+      console.warn("[regen] local webp conversion failed, uploading source bytes", e);
     }
 
-    // Step 3 — pobierz bajty i wgraj do publicznego bucketu.
-    const fileRes = await fetch(finalUrl);
-    if (!fileRes.ok) throw new Error(`Pobranie pliku FAL nieudane (${fileRes.status})`);
-    const bytes = new Uint8Array(await fileRes.arrayBuffer());
     const path = `${data.enrichmentId}.${ext}`;
 
     // Wyczyść stare warianty (gdyby poprzednio był JPG, a teraz WebP itp.).
@@ -110,7 +129,10 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
 
     const { error: dbErr } = await context.supabase
       .from("enrichments")
-      .update({ regenerated_main_image: publicUrl } as never)
+      .update({
+        regenerated_main_image: publicUrl,
+        pinned_main_url: publicUrl,
+      } as never)
       .eq("id", data.enrichmentId);
     if (dbErr) throw new Error(dbErr.message);
 
@@ -125,9 +147,19 @@ export const clearRegeneratedImage = createServerFn({ method: "POST" })
       .from("regenerated-images")
       .remove([`${data.enrichmentId}.webp`, `${data.enrichmentId}.jpg`])
       .catch(() => undefined);
+    // Pobierz aktualny stan, żeby odpiąć pin tylko jeśli wskazywał na regen.
+    const { data: cur } = await context.supabase
+      .from("enrichments")
+      .select("pinned_main_url, regenerated_main_image")
+      .eq("id", data.enrichmentId)
+      .maybeSingle();
+    const pinned = (cur as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null;
+    const regen = (cur as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null;
+    const patch: Record<string, unknown> = { regenerated_main_image: null };
+    if (pinned && regen && pinned === regen) patch.pinned_main_url = null;
     const { error } = await context.supabase
       .from("enrichments")
-      .update({ regenerated_main_image: null } as never)
+      .update(patch as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
     return { ok: true };
