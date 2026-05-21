@@ -401,6 +401,60 @@ function ProductDetail() {
               )}
             </div>
 
+            {/* Galeria wybranych zdjęć ze wszystkich dopasowanych źródeł */}
+            <div className="rounded border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Wybrane zdjęcia</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {allVisible.filter((u) => !hiddenSet.has(u)).length} widocznych
+                  {hiddenImages.length ? ` · ${hiddenImages.length} ukrytych` : ""}
+                </p>
+              </div>
+              {(() => {
+                const visible = allVisible.filter((u) => !hiddenSet.has(u));
+                const sorted = [...visible].sort((a, b) => {
+                  if (a === mainUrl) return -1;
+                  if (b === mainUrl) return 1;
+                  return scoreFor(b) - scoreFor(a);
+                });
+                if (!sorted.length) {
+                  return (
+                    <p className="text-[11px] text-muted-foreground italic">
+                      Brak zdjęć z dopasowanych źródeł.
+                    </p>
+                  );
+                }
+                const extraSet = new Set<string>();
+                for (const s of sources ?? []) for (const u of s.extra_images) extraSet.add(u);
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {sorted.map((u) => renderThumb(u, extraSet.has(u)))}
+                  </div>
+                );
+              })()}
+              {hiddenImages.length > 0 && (
+                <details className="pt-1">
+                  <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
+                    Pokaż ukryte ({hiddenImages.length})
+                  </summary>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 opacity-60">
+                    {hiddenImages.map((u) => (
+                      <div key={u} className="relative group rounded border p-0.5">
+                        <img src={u} alt="" className="h-24 w-24 rounded object-cover grayscale" />
+                        <button
+                          onClick={() => unhideMut.mutate(u)}
+                          className="absolute top-0 right-0 bg-background border rounded p-0.5 opacity-0 group-hover:opacity-100 transition"
+                          title="Przywróć"
+                        >
+                          <Undo2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nazwa</label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Wygeneruj lub wpisz nazwę" />
