@@ -1,3 +1,37 @@
+# Wymuszenie czystej bieli #FFFFFF jako tła
+
+## Problem
+
+Mimo instrukcji „pure white seamless studio background" model
+`seedream/v4/edit` często zwraca tło kremowe / lekko beżowe / ciepłe
+(off-white). Użytkownik wymaga BEZWZGLĘDNIE czystej bieli #FFFFFF.
+
+## Rozwiązanie
+
+Plik: `src/lib/pim/regen.functions.ts` — wzmocnienie sekcji o tle w
+promptcie `regenerateMainImage` (`seedream/v4/edit`):
+
+1. Mocniejsze, powtórzone instrukcje na samym początku promptu:
+   - „Background MUST be PURE WHITE #FFFFFF (RGB 255,255,255) — absolutely no cream, no beige, no ivory, no off-white, no warm tint, no cool tint, no gray, no gradient, no vignette, no paper texture, no shadow on the background itself."
+   - „If in doubt, make the background BRIGHTER and WHITER, not warmer."
+   - „The four corners of the canvas must be exactly #FFFFFF."
+2. Rozszerzenie sekcji `Avoid:`:
+   - dopisać: „cream background, beige background, ivory background, off-white background, warm background, gray background, any background that is not exact #FFFFFF, any tint or color cast on the background, vignette, paper texture on the background".
+3. Zostawić istniejące instrukcje dotyczące kadrowania (~70–75%),
+   centrowania, usuwania znaków wodnych, miękkiego cienia pod
+   produktem — bez zmian.
+4. Bez zmian w pozostałej logice: `prepareFalSourceImage`,
+   `image_size` 2560×2560, obsługa 422, format wyjściowy.
+
+## Pliki do zmiany
+
+- `src/lib/pim/regen.functions.ts` — tylko ciąg `prompt` w wywołaniu
+  `seedream/v4/edit`.
+
+---
+
+# (Poprzednie ustalenia — bez zmian)
+
 # Poprawa promptu FAL: kadrowanie ~70% + usuwanie znaków wodnych
 
 ## Problem
