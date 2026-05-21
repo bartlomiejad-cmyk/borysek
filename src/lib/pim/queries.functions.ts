@@ -21,7 +21,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -64,13 +64,14 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       const picked = (e?.picked_urls as string[] | undefined) ?? [];
       const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
       const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
+      const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
       const allFromSources: string[] = [];
       for (const u of picked) {
         for (const img of imgMap.get(u) ?? []) {
           if (!allFromSources.includes(img)) allFromSources.push(img);
         }
       }
-      const images = pickImages(allFromSources, meta, hidden).slice(0, 8);
+      const images = pickThumbsForList(allFromSources, meta, hidden, pinned, 12);
       return {
         ...p,
         status: e?.status ?? "PENDING",
@@ -83,6 +84,8 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         extra_image_urls: images.filter((u) => extraSet.has(u)),
         picked_urls: picked,
         enrichment_id: (e as { id?: string } | undefined)?.id ?? null,
+        pinned_main_url: pinned,
+        regenerated_main_image: ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image ?? null) as string | null,
         golden_features: ((e as { golden_features?: unknown } | undefined)?.golden_features ?? []) as Array<{ key: string; value: string }>,
         quality: ((e as { quality?: unknown } | undefined)?.quality ?? null) as unknown as null | {
           watermark_urls?: string[];
@@ -93,6 +96,40 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       };
     });
   });
+
+function pickThumbsForList(
+  urls: string[],
+  meta: ImageMeta,
+  hidden: Set<string>,
+  pinned: string | null,
+  max: number,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const candidates = urls.filter((u) => !hidden.has(u));
+  const area = (u: string) => {
+    const m = meta[u];
+    return m ? m.w * m.h : 0;
+  };
+  const big: string[] = [];
+  const rest: string[] = [];
+  for (const u of candidates) {
+    const m = meta[u];
+    if (m && Math.min(m.w, m.h) >= 600) big.push(u);
+    else rest.push(u);
+  }
+  big.sort((a, b) => area(b) - area(a));
+  rest.sort((a, b) => area(b) - area(a));
+  const push = (u: string) => {
+    if (!u || seen.has(u) || out.length >= max) return;
+    seen.add(u);
+    out.push(u);
+  };
+  if (pinned && candidates.includes(pinned)) push(pinned);
+  for (const u of big) push(u);
+  for (const u of rest) push(u);
+  return out;
+}
 
 export const getProductDetail = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
