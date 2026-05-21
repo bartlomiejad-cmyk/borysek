@@ -560,14 +560,36 @@ function ProductDetail() {
             <h2 className="font-semibold flex items-center gap-2">
               Źródła ({sources.length})
             </h2>
-            {analyzing && (
-              <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
-                <Loader2 className="h-3 w-3 animate-spin" /> AI analizuje kompozycję zdjęć…
-              </span>
-            )}
-            {!analyzing && aiUnavailable && (
-              <span className="text-xs text-muted-foreground">Sortowanie po rozdzielczości (AI niedostępne)</span>
-            )}
+            <div className="flex items-center gap-2">
+              {analyzing && (
+                <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" /> AI analizuje…
+                </span>
+              )}
+              {!analyzing && aiUnavailable && (
+                <span className="text-xs text-muted-foreground">Sort po rozdzielczości</span>
+              )}
+              {sources.length > 0 && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="rounded-full h-7 px-3 text-xs"
+                    onClick={() => setOpenSources(Object.fromEntries(sources.map((s) => [s.url, true])))}
+                  >
+                    Rozwiń
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="rounded-full h-7 px-3 text-xs"
+                    onClick={() => setOpenSources({})}
+                  >
+                    Zwiń
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
           {sources.length === 0 && (
             <Card><CardContent className="py-6 text-sm text-muted-foreground">
@@ -579,48 +601,79 @@ function ProductDetail() {
               ...s.images.map((u) => ({ u, extra: false })),
               ...s.extra_images.map((u) => ({ u, extra: true })),
             ].sort((a, b) => scoreFor(b.u) - scoreFor(a.u));
+            const isOpen = openSources[s.url] ?? i === 0;
+            const headThumb = combined[0]?.u;
             return (
-              <Card key={s.url}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <CardTitle className="text-base">
-                        <span className="text-muted-foreground mr-2">#{i + 1}</span>
-                        {s.title ?? "(brak tytułu)"}
-                      </CardTitle>
-                      <a
-                        href={s.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 truncate max-w-full"
+              <Card key={s.url} className="overflow-hidden">
+                <Collapsible
+                  open={isOpen}
+                  onOpenChange={(o) => setOpenSources((m) => ({ ...m, [s.url]: o }))}
+                >
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                    >
+                      {headThumb ? (
+                        <img
+                          src={headThumb}
+                          alt=""
+                          loading="lazy"
+                          className="h-12 w-12 rounded-xl object-cover bg-muted shrink-0"
+                        />
+                      ) : (
+                        <span className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center shrink-0">
+                          <ImageOff className="h-4 w-4 text-muted-foreground" />
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">
+                          <span className="text-muted-foreground mr-2">#{i + 1}</span>
+                          {s.title ?? "(brak tytułu)"}
+                        </div>
+                        <div className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-full">
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{s.url}</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
+                        {combined.length} zdj.
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 text-muted-foreground transition-transform shrink-0",
+                          isOpen && "rotate-180",
+                        )}
+                      />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className="space-y-3 pt-0">
+                      {combined.length > 0 ? (
+                        <div className="flex flex-wrap gap-3">
+                          {combined.map(({ u, extra }) => renderThumb(u, extra))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <ImageOff className="h-3 w-3" /> brak zdjęć{!includeExtra ? " (extra wyłączone)" : ""}
+                        </div>
+                      )}
+                      <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30">
+                        {s.description ?? "(brak opisu)"}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-full"
+                        disabled={regenSingle.isPending}
+                        onClick={() => regenSingle.mutate(s.url)}
                       >
-                        <ExternalLink className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{s.url}</span>
-                      </a>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {combined.length > 0 ? (
-                    <div className="flex flex-wrap gap-3">
-                      {combined.map(({ u, extra }) => renderThumb(u, extra))}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground"><ImageOff className="h-3 w-3" /> brak zdjęć{!includeExtra ? " (extra wyłączone)" : ""}</div>
-                  )}
-                  <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border rounded p-2 bg-muted/30">
-                    {s.description ?? "(brak opisu)"}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={regenSingle.isPending}
-                    onClick={() => regenSingle.mutate(s.url)}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Regeneruj tylko z tego źródła
-                  </Button>
-                </CardContent>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Regeneruj tylko z tego źródła
+                      </Button>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Collapsible>
               </Card>
             );
           })}
