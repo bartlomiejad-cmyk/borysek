@@ -20,6 +20,13 @@ import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage } from "@/lib/pim/regen.functions";
+import {
+  getMediaSettings,
+  saveMediaSettings,
+  regenerateMedia,
+  type MainImageRule,
+  type MediaSettings,
+} from "@/lib/pim/media.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,10 +99,17 @@ function ProjectPage() {
   const hideImgFn = useServerFn(hideImageByProduct);
   const pinFn = useServerFn(setPinnedMainImage);
   const regenFn = useServerFn(regenerateMainImage);
+  const regenMediaFn = useServerFn(regenerateMedia);
+  const getMediaFn = useServerFn(getMediaSettings);
+  const saveMediaFn = useServerFn(saveMediaSettings);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
     queryFn: () => getFn({ data: { id } }),
+  });
+  const { data: mediaSettings } = useQuery({
+    queryKey: ["project", id, "media-settings"],
+    queryFn: () => getMediaFn({ data: { projectId: id } }),
   });
   const { data: products = [], refetch: refetchProducts } = useQuery({
     queryKey: ["project", id, "products"],
@@ -266,19 +280,17 @@ function ProjectPage() {
   const regenerateAll = async (productIds?: string[]) => {
     const idSet = productIds ? new Set(productIds) : null;
     const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
-    const targets = source
-      .map((p) => ({
-        enrichmentId: (p as { enrichment_id?: string | null }).enrichment_id ?? null,
-        url:
-          (p as { pinned_main_url?: string | null }).pinned_main_url ??
-          ((p.images ?? [])[0] ?? null),
-      }))
-      .filter((t): t is { enrichmentId: string; url: string } => !!t.enrichmentId && !!t.url);
+    const targets = source.filter((p) => !!(p as { enrichment_id?: string | null }).enrichment_id);
     if (!targets.length) {
       toast.info("Brak produktów do regeneracji");
       return;
     }
-    if (!confirm(`Zregenerować tła dla ${targets.length} produktów? To zużyje kredyty FAL.`)) return;
+    if (!mediaSettings?.component_a?.trim()) {
+      toast.error("Skonfiguruj Komponent A w Ustawieniach → Zdjęcia AI");
+      return;
+    }
+    const max = mediaSettings.max_gallery_images ?? 0;
+    if (!confirm(`Zregenerować zdjęcia dla ${targets.length} produktów? Do ${1 + max} generacji FAL na produkt.`)) return;
     setRegenProgress({ done: 0, total: targets.length });
     let done = 0;
     let failed = 0;
@@ -288,7 +300,7 @@ function ProjectPage() {
         const t = queue.shift();
         if (!t) break;
         try {
-          await regenFn({ data: { enrichmentId: t.enrichmentId, imageUrl: t.url } });
+          await regenMediaFn({ data: { productId: t.id } });
         } catch (e) {
           console.warn("regen failed", t, e);
           failed++;
@@ -297,7 +309,7 @@ function ProjectPage() {
         setRegenProgress({ done, total: targets.length });
       }
     };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    await Promise.all(Array.from({ length: 2 }, worker));
     setRegenProgress(null);
     toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
     refetchProducts();
