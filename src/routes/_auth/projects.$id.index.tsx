@@ -865,6 +865,71 @@ function SettingsCard({
             <Trash2 className="h-4 w-4 mr-2" /> Reset widoku
           </Button>
         </div>
+        <div className="pt-4 border-t space-y-3">
+          <h3 className="font-semibold text-base">Zdjęcia AI</h3>
+          <p className="text-xs text-muted-foreground">
+            Ustawienia pipeline'u regeneracji teł (FAL + klasyfikacja Gemini).
+          </p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <Label>Komponent A (wymagane)</Label>
+              <Input value={compA} onChange={(e) => setCompA(e.target.value)} placeholder="np. Pudełko amunicji" maxLength={200} />
+            </div>
+            <div>
+              <Label>Komponent B (opcjonalnie)</Label>
+              <Input value={compB} onChange={(e) => setCompB(e.target.value)} placeholder="np. Naboje" maxLength={200} />
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <Label>Reguła miniatury</Label>
+              <Select value={rule} onValueChange={(v) => setRule(v as MainImageRule)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ONLY_A">Tylko Komponent A</SelectItem>
+                  <SelectItem value="A_AND_B_EXISTING">A + B (jeśli istnieje w jednym kadrze)</SelectItem>
+                  <SelectItem value="COMPOSITE_A_AND_B">Kompozycja A + B (FAL łączy)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Limit zdjęć w galerii AI (0-12)</Label>
+              <Input type="number" min={0} max={12} value={maxGallery} onChange={(e) => setMaxGallery(Math.max(0, Math.min(12, parseInt(e.target.value) || 0)))} />
+            </div>
+            <div>
+              <Label>Rozdzielczość (px, 512-4096)</Label>
+              <Input type="number" min={512} max={4096} step={64} value={resolution} onChange={(e) => setResolution(Math.max(512, Math.min(4096, parseInt(e.target.value) || 2560)))} />
+            </div>
+            <div>
+              <Label>Wypełnienie kadru ({padding}%)</Label>
+              <Input type="range" min={30} max={95} value={padding} onChange={(e) => setPadding(parseInt(e.target.value))} />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch checked={shadow} onCheckedChange={setShadow} id="ai-shadow" />
+            <Label htmlFor="ai-shadow" className="cursor-pointer">Sztuczny cień pod produktem</Label>
+          </div>
+          <div>
+            <Label>Dodatkowy prompt stylistyczny (opcjonalnie)</Label>
+            <Textarea value={styleP} onChange={(e) => setStyleP(e.target.value)} rows={3} maxLength={2000} placeholder="np. Studio look, efekt 3D render, delikatny rim light od góry." />
+          </div>
+          <Button
+            onClick={() =>
+              onSaveMedia({
+                component_a: compA.trim(),
+                component_b: compB.trim() || null,
+                main_image_rule: rule,
+                target_resolution: resolution,
+                padding_percent: padding,
+                max_gallery_images: maxGallery,
+                apply_shadow: shadow,
+                custom_style_prompt: styleP.trim() || null,
+              })
+            }
+          >
+            Zapisz ustawienia AI
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
