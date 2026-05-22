@@ -279,6 +279,11 @@ function ProductDetail() {
                 <span className={cn("text-[10px] px-1 py-0 rounded border", scoreToneClass(s.is_clean))} title="Czystość tła">
                   T {s.is_clean}/10
                 </span>
+                {typeof s.has_packaging === "number" && (
+                  <span className={cn("text-[10px] px-1 py-0 rounded border", scoreToneClass(s.has_packaging))} title="Pudełko + produkt razem">
+                    P {s.has_packaging}/10
+                  </span>
+                )}
               </>
             )
           ) : top4.includes(u) && analyzing ? (
