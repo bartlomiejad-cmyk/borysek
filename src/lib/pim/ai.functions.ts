@@ -573,6 +573,7 @@ export const verifyProduct = createServerFn({ method: "POST" })
 const ImageScoreSchema = z.object({
   is_central: z.number().min(0).max(10),
   is_clean: z.number().min(0).max(10),
+  has_packaging: z.number().min(0).max(10),
   is_banner_or_trash: z.boolean(),
 });
 export type ImageScore = z.infer<typeof ImageScoreSchema> & { scored_at: string };
@@ -582,10 +583,11 @@ const SCORE_SYSTEM_PROMPT =
 
 const SCORE_USER_TEXT = [
   "Oceń to zdjęcie produktu i zwróć WYŁĄCZNIE JSON o strukturze:",
-  '{"is_central": number (1-10), "is_clean": number (1-10), "is_banner_or_trash": boolean}',
+  '{"is_central": number (1-10), "is_clean": number (1-10), "has_packaging": number (0-10), "is_banner_or_trash": boolean}',
   "",
   "is_central: czy produkt jest na środku kadru, dobrze widoczny (10), czy mikro-produkt w rogu / ucięty (1).",
   "is_clean: czy tło jest jednolite/białe/mało rozpraszające (10). Odejmij punkty za banery, napisy, logotypy, kolaż.",
+  "has_packaging: 10 = w jednym kadrze widać i opakowanie/pudełko I sam produkt (np. pudełko amunicji + naboje obok); 6-9 = widać tylko pudełko/opakowanie z grafiką produktu; 3-5 = tylko sam produkt bez opakowania; 0-2 = brak kontekstu produktu / nieczytelne.",
   "is_banner_or_trash: true, jeśli obrazek to baner reklamowy, infografika, tabela rozmiarów, ikona, logo sklepu, znak wodny lub kolaż - czyli NIE nadaje się na miniaturę.",
 ].join("\n");
 

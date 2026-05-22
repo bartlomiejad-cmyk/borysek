@@ -136,6 +136,7 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
           num_images: 1,
           sync_mode: true,
           enable_safety_checker: true,
+          output_format: "jpeg",
         },
         FAL_KEY,
       );

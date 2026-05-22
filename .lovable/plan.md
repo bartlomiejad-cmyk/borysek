@@ -1,179 +1,68 @@
-# Wymuszenie czystej bieli #FFFFFF jako tła
+# Plan: 4 ulepszenia eksportu i miniatur
 
-## Problem
+## 1. Eksport CSV — cechy w osobnych kolumnach
 
-Mimo instrukcji „pure white seamless studio background" model
-`seedream/v4/edit` często zwraca tło kremowe / lekko beżowe / ciepłe
-(off-white). Użytkownik wymaga BEZWZGLĘDNIE czystej bieli #FFFFFF.
+**Plik:** `src/lib/pim/export.functions.ts`
 
-## Rozwiązanie
+Obecnie cechy lecą jako `features_text` (połączony string) i `features_json` (JSON). Rozdzielimy je na osobne kolumny per cecha (`cecha_<klucz>`).
 
-Plik: `src/lib/pim/regen.functions.ts` — wzmocnienie sekcji o tle w
-promptcie `regenerateMainImage` (`seedream/v4/edit`):
+- Pierwsze przejście po wszystkich produktach: zebrać unikalny zbiór kluczy cech w całym projekcie, posortowany alfabetycznie (stabilna kolejność kolumn między wierszami).
+- Drugie przejście: dla każdego wiersza dodać klucze `cecha_<klucz> = wartość` (pusty string jeśli produkt nie ma danej cechy).
+- Zachowujemy `features_text` (czytelny podgląd) dla wstecznej kompatybilności. Usuwamy `features_json`.
+- Normalizacja kluczy: trim + zamiana białych znaków i `;` na `_`, żeby nie psuły CSV/nagłówków Excela.
 
-1. Mocniejsze, powtórzone instrukcje na samym początku promptu:
-   - „Background MUST be PURE WHITE #FFFFFF (RGB 255,255,255) — absolutely no cream, no beige, no ivory, no off-white, no warm tint, no cool tint, no gray, no gradient, no vignette, no paper texture, no shadow on the background itself."
-   - „If in doubt, make the background BRIGHTER and WHITER, not warmer."
-   - „The four corners of the canvas must be exactly #FFFFFF."
-2. Rozszerzenie sekcji `Avoid:`:
-   - dopisać: „cream background, beige background, ivory background, off-white background, warm background, gray background, any background that is not exact #FFFFFF, any tint or color cast on the background, vignette, paper texture on the background".
-3. Zostawić istniejące instrukcje dotyczące kadrowania (~70–75%),
-   centrowania, usuwania znaków wodnych, miękkiego cienia pod
-   produktem — bez zmian.
-4. Bez zmian w pozostałej logice: `prepareFalSourceImage`,
-   `image_size` 2560×2560, obsługa 422, format wyjściowy.
+Frontend (`Papa.unparse` / `XLSX.utils.json_to_sheet`) działa bez zmian — sam wykryje nowe pola.
 
-## Pliki do zmiany
+## 2. Regeneracja FAL → zawsze JPG
 
-- `src/lib/pim/regen.functions.ts` — tylko ciąg `prompt` w wywołaniu
-  `seedream/v4/edit`.
+**Plik:** `src/lib/pim/regen.functions.ts`
 
----
+- W requeście do `seedream/v4/edit` dodajemy `output_format: "jpeg"` (Seedream wspiera ten parametr; przy braku wsparcia po prostu fall-backniemy na konwersję w kroku 2).
+- Po pobraniu wyniku z FAL: jeśli `detectImageFormat` zwróci coś innego niż `jpg`, konwertujemy bajty na JPG przed uploadem. Konwersję robimy na poziomie Workera bez native deps:
+  - WebP/PNG → JPG: użycie WASM-owego dekodera/enkodera kompatybilnego z Cloudflare Workers (np. `@jsquash/webp` + `@jsquash/png` + `@jsquash/jpeg`). To czyste WASM, zgodne z naszym runtime.
+  - Quality 92, białe tło (flatten alfa na #FFFFFF, żeby PNG z przezroczystością nie dawały czarnego tła w JPG).
+- Wymuszamy nazwę pliku `${enrichmentId}.jpg` i `content-type: image/jpeg`. Czyścimy stare warianty `.webp`/`.png`/`.jpg` przed uploadem (już mamy ten kod — zostaje).
+- Aktualizujemy UI label w `projects.$id.products.$pid.tsx`: "Białe tło, miękki cień, produkt ~70% kadru, JPG 2560×2560".
 
-# (Poprzednie ustalenia — bez zmian)
+## 3. Eksport CSV — URLe zdjęć AI
 
-# Poprawa promptu FAL: kadrowanie ~70% + usuwanie znaków wodnych
+**Plik:** `src/lib/pim/export.functions.ts`
 
-## Problem
+Obecnie `image_1..3` i `images_all` zawierają tylko scrapowane URLe (z dopisanym na froncie regenerowanym). Dodajemy osobne kolumny dla zdjęć AI:
 
-`fal-ai/bytedance/seedream/v4/edit` ignoruje instrukcję, że produkt ma
-zajmować ~70% kadru — w wyniku produkt jest mały, zepchnięty w dół,
-z dużą pustą przestrzenią. Dodatkowo na źródłowych zdjęciach bywają
-znaki wodne sklepów (np. „bestgun.pl", „militaria"), które model
-przenosi do wygenerowanego zdjęcia.
+- `ai_image_main` — `regenerated_main_image` (URL do JPG w buckecie `regenerated-images`), pusty jeśli brak.
+- (opcjonalnie pod kątem przyszłości — zostawiamy puste sloty `ai_image_2`, `ai_image_3` nieprawda, NA RAZIE TYLKO `ai_image_main`, żeby nie generować pustych kolumn).
+- Kolumny scrapowane (`image_1..3`, `images_all`) zostają bez zmian, ale **przestajemy wymuszać regen na początku** — `image_1` ma być oryginalnym najlepszym zdjęciem ze źródeł, a AI ma własną kolumnę. Sklep importujący CSV decyduje, którego użyć.
 
-## Rozwiązanie
+## 4. Lepsza logika miniatury — preferuj pudełko + naboje razem
 
-Plik: `src/lib/pim/regen.functions.ts` — modyfikacja samego promptu
-w `regenerateMainImage` (`fal-ai/bytedance/seedream/v4/edit`):
+**Pliki:**
+- `src/lib/pim/ai.functions.ts` (prompt + schema)
+- `src/lib/pim/images.ts` (sortowanie do eksportu)
+- `src/routes/_auth/projects.$id.products.$pid.tsx` (`scoreFor`)
 
-1. Mocniejsze, bardziej dosłowne instrukcje dotyczące kadrowania:
-   - „product must fill 70–75% of the frame height AND width",
-   - „scale the product UP so its longest edge spans ~75% of the canvas",
-   - „equal small margins on all four sides (~12–15% of canvas)",
-   - „centered both horizontally and vertically",
-   - „do NOT leave large empty space around the product",
-   - sekcja `Avoid:` rozszerzona o „tiny product, product smaller than
-     50% of frame, excessive whitespace, off-center composition,
-     product pushed to bottom/top".
-2. Dodanie instrukcji usuwania znaków wodnych:
-   - „Remove any watermarks, store logos, website URLs, photo
-     credits or overlay text that are NOT part of the physical product
-     packaging (e.g. shop names like 'bestgun.pl', 'militaria',
-     'gun-center', semi-transparent text across the image).",
-   - „Keep only the printed graphics that physically exist on the
-     product/packaging itself.",
-   - w `Avoid:` dopisać „visible watermarks, shop URLs, overlay text,
-     photo credits".
+Dodajemy trzeci wymiar AI `has_packaging` (0–10) obok `is_central` i `is_clean`:
 
-Reszta logiki (`image_size` 2560×2560, `prepareFalSourceImage`,
-obsługa błędów 422, format wyjściowy) bez zmian.
+- Schema Zod w `ai.functions.ts` dostaje pole `has_packaging: z.number().min(0).max(10)` (z migracją wstecz: jeśli stare wpisy go nie mają, traktujemy jako 0 i nie psujemy istniejących dopasowań).
+- Prompt do gemini: `"has_packaging: 10 = widoczne i pudełko/opakowanie i sama amunicja/produkt w jednym kadrze; 6-9 = widać tylko pudełko z grafiką produktu; 3-5 = tylko sam produkt bez opakowania; 0-2 = brak kontekstu produktu."`
+- Wzór scoringu zmienia się z `(is_central + is_clean) * area` na `(is_central + is_clean + 1.5 * has_packaging) * area`. Waga 1.5 nadaje "combo pudełko+produkt" przewagę, ale nie przebije totalnego śmiecia.
+- `is_banner_or_trash = true` nadal zeruje score.
+- Aktualizujemy renderowanie miniatury — dodajemy badge `P {has_packaging}/10` obok `C` i `T`.
+- W `images.ts` (export `pickImages`) sortowanie również używa `has_packaging`, jeśli dostępne w `image_meta`/scores. (Wymaga przekazania `image_scores` do `pickImages` — rozszerzamy sygnaturę i call site w `export.functions.ts`).
+
+**Migracja istniejących scores:** brak migracji DB — `image_scores` to JSONB, stare wpisy bez `has_packaging` będą traktowane jako 0. Użytkownik może wymusić ponowną analizę usuwając wpis (już istnieje flow) albo poczekać aż top-4 się zmieni.
+
+## Detale techniczne
+
+- `@jsquash/*` pakiety: `bun add @jsquash/jpeg @jsquash/png @jsquash/webp`. Każdy z nich ma builda Workers-compatible (WASM inlined). Dodać try/catch — jeśli inicjalizacja WASM zawiedzie, raportujemy "Konwersja JPG nieudana, zapisuję oryginał" i lecimy z plikiem jaki dostaliśmy z FAL.
+- Wszystkie zmiany backendowe to istniejące `createServerFn` — bez nowych edge functions, bez migracji DB.
+- Zmiany w `image_scores` są addytywne (nowy klucz w JSONB), zgodne z RLS.
 
 ## Pliki do zmiany
 
-- `src/lib/pim/regen.functions.ts` — tylko ciąg `prompt` w wywołaniu
-  `seedream/v4/edit`.
-
----
-
-# (Poprzednie ustalenia — bez zmian)
-
-## Naprawa regeneracji teł dla URL-i ze spacjami/UTF-8
-
-## Problem
-
-FAL `fal-ai/bytedance/seedream/v4/edit` zwraca 422 `file_download_error`
-dla URL-i ze spacjami i polskimi znakami, np.
-`https://e-militaria.pl/133977-large_default/Spłonki Pistoletowe Fiocchi małe BRASS - 150szt.jpg`.
-FAL nie potrafi pobrać pliku, bo URL nie jest poprawnie zakodowany.
-
-## Rozwiązanie
-
-Plik: `src/lib/pim/regen.functions.ts`
-
-- Dodaję helper `encodeImageUrl(url)`, który koduje per-segment ścieżki
-  (`URL` API + `encodeURIComponent` na każdym segmencie po dekodowaniu),
-  bez podwójnego enkodowania już zakodowanych URL-i.
-- Stosuję go do `data.imageUrl` przed wysyłką do `seedream/v4/edit`
-  i do `image-conversion`.
-- W `callFal` wykrywam `422` z `file_download_error` i rzucam czytelny
-  komunikat: „FAL nie mógł pobrać źródłowego zdjęcia (zły URL)".
-- Pozostawiam resztę logiki bez zmian.
-
-Plik: `src/routes/_auth/projects.$id.index.tsx`
-
-## 1. Podgląd miniaturki zbyt daleko
-
-W `ProductThumbs` podgląd na hover otwiera się przy `r.right + 8, r.top`, ale
-wizualnie „odjeżdża" od kciuka. Zmiany:
-
-- zmniejszam odstęp do 4 px,
-- jeśli z prawej brakuje miejsca (`r.right + 320 > window.innerWidth`), otwieram
-  podgląd po lewej (`left = r.left − 320 − 4`),
-- clamp `top` do widocznego ekranu (żeby nie wychodził pod fold),
-- nasłuchuję `scroll`/`resize` na czas hovera i zamykam podgląd, żeby nie
-  „pływał" po przewinięciu.
-
-## 2. Zaznaczanie produktów + belka akcji masowych
-
-- nowy stan `selectedIds: Set<string>` + helpery `toggleSelected`, `toggleAll`,
-  `clearSelected`,
-- kolumna `Checkbox` w każdym wierszu tabeli + checkbox „zaznacz wszystkie
-  widoczne" w nagłówku (stan `indeterminate`, działa na aktualnie
-  przefiltrowanej liście),
-- sticky belka nad tabelą widoczna tylko gdy `selectedIds.size > 0`:
-  „Zaznaczono N produktów", „Wyczyść", „Generuj złote rekordy",
-  „Regeneruj tła", „Eksport CSV/XLSX",
-- refaktor `generateAll(productIds?)` i `regenerateAll(productIds?)` —
-  gdy podany ID-set, działa tylko na zaznaczonych (z pominięciem filtra
-  „status !== GENERATED", żeby można było wymusić regenerację),
-- `exportFile` przy zaznaczeniu filtruje wynik eksportu po `selectedIds`,
-- istniejące przyciski na górze strony działają dalej dla całej listy
-  (gdy nic nie jest zaznaczone).
-
-## Szczegóły techniczne
-
-- używam istniejącego `@/components/ui/checkbox` (shadcn),
-- belka: `sticky top-0 z-20 bg-primary/10 border-y border-primary/30`,
-- `colSpan` w pustym stanie tabeli zmienia się z 6 na 7.
-# Plan: podgląd miniatur + masowy wybór produktów
-
-## 1. Podgląd miniaturki bliżej kursora
-
-W tabeli produktów po najechaniu na pierwsze zdjęcie podgląd otwiera się daleko od miniaturki (efekt „wisi pośrodku ekranu”).
-
-Zmiana w `src/routes/_auth/projects.$id.index.tsx` w komponencie galerii miniaturek:
-
-- Anker podglądu zostaje przy prawej krawędzi miniaturki, ale przed pokazaniem doliczamy realne wymiary kafelka (ok. 320 px max) i zaciskamy pozycję do widocznego obszaru okna (`window.innerWidth/innerHeight`).
-- Jeśli po prawej brakuje miejsca, otwieramy podgląd po lewej stronie miniaturki (`left = r.left − width − 8`).
-- Jeśli po dole brakuje miejsca, przesuwamy `top` do góry, żeby cały podgląd mieścił się w viewport.
-- Odstęp zmniejszamy z 8 px do 4 px, żeby podgląd wizualnie „kleił się” do miniatury.
-
-Efekt: podgląd pojawia się tuż obok kafelka, niezależnie od pozycji w wierszu i bez wypadania poza ekran.
-
-## 2. Zaznaczanie produktów i pasek akcji masowych
-
-Na liście „Produkty” dodajemy mechanizm zaznaczania wielu wierszy i wspólny pasek akcji.
-
-Zakres w `src/routes/_auth/projects.$id.index.tsx`:
-
-- Stan `selectedIds: Set<string>` w komponencie strony.
-- Nowa kolumna z lewej w tabeli z `Checkbox` (`src/components/ui/checkbox.tsx`) na każdy wiersz; w nagłówku checkbox „zaznacz wszystkie widoczne” (z filtrowaną listą `filtered`).
-- Zaznaczenie/odznaczenie aktualizuje `selectedIds`; zmiana filtra/wyszukiwarki nie kasuje zaznaczeń, ale checkbox „zaznacz wszystkie” odnosi się tylko do widocznych pozycji.
-- Sticky pasek akcji nad tabelą (widoczny tylko gdy `selectedIds.size > 0`):
-  - tekst „Zaznaczono N produktów”,
-  - „Wyczyść”,
-  - „Generuj złote rekordy (zaznaczone)” — wywołuje istniejący `generateAll` ograniczony do zaznaczonych id (refaktor: `generateAll(productIds?: string[])`),
-  - „Regeneruj tła (zaznaczone)” — analogicznie dla `regenerateAll`,
-  - „Eksport zaznaczonych do CSV/XLSX” (filtrowanie wyniku `exportProject` po `id`).
-- Istniejące przyciski u góry strony (Generuj/Regeneruj/Eksport) działają dalej dla całej listy, gdy nic nie jest zaznaczone.
-
-## Pliki do zmiany
-
-- `src/routes/_auth/projects.$id.index.tsx`
-
-## Szczegóły techniczne
-
-- Pozycjonowanie podglądu liczone po `getBoundingClientRect()` miniaturki + stałe `PREVIEW_W = 320`, `PREVIEW_H = 360` (uwzględnia pasek z wymiarami), `GAP = 4`. Wybór strony (prawo/lewo) i clamp do `[8, window.innerWidth − PREVIEW_W − 8]` / analogicznie dla pionu.
-- `selectedIds` trzymane w `useState<Set<string>>`; helper `toggleSelected(id)`, `toggleAll(visibleIds)`, `clearSelected()`. Pasek renderowany jako `sticky top-0 z-20` w obrębie karty „Produkty”.
-- Refaktor `generateAll` i `regenerateAll`: przyjmują opcjonalną listę `productIds`; bez argumentu działają na `filtered` jak dotychczas.
+- `src/lib/pim/export.functions.ts` — dynamiczne kolumny cech, `ai_image_main`, brak wymuszania regen jako image_1, sortowanie z `has_packaging`.
+- `src/lib/pim/regen.functions.ts` — output JPG + konwersja WASM.
+- `src/lib/pim/ai.functions.ts` — nowy wymiar `has_packaging` w prompt + Zod schema.
+- `src/lib/pim/images.ts` — rozszerzona sygnatura `pickImages` o scores.
+- `src/routes/_auth/projects.$id.products.$pid.tsx` — `scoreFor` z `has_packaging`, badge `P x/10`, label "JPG".
+- `package.json` — dependency `@jsquash/*`.

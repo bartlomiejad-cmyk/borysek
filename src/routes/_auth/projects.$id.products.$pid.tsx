@@ -22,7 +22,7 @@ export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
 });
 
-type ImgScore = { is_central: number; is_clean: number; is_banner_or_trash: boolean };
+type ImgScore = { is_central: number; is_clean: number; has_packaging?: number; is_banner_or_trash: boolean };
 type ImgMeta = { w: number; h: number };
 
 function scoreToneClass(n: number): string {
@@ -120,7 +120,8 @@ function ProductDetail() {
     const effectiveArea = area > 0 ? area : 1;
     if (!s) return area;
     if (s.is_banner_or_trash) return 0;
-    return (s.is_central + s.is_clean) * effectiveArea;
+    const pkg = s.has_packaging ?? 0;
+    return (s.is_central + s.is_clean + 1.5 * pkg) * effectiveArea;
   };
 
   const sortedGlobal = [...allVisible].sort((a, b) => scoreFor(b) - scoreFor(a));
@@ -278,6 +279,11 @@ function ProductDetail() {
                 <span className={cn("text-[10px] px-1 py-0 rounded border", scoreToneClass(s.is_clean))} title="Czystość tła">
                   T {s.is_clean}/10
                 </span>
+                {typeof s.has_packaging === "number" && (
+                  <span className={cn("text-[10px] px-1 py-0 rounded border", scoreToneClass(s.has_packaging))} title="Pudełko + produkt razem">
+                    P {s.has_packaging}/10
+                  </span>
+                )}
               </>
             )
           ) : top4.includes(u) && analyzing ? (
@@ -340,7 +346,7 @@ function ProductDetail() {
                     <Wand2 className="h-3.5 w-3.5 text-violet-500" /> Zdjęcie główne (FAL.ai)
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Białe tło, miękki cień, produkt ~70% kadru, WebP 2560×2560.
+                    Białe tło, miękki cień, produkt ~70% kadru, JPG 2560×2560.
                   </p>
                 </div>
                 <div className="flex gap-1">
