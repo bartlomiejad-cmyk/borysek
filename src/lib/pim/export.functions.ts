@@ -25,7 +25,7 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, image_scores, regenerated_main_image, model, generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, model, generated_at",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
@@ -68,6 +68,13 @@ export const exportProject = createServerFn({ method: "GET" })
     }
     const sortedFeatureKeys = [...allFeatureKeys].sort((a, b) => a.localeCompare(b, "pl"));
 
+    // Max długość galerii AI w projekcie — wyznacza ile kolumn ai_gallery_*.
+    let maxGallery = 0;
+    for (const e of ens ?? []) {
+      const g = ((e as unknown as { ai_gallery_urls?: string[] }).ai_gallery_urls) ?? [];
+      if (Array.isArray(g) && g.length > maxGallery) maxGallery = g.length;
+    }
+
     return (products ?? []).map((p) => {
       const e = map.get(p.id);
       const urls = (e?.picked_urls as string[] | undefined) ?? [];
@@ -83,6 +90,7 @@ export const exportProject = createServerFn({ method: "GET" })
       // Scrapowane zdjęcia ze źródeł — bez wymuszania regen. URL AI ma własną kolumnę.
       const images = pickImages(all, meta, hidden, scores);
       const regen = ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image) ?? "";
+      const gallery = (((e as unknown as { ai_gallery_urls?: string[] } | undefined)?.ai_gallery_urls) ?? []) as string[];
       const features = ((e as unknown as { golden_features?: Array<{ key: string; value: string }> } | undefined)?.golden_features ?? []);
       const featureCols: Record<string, string> = {};
       for (const k of sortedFeatureKeys) featureCols[`cecha_${k}`] = "";
@@ -90,6 +98,8 @@ export const exportProject = createServerFn({ method: "GET" })
         const k = normalizeKey(f.key ?? "");
         if (k) featureCols[`cecha_${k}`] = f.value ?? "";
       }
+      const galleryCols: Record<string, string> = {};
+      for (let i = 0; i < maxGallery; i++) galleryCols[`ai_gallery_${i + 1}`] = gallery[i] ?? "";
       return {
         id: p.ext_id ?? "",
         nazwa: p.nazwa ?? "",
@@ -106,6 +116,8 @@ export const exportProject = createServerFn({ method: "GET" })
         image_3: images[2] ?? "",
         images_all: images.join(" | "),
         ai_image_main: regen,
+        ai_gallery_all: gallery.join(" | "),
+        ...galleryCols,
         golden_name: e?.golden_name ?? "",
         golden_description: e?.golden_description ?? "",
         features_text: features.map((f) => `${f.key}: ${f.value}`).join(" | "),
