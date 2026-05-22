@@ -22,7 +22,7 @@ export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
 });
 
-type ImgScore = { is_central: number; is_clean: number; is_banner_or_trash: boolean };
+type ImgScore = { is_central: number; is_clean: number; has_packaging?: number; is_banner_or_trash: boolean };
 type ImgMeta = { w: number; h: number };
 
 function scoreToneClass(n: number): string {
@@ -120,7 +120,8 @@ function ProductDetail() {
     const effectiveArea = area > 0 ? area : 1;
     if (!s) return area;
     if (s.is_banner_or_trash) return 0;
-    return (s.is_central + s.is_clean) * effectiveArea;
+    const pkg = s.has_packaging ?? 0;
+    return (s.is_central + s.is_clean + 1.5 * pkg) * effectiveArea;
   };
 
   const sortedGlobal = [...allVisible].sort((a, b) => scoreFor(b) - scoreFor(a));
