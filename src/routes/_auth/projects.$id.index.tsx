@@ -698,6 +698,8 @@ function StatusBadge({ status, error }: { status: string; error: string | null }
 function SettingsCard({
   project,
   onSave,
+  mediaSettings,
+  onSaveMedia,
 }: {
   project?: {
     name: string;
@@ -721,6 +723,8 @@ function SettingsCard({
     name_column?: string;
     id_column?: string;
   }) => Promise<void>;
+  mediaSettings?: MediaSettings;
+  onSaveMedia: (p: Omit<MediaSettings, never>) => Promise<void>;
 }) {
   const [name, setName] = useState(project?.name ?? "");
   const [prompt, setPrompt] = useState(project?.custom_prompt ?? "");
@@ -733,6 +737,27 @@ function SettingsCard({
   const [nameCol, setNameCol] = useState(project?.name_column ?? "");
   const [codeCol, setCodeCol] = useState(project?.code_column ?? "");
   const [eanCol, setEanCol] = useState(project?.ean_column ?? "");
+
+  // Media (AI images) settings.
+  const [compA, setCompA] = useState(mediaSettings?.component_a ?? "");
+  const [compB, setCompB] = useState(mediaSettings?.component_b ?? "");
+  const [rule, setRule] = useState<MainImageRule>(mediaSettings?.main_image_rule ?? "ONLY_A");
+  const [resolution, setResolution] = useState<number>(mediaSettings?.target_resolution ?? 2560);
+  const [padding, setPadding] = useState<number>(mediaSettings?.padding_percent ?? 70);
+  const [maxGallery, setMaxGallery] = useState<number>(mediaSettings?.max_gallery_images ?? 5);
+  const [shadow, setShadow] = useState<boolean>(mediaSettings?.apply_shadow ?? true);
+  const [styleP, setStyleP] = useState<string>(mediaSettings?.custom_style_prompt ?? "");
+  useEffect(() => {
+    if (!mediaSettings) return;
+    setCompA(mediaSettings.component_a ?? "");
+    setCompB(mediaSettings.component_b ?? "");
+    setRule(mediaSettings.main_image_rule);
+    setResolution(mediaSettings.target_resolution);
+    setPadding(mediaSettings.padding_percent);
+    setMaxGallery(mediaSettings.max_gallery_images);
+    setShadow(mediaSettings.apply_shadow);
+    setStyleP(mediaSettings.custom_style_prompt ?? "");
+  }, [mediaSettings]);
 
   // Sync once project loads
   const initialized = useMemo(() => !!project, [project]);
