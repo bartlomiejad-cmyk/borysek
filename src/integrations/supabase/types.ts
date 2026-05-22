@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       enrichments: {
         Row: {
+          ai_gallery_urls: Json
           error: string | null
           generated_at: string | null
           golden_description: string | null
@@ -27,6 +28,7 @@ export type Database = {
           image_scores: Json
           match_type: Database["public"]["Enums"]["match_type"]
           matched_term: string | null
+          media_classification: Json
           model: string | null
           picked_urls: string[]
           pinned_main_url: string | null
@@ -39,6 +41,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_gallery_urls?: Json
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
@@ -50,6 +53,7 @@ export type Database = {
           image_scores?: Json
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
+          media_classification?: Json
           model?: string | null
           picked_urls?: string[]
           pinned_main_url?: string | null
@@ -62,6 +66,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_gallery_urls?: Json
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
@@ -73,6 +78,7 @@ export type Database = {
           image_scores?: Json
           match_type?: Database["public"]["Enums"]["match_type"]
           matched_term?: string | null
+          media_classification?: Json
           model?: string | null
           picked_urls?: string[]
           pinned_main_url?: string | null
@@ -97,6 +103,53 @@ export type Database = {
             columns: ["source_product_id"]
             isOneToOne: true
             referencedRelation: "source_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_technical_settings: {
+        Row: {
+          apply_shadow: boolean
+          component_a: string
+          component_b: string | null
+          custom_style_prompt: string | null
+          main_image_rule: Database["public"]["Enums"]["main_image_rule"]
+          max_gallery_images: number
+          padding_percent: number
+          project_id: string
+          target_resolution: number
+          updated_at: string
+        }
+        Insert: {
+          apply_shadow?: boolean
+          component_a?: string
+          component_b?: string | null
+          custom_style_prompt?: string | null
+          main_image_rule?: Database["public"]["Enums"]["main_image_rule"]
+          max_gallery_images?: number
+          padding_percent?: number
+          project_id: string
+          target_resolution?: number
+          updated_at?: string
+        }
+        Update: {
+          apply_shadow?: boolean
+          component_a?: string
+          component_b?: string | null
+          custom_style_prompt?: string | null
+          main_image_rule?: Database["public"]["Enums"]["main_image_rule"]
+          max_gallery_images?: number
+          padding_percent?: number
+          project_id?: string
+          target_resolution?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_technical_settings_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
@@ -275,6 +328,7 @@ export type Database = {
     }
     Enums: {
       enrichment_status: "PENDING" | "MATCHED" | "GENERATED" | "FAILED"
+      main_image_rule: "ONLY_A" | "A_AND_B_EXISTING" | "COMPOSITE_A_AND_B"
       mapping_strategy: "EAN" | "NAZWA" | "HYBRID"
       match_type: "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH"
     }
@@ -405,6 +459,7 @@ export const Constants = {
   public: {
     Enums: {
       enrichment_status: ["PENDING", "MATCHED", "GENERATED", "FAILED"],
+      main_image_rule: ["ONLY_A", "A_AND_B_EXISTING", "COMPOSITE_A_AND_B"],
       mapping_strategy: ["EAN", "NAZWA", "HYBRID"],
       match_type: ["EAN_MATCH", "NAME_MATCH", "HYBRID_MATCH", "NO_MATCH"],
     },

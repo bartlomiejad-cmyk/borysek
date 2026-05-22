@@ -20,6 +20,13 @@ import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage } from "@/lib/pim/regen.functions";
+import {
+  getMediaSettings,
+  saveMediaSettings,
+  regenerateMedia,
+  type MainImageRule,
+  type MediaSettings,
+} from "@/lib/pim/media.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,10 +99,17 @@ function ProjectPage() {
   const hideImgFn = useServerFn(hideImageByProduct);
   const pinFn = useServerFn(setPinnedMainImage);
   const regenFn = useServerFn(regenerateMainImage);
+  const regenMediaFn = useServerFn(regenerateMedia);
+  const getMediaFn = useServerFn(getMediaSettings);
+  const saveMediaFn = useServerFn(saveMediaSettings);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
     queryFn: () => getFn({ data: { id } }),
+  });
+  const { data: mediaSettings } = useQuery({
+    queryKey: ["project", id, "media-settings"],
+    queryFn: () => getMediaFn({ data: { projectId: id } }),
   });
   const { data: products = [], refetch: refetchProducts } = useQuery({
     queryKey: ["project", id, "products"],
@@ -266,19 +280,17 @@ function ProjectPage() {
   const regenerateAll = async (productIds?: string[]) => {
     const idSet = productIds ? new Set(productIds) : null;
     const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
-    const targets = source
-      .map((p) => ({
-        enrichmentId: (p as { enrichment_id?: string | null }).enrichment_id ?? null,
-        url:
-          (p as { pinned_main_url?: string | null }).pinned_main_url ??
-          ((p.images ?? [])[0] ?? null),
-      }))
-      .filter((t): t is { enrichmentId: string; url: string } => !!t.enrichmentId && !!t.url);
+    const targets = source.filter((p) => !!(p as { enrichment_id?: string | null }).enrichment_id);
     if (!targets.length) {
       toast.info("Brak produktów do regeneracji");
       return;
     }
-    if (!confirm(`Zregenerować tła dla ${targets.length} produktów? To zużyje kredyty FAL.`)) return;
+    if (!mediaSettings?.component_a?.trim()) {
+      toast.error("Skonfiguruj Komponent A w Ustawieniach → Zdjęcia AI");
+      return;
+    }
+    const max = mediaSettings.max_gallery_images ?? 0;
+    if (!confirm(`Zregenerować zdjęcia dla ${targets.length} produktów? Do ${1 + max} generacji FAL na produkt.`)) return;
     setRegenProgress({ done: 0, total: targets.length });
     let done = 0;
     let failed = 0;
@@ -288,7 +300,7 @@ function ProjectPage() {
         const t = queue.shift();
         if (!t) break;
         try {
-          await regenFn({ data: { enrichmentId: t.enrichmentId, imageUrl: t.url } });
+          await regenMediaFn({ data: { productId: t.id } });
         } catch (e) {
           console.warn("regen failed", t, e);
           failed++;
@@ -297,7 +309,7 @@ function ProjectPage() {
         setRegenProgress({ done, total: targets.length });
       }
     };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    await Promise.all(Array.from({ length: 2 }, worker));
     setRegenProgress(null);
     toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
     refetchProducts();
@@ -424,6 +436,12 @@ function ProjectPage() {
         <TabsContent value="settings" className="pt-3">
           <SettingsCard
             project={meta?.project}
+            mediaSettings={mediaSettings}
+            onSaveMedia={async (patch) => {
+              await saveMediaFn({ data: { projectId: id, ...patch } });
+              toast.success("Zapisano ustawienia AI");
+              qc.invalidateQueries({ queryKey: ["project", id, "media-settings"] });
+            }}
             onSave={async (patch) => {
               await updFn({ data: { id, ...patch } });
               toast.success("Zapisano");
@@ -680,6 +698,8 @@ function StatusBadge({ status, error }: { status: string; error: string | null }
 function SettingsCard({
   project,
   onSave,
+  mediaSettings,
+  onSaveMedia,
 }: {
   project?: {
     name: string;
@@ -703,6 +723,8 @@ function SettingsCard({
     name_column?: string;
     id_column?: string;
   }) => Promise<void>;
+  mediaSettings?: MediaSettings;
+  onSaveMedia: (p: Omit<MediaSettings, never>) => Promise<void>;
 }) {
   const [name, setName] = useState(project?.name ?? "");
   const [prompt, setPrompt] = useState(project?.custom_prompt ?? "");
@@ -715,6 +737,27 @@ function SettingsCard({
   const [nameCol, setNameCol] = useState(project?.name_column ?? "");
   const [codeCol, setCodeCol] = useState(project?.code_column ?? "");
   const [eanCol, setEanCol] = useState(project?.ean_column ?? "");
+
+  // Media (AI images) settings.
+  const [compA, setCompA] = useState(mediaSettings?.component_a ?? "");
+  const [compB, setCompB] = useState(mediaSettings?.component_b ?? "");
+  const [rule, setRule] = useState<MainImageRule>(mediaSettings?.main_image_rule ?? "ONLY_A");
+  const [resolution, setResolution] = useState<number>(mediaSettings?.target_resolution ?? 2560);
+  const [padding, setPadding] = useState<number>(mediaSettings?.padding_percent ?? 70);
+  const [maxGallery, setMaxGallery] = useState<number>(mediaSettings?.max_gallery_images ?? 5);
+  const [shadow, setShadow] = useState<boolean>(mediaSettings?.apply_shadow ?? true);
+  const [styleP, setStyleP] = useState<string>(mediaSettings?.custom_style_prompt ?? "");
+  useEffect(() => {
+    if (!mediaSettings) return;
+    setCompA(mediaSettings.component_a ?? "");
+    setCompB(mediaSettings.component_b ?? "");
+    setRule(mediaSettings.main_image_rule);
+    setResolution(mediaSettings.target_resolution);
+    setPadding(mediaSettings.padding_percent);
+    setMaxGallery(mediaSettings.max_gallery_images);
+    setShadow(mediaSettings.apply_shadow);
+    setStyleP(mediaSettings.custom_style_prompt ?? "");
+  }, [mediaSettings]);
 
   // Sync once project loads
   const initialized = useMemo(() => !!project, [project]);
@@ -820,6 +863,71 @@ function SettingsCard({
             }}
           >
             <Trash2 className="h-4 w-4 mr-2" /> Reset widoku
+          </Button>
+        </div>
+        <div className="pt-4 border-t space-y-3">
+          <h3 className="font-semibold text-base">Zdjęcia AI</h3>
+          <p className="text-xs text-muted-foreground">
+            Ustawienia pipeline'u regeneracji teł (FAL + klasyfikacja Gemini).
+          </p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <Label>Komponent A (wymagane)</Label>
+              <Input value={compA} onChange={(e) => setCompA(e.target.value)} placeholder="np. Pudełko amunicji" maxLength={200} />
+            </div>
+            <div>
+              <Label>Komponent B (opcjonalnie)</Label>
+              <Input value={compB} onChange={(e) => setCompB(e.target.value)} placeholder="np. Naboje" maxLength={200} />
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <Label>Reguła miniatury</Label>
+              <Select value={rule} onValueChange={(v) => setRule(v as MainImageRule)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ONLY_A">Tylko Komponent A</SelectItem>
+                  <SelectItem value="A_AND_B_EXISTING">A + B (jeśli istnieje w jednym kadrze)</SelectItem>
+                  <SelectItem value="COMPOSITE_A_AND_B">Kompozycja A + B (FAL łączy)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Limit zdjęć w galerii AI (0-12)</Label>
+              <Input type="number" min={0} max={12} value={maxGallery} onChange={(e) => setMaxGallery(Math.max(0, Math.min(12, parseInt(e.target.value) || 0)))} />
+            </div>
+            <div>
+              <Label>Rozdzielczość (px, 512-4096)</Label>
+              <Input type="number" min={512} max={4096} step={64} value={resolution} onChange={(e) => setResolution(Math.max(512, Math.min(4096, parseInt(e.target.value) || 2560)))} />
+            </div>
+            <div>
+              <Label>Wypełnienie kadru ({padding}%)</Label>
+              <Input type="range" min={30} max={95} value={padding} onChange={(e) => setPadding(parseInt(e.target.value))} />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch checked={shadow} onCheckedChange={setShadow} id="ai-shadow" />
+            <Label htmlFor="ai-shadow" className="cursor-pointer">Sztuczny cień pod produktem</Label>
+          </div>
+          <div>
+            <Label>Dodatkowy prompt stylistyczny (opcjonalnie)</Label>
+            <Textarea value={styleP} onChange={(e) => setStyleP(e.target.value)} rows={3} maxLength={2000} placeholder="np. Studio look, efekt 3D render, delikatny rim light od góry." />
+          </div>
+          <Button
+            onClick={() =>
+              onSaveMedia({
+                component_a: compA.trim(),
+                component_b: compB.trim() || null,
+                main_image_rule: rule,
+                target_resolution: resolution,
+                padding_percent: padding,
+                max_gallery_images: maxGallery,
+                apply_shadow: shadow,
+                custom_style_prompt: styleP.trim() || null,
+              })
+            }
+          >
+            Zapisz ustawienia AI
           </Button>
         </div>
       </CardContent>
