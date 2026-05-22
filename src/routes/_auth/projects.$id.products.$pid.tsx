@@ -341,7 +341,7 @@ function ProductDetail() {
                     <Wand2 className="h-3.5 w-3.5 text-violet-500" /> Zdjęcie główne (FAL.ai)
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Białe tło, miękki cień, produkt ~70% kadru, WebP 2560×2560.
+                    Białe tło, miękki cień, produkt ~70% kadru, JPG 2560×2560.
                   </p>
                 </div>
                 <div className="flex gap-1">
