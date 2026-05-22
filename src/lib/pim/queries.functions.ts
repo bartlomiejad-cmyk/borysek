@@ -21,7 +21,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image, ai_gallery_urls",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -86,6 +86,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         enrichment_id: (e as { id?: string } | undefined)?.id ?? null,
         pinned_main_url: pinned,
         regenerated_main_image: ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image ?? null) as string | null,
+        ai_gallery_urls: (((e as { ai_gallery_urls?: string[] } | undefined)?.ai_gallery_urls) ?? []) as string[],
         golden_features: ((e as { golden_features?: unknown } | undefined)?.golden_features ?? []) as Array<{ key: string; value: string }>,
         quality: ((e as { quality?: unknown } | undefined)?.quality ?? null) as unknown as null | {
           watermark_urls?: string[];
