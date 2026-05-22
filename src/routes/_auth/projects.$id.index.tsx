@@ -436,6 +436,12 @@ function ProjectPage() {
         <TabsContent value="settings" className="pt-3">
           <SettingsCard
             project={meta?.project}
+            mediaSettings={mediaSettings}
+            onSaveMedia={async (patch) => {
+              await saveMediaFn({ data: { projectId: id, ...patch } });
+              toast.success("Zapisano ustawienia AI");
+              qc.invalidateQueries({ queryKey: ["project", id, "media-settings"] });
+            }}
             onSave={async (patch) => {
               await updFn({ data: { id, ...patch } });
               toast.success("Zapisano");
