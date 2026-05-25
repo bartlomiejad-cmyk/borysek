@@ -132,11 +132,21 @@ function ProjectPage() {
     queryFn: () => listFn({ data: { projectId: id } }),
   });
 
-  const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
-  const [search, setSearch] = useState("");
-  const [pageSize, setPageSize] = useState<number>(25);
-  const [page, setPage] = useState<number>(1);
+  const navigate = useNavigate();
+  const urlSearch = Route.useSearch();
+
+  const filter = urlSearch.filter;
+  const search = urlSearch.search;
+  const pageSize = urlSearch.pageSize;
+  const page = urlSearch.page;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const updateSearch = (partial: Partial<typeof urlSearch>) => {
+    navigate({
+      to: ".",
+      search: (prev) => ({ ...prev, ...partial }),
+    });
+  };
 
   // Active background jobs (server-side, survives browser close).
   const lastTerminalToastRef = useRef<Record<string, string>>({});
@@ -196,7 +206,7 @@ function ProjectPage() {
 
   // Reset page when filter/search/pageSize changes
   useEffect(() => {
-    setPage(1);
+    if (page !== 1) updateSearch({ page: 1 });
   }, [filter, search, pageSize]);
 
   const toggleSelected = (pid: string) => {
