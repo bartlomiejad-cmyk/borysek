@@ -1134,22 +1134,25 @@ function ProductThumbs({
           +{overflow}
         </div>
       )}
-      {hovered ? (
-        <div
-          className="fixed z-50 pointer-events-none rounded-lg border bg-background shadow-xl overflow-hidden"
-          style={{ left: hovered.x, top: hovered.y }}
-        >
-          <div className="px-2 py-1 bg-foreground text-background text-xs font-mono text-center">
-            {dims ? `${dims.w} × ${dims.h} px` : "ładuję…"}
-          </div>
-          <img
-            src={hovered.url}
-            alt=""
-            className="block"
-            style={{ maxWidth: 320, maxHeight: 320 }}
-          />
-        </div>
-      ) : null}
+      {hovered && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed z-50 pointer-events-none rounded-lg border bg-background shadow-xl overflow-hidden"
+              style={{ left: hovered.x, top: hovered.y }}
+            >
+              <div className="px-2 py-1 bg-foreground text-background text-xs font-mono text-center">
+                {dims ? `${dims.w} × ${dims.h} px` : "ładuję…"}
+              </div>
+              <img
+                src={hovered.url}
+                alt=""
+                className="block"
+                style={{ maxWidth: 320, maxHeight: 320 }}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
