@@ -360,10 +360,10 @@ function ProjectPage() {
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
           </Button>
-          <Button onClick={() => generateAll()} disabled={!!genProgress}>
+          <Button onClick={() => generateAll()} disabled={!!genActive}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
-          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenProgress}>
+          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenActive}>
             <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
           </Button>
           <Button asChild variant="outline">
@@ -380,54 +380,54 @@ function ProjectPage() {
         </div>
       </div>
 
-      {genProgress && (
+      {genActive && genJob && (
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Weryfikacja i generacja {genProgress.done}/{genProgress.total}</span>
+              <span>Weryfikacja i generacja {genJob.processed_count}/{genJob.total} (w tle)</span>
               <div className="flex items-center gap-3">
-                <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
+                <span className="text-muted-foreground">{Math.round((genJob.processed_count / Math.max(1, genJob.total)) * 100)}%</span>
                 <Button
                   size="sm"
                   variant="destructive"
-                  onClick={() => {
-                    cancelGenRef.current = true;
-                    genAbortRef.current?.abort();
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: genJob.id } });
                     toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "GENERATE_GOLDEN"] });
                   }}
-                  disabled={cancelGenRef.current}
+                  disabled={genJob.cancel_requested}
                 >
                   <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
                 </Button>
               </div>
             </div>
-            <Progress value={(genProgress.done / genProgress.total) * 100} />
+            <Progress value={(genJob.processed_count / Math.max(1, genJob.total)) * 100} />
           </CardContent>
         </Card>
       )}
 
-      {regenProgress && (
+      {regenActive && regenJob && (
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Regeneracja teł {regenProgress.done}/{regenProgress.total}</span>
+              <span>Regeneracja teł {regenJob.processed_count}/{regenJob.total} (w tle)</span>
               <div className="flex items-center gap-3">
-                <span className="text-muted-foreground">{Math.round((regenProgress.done / regenProgress.total) * 100)}%</span>
+                <span className="text-muted-foreground">{Math.round((regenJob.processed_count / Math.max(1, regenJob.total)) * 100)}%</span>
                 <Button
                   size="sm"
                   variant="destructive"
-                  onClick={() => {
-                    cancelRegenRef.current = true;
-                    regenAbortRef.current?.abort();
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: regenJob.id } });
                     toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "REGENERATE_MEDIA"] });
                   }}
-                  disabled={cancelRegenRef.current}
+                  disabled={regenJob.cancel_requested}
                 >
                   <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
                 </Button>
               </div>
             </div>
-            <Progress value={(regenProgress.done / regenProgress.total) * 100} />
+            <Progress value={(regenJob.processed_count / Math.max(1, regenJob.total)) * 100} />
           </CardContent>
         </Card>
       )}
