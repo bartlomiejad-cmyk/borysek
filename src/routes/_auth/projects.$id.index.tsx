@@ -446,12 +446,16 @@ function ProjectPage() {
 
         <TabsContent value="data" className="space-y-3 pt-3">
           <div className="grid md:grid-cols-3 gap-3">
-            <UploadZone
-              title="Source CSV"
-              accept=".csv,text/csv"
-              description="Twoja baza: id, nazwa, kod, ean"
+            <ImportCsvDialog
+              projectId={id}
               count={meta?.counts.source_products}
-              onFile={handleSourceCsv}
+              defaults={{
+                id_column: meta?.project.id_column,
+                name_column: meta?.project.name_column,
+                code_column: meta?.project.code_column,
+                ean_column: meta?.project.ean_column,
+              }}
+              onDone={() => refetchProducts()}
             />
             <UploadZone
               title="Search JSON"
