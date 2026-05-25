@@ -93,7 +93,7 @@ export function RemapCsvDialog({ projectId, defaults, onDone }: Props) {
       const initialKey = initial[keyField];
       setKeyColumn(initialKey !== SKIP ? initialKey : raw.headers[0]);
     } catch (e) {
-      toast.error(friendlyError(e));
+      toast.error(friendlyError(e, "Nie udało się wczytać CSV"));
     }
   };
 
@@ -145,7 +145,7 @@ export function RemapCsvDialog({ projectId, defaults, onDone }: Props) {
       setOpen(false);
       reset();
     } catch (e) {
-      toast.error(friendlyError(e));
+      toast.error(friendlyError(e, "Nie udało się zaktualizować produktów"));
     } finally {
       setBusy(false);
     }
