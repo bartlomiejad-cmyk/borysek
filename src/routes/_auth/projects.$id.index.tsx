@@ -683,7 +683,7 @@ function ProjectPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
             <div className="flex items-center gap-2 text-muted-foreground">
               <span>Wierszy na stronę:</span>
-              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+              <Select value={String(pageSize)} onValueChange={(v) => updateSearch({ pageSize: Number(v) })}>
                 <SelectTrigger className="w-20 h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {[10, 25, 50, 100, 200, 500].map((n) => (
