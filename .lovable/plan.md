@@ -1,48 +1,31 @@
 ## Problem
 
-Po zaimportowaniu produktów okazuje się, że któraś kolumna źródłowa (np. `kod`/symbol) nie została zmapowana w ustawieniach projektu — w bazie jest `null`. Obecnie jedyny sposób to wyczyścić produkty i zaimportować od nowa, co kasuje też wszystkie wyniki AI, regeneracje i ukryte zdjęcia.
+Obecnie „Wgraj produkty" (UploadZone → `handleSourceCsv`) idzie od razu w `parseCsv` z polami `id_column / name_column / code_column / ean_column` wziętymi z konfiguracji projektu. Jeśli któraś nie jest ustawiona w projekcie, kolumna leci jako `null` i potem trzeba ratować się „Uzupełnij dane z CSV". Użytkownik chce mapowania **już na etapie wgrywania**.
 
 ## Rozwiązanie
 
-Dodaję funkcję **„Uzupełnij dane z CSV"** dostępną w widoku projektu obok obecnego uploadu źródła. Pozwala dograć/poprawić wartości pól (`kod`, `ean`, `nazwa`, `ext_id`) dla już istniejących `source_products` bez kasowania niczego innego.
+Zamiast jednoklikowego uploadu — dwukrokowy flow w jednym dialogu:
 
-### Flow w UI
+1. Wybór pliku CSV.
+2. Dialog z preview nagłówków + 4 selecty mapowania (`ID`, `Nazwa`, `Kod`, `EAN`), prefillowane z ustawień projektu (jeśli są). Każde pole można zmienić lub ustawić „— pomiń —".
+3. Po „Wczytaj" — parsuje, kasuje stare `source_products`, wstawia nowe (jak dziś).
 
-1. Nowy przycisk **„Uzupełnij dane z CSV"** w sekcji uploadów (osobno od „Wgraj produkty").
-2. Po wybraniu pliku otwiera się dialog:
-   - **Kolumna klucza** (select po nagłówkach CSV) — po czym dopasować wiersz do istniejącego produktu.
-   - **Pole klucza w bazie**: `ext_id` / `ean` / `kod` / `nazwa`.
-   - **Mapowanie**: dla każdego pola docelowego (`ext_id`, `nazwa`, `kod`, `ean`) wybór kolumny CSV (lub „— pomiń —"). Domyślnie podpowiadam te z konfiguracji projektu.
-   - Checkbox **„Nadpisuj istniejące wartości"** (domyślnie OFF — wypełnia tylko puste pola, żeby nie zepsuć już dobrych danych).
-3. Po „Zastosuj" pokazuje podsumowanie: dopasowanych X, niedopasowanych Y, zmienionych Z.
+Dialog jest osobny od istniejącego `RemapCsvDialog` (tamten patchuje istniejące produkty bez klucza, ten robi pełny import z mapowaniem).
 
-### Backend — nowy server function
+### Pliki
 
-`updateSourceProductsFromCsv` w `src/lib/pim/ingest.functions.ts`:
+- `src/components/pim/ImportCsvDialog.tsx` — **nowy**. Wybór pliku + selecty mapowania + checkbox „Wyczyść poprzednie produkty" (domyślnie ON, jak dziś). Wywołuje `clearProjectData` + `ingestSourceProducts` w batchach.
+- `src/lib/pim/parsers.ts` — **dodać** wariant `parseCsvWithMapping(file, mapping)` przyjmujący jawne mapowanie nagłówek → pole (zamiast nazw z projektu). Stare `parseCsv` zostaje dla wstecznej kompatybilności / wewnętrznych użyć.
+- `src/routes/_auth/projects.$id.index.tsx` — zastąpić obecny `UploadZone title="Wgraj produkty"` komponentem `ImportCsvDialog` (przekazując projectId, defaults z `meta.project`, callback `refetchProducts`). `handleSourceCsv` usuwam.
 
-- Input: `projectId`, `keyField` (`ext_id|ean|kod|nazwa`), `rows: Array<{ key: string; ext_id?: string|null; nazwa?: string|null; kod?: string|null; ean?: string|null }>`, `overwrite: boolean`.
-- Pobiera `source_products` projektu (id + 4 pola klucza).
-- Buduje mapę `key → product.id` po wybranym polu (normalizacja: trim, lowercase dla nazwy; trim dla pozostałych).
-- Dla każdego wiersza CSV: znajduje produkt, składa patch — przy `overwrite=false` ustawia tylko te pola, w których aktualna wartość jest `null`/pusta.
-- Wykonuje update'y w batchach (po 200, `update().eq("id", ...)` per produkt — proste i bezpieczne; ilości są rzędu setek/tysięcy).
-- Zwraca `{ matched, unmatched, updated, skipped }`.
-- **Nie tyka** `enrichments`, `product_sources`, `search_results` — cała praca AI i scrapingu zostaje.
+### Zachowuję bez zmian
 
-### Frontend
+- Pozostałe dwa UploadZone (search JSON, products JSON) — bez zmian, nie mają problemu z mapowaniem.
+- `RemapCsvDialog` — bez zmian, dalej dostępny do post-importowego poprawiania.
+- Konfiguracja kolumn w ustawieniach projektu — bez zmian; służy jako domyślne mapowanie w dialogu.
 
-- Rozszerzam `parseCsv` (lub dodaję wariant `parseCsvRaw`) o tryb zwracający surowe nagłówki + wiersze jako `Record<string,string>` — potrzebne do dialogu mapowania.
-- Nowy komponent `RemapCsvDialog.tsx` (select klucza + 4 selecty mapowania + checkbox + przycisk).
-- Po sukcesie: `qc.invalidateQueries(["project", id])` + `refetchProducts()` + toast z podsumowaniem.
+### Czego świadomie nie robię
 
-### Co świadomie pomijam
-
-- Nie ruszam mechanizmu matchingu (`runMatching`) — jeżeli użytkownik chce ponownie dopasować źródła po zmianie EAN/nazwy, robi to istniejącym przyciskiem „Dopasuj".
-- Nie zmieniam schematu bazy.
-- Nie dodaję edycji pojedynczego produktu w UI (osobny temat, jeśli będzie potrzeba).
-
-## Pliki do zmiany
-
-- `src/lib/pim/ingest.functions.ts` — nowy serverFn `updateSourceProductsFromCsv`.
-- `src/lib/pim/parsers.ts` — pomocnik do parsowania CSV ze zwrotem `{ headers, rows }`.
-- `src/components/pim/RemapCsvDialog.tsx` — nowy komponent dialogu.
-- `src/routes/_auth/projects.$id.index.tsx` — przycisk w sekcji uploadów + podpięcie dialogu.
+- Nie zmieniam schematu bazy ani server functions ingestowych.
+- Nie zmieniam zachowania innych uploadów.
+- Nie zapisuję wybranego mapowania jako nowych ustawień projektu (można dodać później jako checkbox „Zapamiętaj mapowanie").
