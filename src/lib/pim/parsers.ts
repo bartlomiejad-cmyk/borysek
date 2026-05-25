@@ -60,6 +60,37 @@ export const parseCsv = (file: File, mapping?: CsvMapping): Promise<CsvRow[]> =>
     });
   });
 
+export type RawCsv = {
+  headers: string[];
+  rows: Array<Record<string, string>>;
+};
+
+/**
+ * Parse a CSV file into raw headers + string rows. Used for the post-import
+ * column remap dialog, where the user picks which CSV column maps to which
+ * product field at runtime.
+ */
+export const parseCsvRaw = (file: File): Promise<RawCsv> =>
+  new Promise((resolve, reject) => {
+    Papa.parse<Record<string, unknown>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => {
+        const headers = (res.meta.fields ?? []).map((h) => String(h));
+        const rows = res.data.map((r) => {
+          const out: Record<string, string> = {};
+          for (const k of Object.keys(r)) {
+            const v = r[k];
+            out[k] = v === null || v === undefined ? "" : String(v).trim();
+          }
+          return out;
+        });
+        resolve({ headers, rows });
+      },
+      error: (err) => reject(err),
+    });
+  });
+
 export type SearchRow = { term: string; organic_urls: string[] };
 
 /**
