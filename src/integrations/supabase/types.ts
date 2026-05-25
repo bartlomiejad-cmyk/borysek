@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      bulk_jobs: {
+        Row: {
+          cancel_requested: boolean
+          created_at: string
+          failed_count: number
+          finished_at: string | null
+          id: string
+          items: Json
+          kind: Database["public"]["Enums"]["bulk_job_kind"]
+          last_error: string | null
+          processed_count: number
+          project_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["bulk_job_status"]
+          total: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cancel_requested?: boolean
+          created_at?: string
+          failed_count?: number
+          finished_at?: string | null
+          id?: string
+          items?: Json
+          kind: Database["public"]["Enums"]["bulk_job_kind"]
+          last_error?: string | null
+          processed_count?: number
+          project_id: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["bulk_job_status"]
+          total?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cancel_requested?: boolean
+          created_at?: string
+          failed_count?: number
+          finished_at?: string | null
+          id?: string
+          items?: Json
+          kind?: Database["public"]["Enums"]["bulk_job_kind"]
+          last_error?: string | null
+          processed_count?: number
+          project_id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["bulk_job_status"]
+          total?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       enrichments: {
         Row: {
           ai_gallery_urls: Json
@@ -327,6 +381,13 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      bulk_job_kind: "GENERATE_GOLDEN" | "REGENERATE_MEDIA"
+      bulk_job_status:
+        | "PENDING"
+        | "PROCESSING"
+        | "COMPLETED"
+        | "CANCELLED"
+        | "FAILED"
       enrichment_status: "PENDING" | "MATCHED" | "GENERATED" | "FAILED"
       main_image_rule: "ONLY_A" | "A_AND_B_EXISTING" | "COMPOSITE_A_AND_B"
       mapping_strategy: "EAN" | "NAZWA" | "HYBRID"
@@ -458,6 +519,14 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      bulk_job_kind: ["GENERATE_GOLDEN", "REGENERATE_MEDIA"],
+      bulk_job_status: [
+        "PENDING",
+        "PROCESSING",
+        "COMPLETED",
+        "CANCELLED",
+        "FAILED",
+      ],
       enrichment_status: ["PENDING", "MATCHED", "GENERATED", "FAILED"],
       main_image_rule: ["ONLY_A", "A_AND_B_EXISTING", "COMPOSITE_A_AND_B"],
       mapping_strategy: ["EAN", "NAZWA", "HYBRID"],

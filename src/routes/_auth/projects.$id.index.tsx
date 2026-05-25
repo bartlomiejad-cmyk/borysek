@@ -23,10 +23,14 @@ import { regenerateMainImage } from "@/lib/pim/regen.functions";
 import {
   getMediaSettings,
   saveMediaSettings,
-  regenerateMedia,
   type MainImageRule,
   type MediaSettings,
 } from "@/lib/pim/media.functions";
+import {
+  createBulkJob,
+  getActiveBulkJob,
+  cancelBulkJob,
+} from "@/lib/pim/bulk-jobs.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -79,8 +83,6 @@ import {
 
 export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
 
-const CONCURRENCY = 5;
-
 function ProjectPage() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
@@ -99,9 +101,11 @@ function ProjectPage() {
   const hideImgFn = useServerFn(hideImageByProduct);
   const pinFn = useServerFn(setPinnedMainImage);
   const regenFn = useServerFn(regenerateMainImage);
-  const regenMediaFn = useServerFn(regenerateMedia);
   const getMediaFn = useServerFn(getMediaSettings);
   const saveMediaFn = useServerFn(saveMediaSettings);
+  const createJobFn = useServerFn(createBulkJob);
+  const getActiveJobFn = useServerFn(getActiveBulkJob);
+  const cancelJobFn = useServerFn(cancelBulkJob);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -118,15 +122,43 @@ function ProjectPage() {
 
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
   const [search, setSearch] = useState("");
-  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
-  const [regenProgress, setRegenProgress] = useState<{ done: number; total: number } | null>(null);
-  const cancelGenRef = useRef(false);
-  const cancelRegenRef = useRef(false);
-  const genAbortRef = useRef<AbortController | null>(null);
-  const regenAbortRef = useRef<AbortController | null>(null);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Active background jobs (server-side, survives browser close).
+  const lastTerminalToastRef = useRef<Record<string, string>>({});
+  const { data: genJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "GENERATE_GOLDEN"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "GENERATE_GOLDEN" } }),
+    refetchInterval: 3000,
+  });
+  const { data: regenJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "REGENERATE_MEDIA"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "REGENERATE_MEDIA" } }),
+    refetchInterval: 3000,
+  });
+  const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
+  const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
+
+  // Show toast once per terminal job state + refetch products.
+  useEffect(() => {
+    for (const job of [genJob, regenJob]) {
+      if (!job) continue;
+      if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
+      if (lastTerminalToastRef.current[job.id] === job.status) continue;
+      lastTerminalToastRef.current[job.id] = job.status;
+      const label = job.kind === "GENERATE_GOLDEN" ? "Generacja złotych rekordów" : "Regeneracja zdjęć";
+      if (job.status === "COMPLETED") {
+        toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
+      } else if (job.status === "CANCELLED") {
+        toast.info(`${label}: zatrzymano ${job.processed_count}/${job.total}`);
+      } else {
+        toast.error(`${label}: nie powiodło się — ${job.last_error ?? "?"}`);
+      }
+      refetchProducts();
+    }
+  }, [genJob, regenJob, refetchProducts]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -250,47 +282,15 @@ function ProjectPage() {
       toast.info("Brak produktów do wygenerowania");
       return;
     }
-    setGenProgress({ done: 0, total: targets.length });
-    cancelGenRef.current = false;
-    const ac = new AbortController();
-    genAbortRef.current = ac;
-    let done = 0;
-    let failed = 0;
-    const queue = [...targets];
-    const worker = async () => {
-      while (queue.length) {
-        if (cancelGenRef.current) break;
-        const p = queue.shift();
-        if (!p) break;
-        try {
-          // 1) Verify sources (watermark/mismatch detection + measure image sizes).
-          //    Best-effort: a failure here MUST NOT block generation.
-          try {
-            await verifyFn({ data: { productId: p.id }, signal: ac.signal });
-          } catch (e) {
-            console.warn("verifySources failed for", p.id, e);
-          }
-          if (cancelGenRef.current) break;
-          // 2) Generate golden record (name + description + features).
-          await genFn({ data: { productId: p.id, mode: "all" }, signal: ac.signal });
-        } catch {
-          failed++;
-        }
-        if (!cancelGenRef.current) {
-          done++;
-          setGenProgress({ done, total: targets.length });
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    genAbortRef.current = null;
-    setGenProgress(null);
-    if (cancelGenRef.current) {
-      toast.info(`Zatrzymano. Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
-    } else {
-      toast.success(`Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    try {
+      await createJobFn({
+        data: { projectId: id, kind: "GENERATE_GOLDEN", items: targets.map((t) => t.id) },
+      });
+      toast.success(`Uruchomiono w tle: ${targets.length} produktów. Możesz zamknąć kartę.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "GENERATE_GOLDEN"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
     }
-    refetchProducts();
   };
 
   const regenerateAll = async (productIds?: string[]) => {
@@ -307,39 +307,15 @@ function ProjectPage() {
     }
     const max = mediaSettings.max_gallery_images ?? 0;
     if (!confirm(`Zregenerować zdjęcia dla ${targets.length} produktów? Do ${1 + max} generacji FAL na produkt.`)) return;
-    setRegenProgress({ done: 0, total: targets.length });
-    cancelRegenRef.current = false;
-    const ac = new AbortController();
-    regenAbortRef.current = ac;
-    let done = 0;
-    let failed = 0;
-    const queue = [...targets];
-    const worker = async () => {
-      while (queue.length) {
-        if (cancelRegenRef.current) break;
-        const t = queue.shift();
-        if (!t) break;
-        try {
-          await regenMediaFn({ data: { productId: t.id }, signal: ac.signal });
-        } catch (e) {
-          console.warn("regen failed", t, e);
-          failed++;
-        }
-        if (!cancelRegenRef.current) {
-          done++;
-          setRegenProgress({ done, total: targets.length });
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: 2 }, worker));
-    regenAbortRef.current = null;
-    setRegenProgress(null);
-    if (cancelRegenRef.current) {
-      toast.info(`Zatrzymano. Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
-    } else {
-      toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    try {
+      await createJobFn({
+        data: { projectId: id, kind: "REGENERATE_MEDIA", items: targets.map((t) => t.id) },
+      });
+      toast.success(`Uruchomiono w tle: ${targets.length} produktów. Możesz zamknąć kartę.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "REGENERATE_MEDIA"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
     }
-    refetchProducts();
   };
 
   const exportFile = async (fmt: "csv" | "xlsx") => {
@@ -384,10 +360,10 @@ function ProjectPage() {
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
           </Button>
-          <Button onClick={() => generateAll()} disabled={!!genProgress}>
+          <Button onClick={() => generateAll()} disabled={!!genActive}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
-          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenProgress}>
+          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenActive}>
             <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
           </Button>
           <Button asChild variant="outline">
@@ -404,54 +380,54 @@ function ProjectPage() {
         </div>
       </div>
 
-      {genProgress && (
+      {genActive && genJob && (
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Weryfikacja i generacja {genProgress.done}/{genProgress.total}</span>
+              <span>Weryfikacja i generacja {genJob.processed_count}/{genJob.total} (w tle)</span>
               <div className="flex items-center gap-3">
-                <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
+                <span className="text-muted-foreground">{Math.round((genJob.processed_count / Math.max(1, genJob.total)) * 100)}%</span>
                 <Button
                   size="sm"
                   variant="destructive"
-                  onClick={() => {
-                    cancelGenRef.current = true;
-                    genAbortRef.current?.abort();
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: genJob.id } });
                     toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "GENERATE_GOLDEN"] });
                   }}
-                  disabled={cancelGenRef.current}
+                  disabled={genJob.cancel_requested}
                 >
                   <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
                 </Button>
               </div>
             </div>
-            <Progress value={(genProgress.done / genProgress.total) * 100} />
+            <Progress value={(genJob.processed_count / Math.max(1, genJob.total)) * 100} />
           </CardContent>
         </Card>
       )}
 
-      {regenProgress && (
+      {regenActive && regenJob && (
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Regeneracja teł {regenProgress.done}/{regenProgress.total}</span>
+              <span>Regeneracja teł {regenJob.processed_count}/{regenJob.total} (w tle)</span>
               <div className="flex items-center gap-3">
-                <span className="text-muted-foreground">{Math.round((regenProgress.done / regenProgress.total) * 100)}%</span>
+                <span className="text-muted-foreground">{Math.round((regenJob.processed_count / Math.max(1, regenJob.total)) * 100)}%</span>
                 <Button
                   size="sm"
                   variant="destructive"
-                  onClick={() => {
-                    cancelRegenRef.current = true;
-                    regenAbortRef.current?.abort();
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: regenJob.id } });
                     toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "REGENERATE_MEDIA"] });
                   }}
-                  disabled={cancelRegenRef.current}
+                  disabled={regenJob.cancel_requested}
                 >
                   <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
                 </Button>
               </div>
             </div>
-            <Progress value={(regenProgress.done / regenProgress.total) * 100} />
+            <Progress value={(regenJob.processed_count / Math.max(1, regenJob.total)) * 100} />
           </CardContent>
         </Card>
       )}
