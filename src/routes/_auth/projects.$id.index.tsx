@@ -518,7 +518,7 @@ function ProjectPage() {
               <Button
                 size="sm"
                 onClick={() => generateAll([...selectedIds])}
-                disabled={!!genProgress}
+                disabled={!!genActive}
               >
                 <Sparkles className="h-4 w-4 mr-1" /> Generuj złote rekordy
               </Button>
@@ -526,7 +526,7 @@ function ProjectPage() {
                 size="sm"
                 variant="outline"
                 onClick={() => regenerateAll([...selectedIds])}
-                disabled={!!regenProgress}
+                disabled={!!regenActive}
               >
                 <RefreshCw className="h-4 w-4 mr-1" /> Regeneruj tła
               </Button>
