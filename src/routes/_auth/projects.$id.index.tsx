@@ -83,7 +83,17 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
+const searchSchema = z.object({
+  page: z.number().min(1).catch(1),
+  pageSize: z.number().min(1).catch(25),
+  filter: z.enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH"]).catch("ALL"),
+  search: z.string().catch(""),
+});
+
+export const Route = createFileRoute("/_auth/projects/$id/")({
+  validateSearch: searchSchema,
+  component: ProjectPage,
+});
 
 function ProjectPage() {
   const { id } = Route.useParams();
