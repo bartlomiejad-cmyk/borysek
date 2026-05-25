@@ -511,10 +511,10 @@ function ProjectPage() {
             <Input
               placeholder="Szukaj nazwa/EAN/kod..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => updateSearch({ search: e.target.value })}
               className="w-64"
             />
-            <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+            <Select value={filter} onValueChange={(v) => updateSearch({ filter: v as typeof filter })}>
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">Wszystkie</SelectItem>
