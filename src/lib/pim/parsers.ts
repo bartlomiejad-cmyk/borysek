@@ -65,6 +65,39 @@ export type RawCsv = {
   rows: Array<Record<string, string>>;
 };
 
+export type ExplicitCsvMapping = {
+  id_column?: string | null;
+  name_column?: string | null;
+  code_column?: string | null;
+  ean_column?: string | null;
+};
+
+/**
+ * Build CsvRow[] from already-parsed RawCsv using an explicit column mapping
+ * (header → field). Unlike `parseCsv`, does NOT fall back to common aliases —
+ * only the selected columns are read. Empty/unset mappings yield `null`.
+ */
+export const buildCsvRowsFromMapping = (
+  raw: RawCsv,
+  mapping: ExplicitCsvMapping,
+): CsvRow[] => {
+  const get = (row: Record<string, string>, col?: string | null) => {
+    if (!col) return null;
+    const v = row[col];
+    if (v === null || v === undefined) return null;
+    const t = String(v).trim();
+    return t === "" ? null : t;
+  };
+  const rows: CsvRow[] = raw.rows.map((r) => ({
+    ext_id: get(r, mapping.id_column),
+    nazwa: get(r, mapping.name_column),
+    kod: get(r, mapping.code_column),
+    ean: get(r, mapping.ean_column),
+    raw: r,
+  }));
+  return rows.filter((r) => r.nazwa || r.ean || r.kod || r.ext_id);
+};
+
 /**
  * Parse a CSV file into raw headers + string rows. Used for the post-import
  * column remap dialog, where the user picks which CSV column maps to which

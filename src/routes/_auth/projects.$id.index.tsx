@@ -9,7 +9,6 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import { getProject, updateProject } from "@/lib/pim/projects.functions";
 import {
-  ingestSourceProducts,
   ingestSearchResults,
   ingestProductSources,
   clearProjectData,
@@ -18,7 +17,7 @@ import { runMatching } from "@/lib/pim/matching.functions";
 import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
-import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
+import { parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage } from "@/lib/pim/regen.functions";
@@ -66,6 +65,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
+import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
@@ -102,7 +102,6 @@ function ProjectPage() {
 
   const getFn = useServerFn(getProject);
   const updFn = useServerFn(updateProject);
-  const ingSpFn = useServerFn(ingestSourceProducts);
   const ingSrFn = useServerFn(ingestSearchResults);
   const ingPsFn = useServerFn(ingestProductSources);
   const clearFn = useServerFn(clearProjectData);
@@ -236,24 +235,6 @@ function ProjectPage() {
   const clearSelected = () => setSelectedIds(new Set());
 
   // ---- Uploads ----
-
-  const handleSourceCsv = async (file: File) => {
-    const rows = await parseCsv(file, {
-      id_column: meta?.project.id_column,
-      name_column: meta?.project.name_column,
-      code_column: meta?.project.code_column,
-      ean_column: meta?.project.ean_column,
-    });
-    if (!rows.length) throw new Error("Pusty plik CSV lub brak nagłówków id/nazwa/kod/ean");
-    await clearFn({ data: { projectId: id, scope: "source_products" } });
-    const batchSize = 1000;
-    for (let i = 0; i < rows.length; i += batchSize) {
-      await ingSpFn({ data: { projectId: id, rows: rows.slice(i, i + batchSize) } });
-    }
-    toast.success(`Wczytano ${rows.length} produktów`);
-    qc.invalidateQueries({ queryKey: ["project", id] });
-    refetchProducts();
-  };
 
   const handleSearchJson = async (file: File) => {
     const text = await file.text();
@@ -463,12 +444,16 @@ function ProjectPage() {
 
         <TabsContent value="data" className="space-y-3 pt-3">
           <div className="grid md:grid-cols-3 gap-3">
-            <UploadZone
-              title="Source CSV"
-              accept=".csv,text/csv"
-              description="Twoja baza: id, nazwa, kod, ean"
+            <ImportCsvDialog
+              projectId={id}
               count={meta?.counts.source_products}
-              onFile={handleSourceCsv}
+              defaults={{
+                id_column: meta?.project.id_column,
+                name_column: meta?.project.name_column,
+                code_column: meta?.project.code_column,
+                ean_column: meta?.project.ean_column,
+              }}
+              onDone={() => refetchProducts()}
             />
             <UploadZone
               title="Search JSON"
