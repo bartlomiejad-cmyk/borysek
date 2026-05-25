@@ -14,6 +14,7 @@ import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
 import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects.$id.index'
+import { Route as ApiPublicHooksProcessBulkJobsRouteImport } from './routes/api/public/hooks/process-bulk-jobs'
 import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/projects.$id.verify'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
 
@@ -41,6 +42,12 @@ const AuthProjectsIdIndexRoute = AuthProjectsIdIndexRouteImport.update({
   path: '/projects/$id/',
   getParentRoute: () => AuthRoute,
 } as any)
+const ApiPublicHooksProcessBulkJobsRoute =
+  ApiPublicHooksProcessBulkJobsRouteImport.update({
+    id: '/api/public/hooks/process-bulk-jobs',
+    path: '/api/public/hooks/process-bulk-jobs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthProjectsIdVerifyRoute = AuthProjectsIdVerifyRouteImport.update({
   id: '/projects/$id/verify',
   path: '/projects/$id/verify',
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/projects/': typeof AuthProjectsIndexRoute
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
+  '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
@@ -66,6 +74,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/projects': typeof AuthProjectsIndexRoute
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
+  '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/projects/$id': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
@@ -76,6 +85,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_auth/projects/': typeof AuthProjectsIndexRoute
   '/_auth/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
+  '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/_auth/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
 }
@@ -86,6 +96,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/projects/'
     | '/projects/$id/verify'
+    | '/api/public/hooks/process-bulk-jobs'
     | '/projects/$id/'
     | '/projects/$id/products/$pid'
   fileRoutesByTo: FileRoutesByTo
@@ -94,6 +105,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/projects'
     | '/projects/$id/verify'
+    | '/api/public/hooks/process-bulk-jobs'
     | '/projects/$id'
     | '/projects/$id/products/$pid'
   id:
@@ -103,6 +115,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_auth/projects/'
     | '/_auth/projects/$id/verify'
+    | '/api/public/hooks/process-bulk-jobs'
     | '/_auth/projects/$id/'
     | '/_auth/projects/$id/products/$pid'
   fileRoutesById: FileRoutesById
@@ -111,6 +124,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ApiPublicHooksProcessBulkJobsRoute: typeof ApiPublicHooksProcessBulkJobsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -150,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthProjectsIdIndexRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/api/public/hooks/process-bulk-jobs': {
+      id: '/api/public/hooks/process-bulk-jobs'
+      path: '/api/public/hooks/process-bulk-jobs'
+      fullPath: '/api/public/hooks/process-bulk-jobs'
+      preLoaderRoute: typeof ApiPublicHooksProcessBulkJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_auth/projects/$id/verify': {
       id: '/_auth/projects/$id/verify'
       path: '/projects/$id/verify'
@@ -187,7 +208,18 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRouteWithChildren,
   LoginRoute: LoginRoute,
+  ApiPublicHooksProcessBulkJobsRoute: ApiPublicHooksProcessBulkJobsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
