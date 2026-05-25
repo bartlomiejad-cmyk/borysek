@@ -120,6 +120,8 @@ function ProjectPage() {
   const [search, setSearch] = useState("");
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
   const [regenProgress, setRegenProgress] = useState<{ done: number; total: number } | null>(null);
+  const cancelGenRef = useRef(false);
+  const cancelRegenRef = useRef(false);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -247,11 +249,13 @@ function ProjectPage() {
       return;
     }
     setGenProgress({ done: 0, total: targets.length });
+    cancelGenRef.current = false;
     let done = 0;
     let failed = 0;
     const queue = [...targets];
     const worker = async () => {
       while (queue.length) {
+        if (cancelGenRef.current) break;
         const p = queue.shift();
         if (!p) break;
         try {
@@ -273,7 +277,11 @@ function ProjectPage() {
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     setGenProgress(null);
-    toast.success(`Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    if (cancelGenRef.current) {
+      toast.info(`Zatrzymano. Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    } else {
+      toast.success(`Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    }
     refetchProducts();
   };
 
@@ -292,11 +300,13 @@ function ProjectPage() {
     const max = mediaSettings.max_gallery_images ?? 0;
     if (!confirm(`Zregenerować zdjęcia dla ${targets.length} produktów? Do ${1 + max} generacji FAL na produkt.`)) return;
     setRegenProgress({ done: 0, total: targets.length });
+    cancelRegenRef.current = false;
     let done = 0;
     let failed = 0;
     const queue = [...targets];
     const worker = async () => {
       while (queue.length) {
+        if (cancelRegenRef.current) break;
         const t = queue.shift();
         if (!t) break;
         try {
@@ -311,7 +321,11 @@ function ProjectPage() {
     };
     await Promise.all(Array.from({ length: 2 }, worker));
     setRegenProgress(null);
-    toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    if (cancelRegenRef.current) {
+      toast.info(`Zatrzymano. Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    } else {
+      toast.success(`Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
+    }
     refetchProducts();
   };
 
@@ -382,7 +396,20 @@ function ProjectPage() {
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
               <span>Weryfikacja i generacja {genProgress.done}/{genProgress.total}</span>
-              <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">{Math.round((genProgress.done / genProgress.total) * 100)}%</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    cancelGenRef.current = true;
+                    toast.message("Zatrzymywanie po bieżących wywołaniach…");
+                  }}
+                  disabled={cancelGenRef.current}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
             </div>
             <Progress value={(genProgress.done / genProgress.total) * 100} />
           </CardContent>
@@ -394,7 +421,20 @@ function ProjectPage() {
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
               <span>Regeneracja teł {regenProgress.done}/{regenProgress.total}</span>
-              <span className="text-muted-foreground">{Math.round((regenProgress.done / regenProgress.total) * 100)}%</span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">{Math.round((regenProgress.done / regenProgress.total) * 100)}%</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    cancelRegenRef.current = true;
+                    toast.message("Zatrzymywanie po bieżących wywołaniach…");
+                  }}
+                  disabled={cancelRegenRef.current}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
             </div>
             <Progress value={(regenProgress.done / regenProgress.total) * 100} />
           </CardContent>
