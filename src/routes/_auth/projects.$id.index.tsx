@@ -669,7 +669,7 @@ function ProjectPage() {
                           <RefreshCw className="h-4 w-4" />
                         </Button>
                         <Button asChild size="sm" variant="ghost">
-                          <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }}>
+                          <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }} search={urlSearch}>
                             <ArrowRight className="h-4 w-4" />
                           </Link>
                         </Button>
