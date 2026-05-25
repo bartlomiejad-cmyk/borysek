@@ -18,7 +18,7 @@ import { runMatching } from "@/lib/pim/matching.functions";
 import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
-import { parseCsv, parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
+import { parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage } from "@/lib/pim/regen.functions";
@@ -66,6 +66,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
+import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
