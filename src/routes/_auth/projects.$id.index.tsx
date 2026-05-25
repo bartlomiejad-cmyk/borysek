@@ -9,7 +9,6 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import { getProject, updateProject } from "@/lib/pim/projects.functions";
 import {
-  ingestSourceProducts,
   ingestSearchResults,
   ingestProductSources,
   clearProjectData,
@@ -103,7 +102,6 @@ function ProjectPage() {
 
   const getFn = useServerFn(getProject);
   const updFn = useServerFn(updateProject);
-  const ingSpFn = useServerFn(ingestSourceProducts);
   const ingSrFn = useServerFn(ingestSearchResults);
   const ingPsFn = useServerFn(ingestProductSources);
   const clearFn = useServerFn(clearProjectData);
