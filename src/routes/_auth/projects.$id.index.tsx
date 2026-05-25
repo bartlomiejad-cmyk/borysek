@@ -238,24 +238,6 @@ function ProjectPage() {
 
   // ---- Uploads ----
 
-  const handleSourceCsv = async (file: File) => {
-    const rows = await parseCsv(file, {
-      id_column: meta?.project.id_column,
-      name_column: meta?.project.name_column,
-      code_column: meta?.project.code_column,
-      ean_column: meta?.project.ean_column,
-    });
-    if (!rows.length) throw new Error("Pusty plik CSV lub brak nagłówków id/nazwa/kod/ean");
-    await clearFn({ data: { projectId: id, scope: "source_products" } });
-    const batchSize = 1000;
-    for (let i = 0; i < rows.length; i += batchSize) {
-      await ingSpFn({ data: { projectId: id, rows: rows.slice(i, i + batchSize) } });
-    }
-    toast.success(`Wczytano ${rows.length} produktów`);
-    qc.invalidateQueries({ queryKey: ["project", id] });
-    refetchProducts();
-  };
-
   const handleSearchJson = async (file: File) => {
     const text = await file.text();
     const json = JSON.parse(text);
