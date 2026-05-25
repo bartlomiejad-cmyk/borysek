@@ -1,8 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { z } from "zod";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { toast } from "sonner";
@@ -82,7 +83,17 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-export const Route = createFileRoute("/_auth/projects/$id/")({ component: ProjectPage });
+const searchSchema = z.object({
+  page: z.number().min(1).catch(1),
+  pageSize: z.number().min(1).catch(25),
+  filter: z.enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH"]).catch("ALL"),
+  search: z.string().catch(""),
+});
+
+export const Route = createFileRoute("/_auth/projects/$id/")({
+  validateSearch: searchSchema,
+  component: ProjectPage,
+});
 
 function ProjectPage() {
   const { id } = Route.useParams();
@@ -121,11 +132,21 @@ function ProjectPage() {
     queryFn: () => listFn({ data: { projectId: id } }),
   });
 
-  const [filter, setFilter] = useState<"ALL" | "MATCHED" | "PENDING" | "GENERATED" | "NO_MATCH">("ALL");
-  const [search, setSearch] = useState("");
-  const [pageSize, setPageSize] = useState<number>(25);
-  const [page, setPage] = useState<number>(1);
+  const navigate = useNavigate();
+  const urlSearch = Route.useSearch();
+
+  const filter = urlSearch.filter;
+  const search = urlSearch.search;
+  const pageSize = urlSearch.pageSize;
+  const page = urlSearch.page;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const updateSearch = (partial: Partial<typeof urlSearch>) => {
+    navigate({
+      to: ".",
+      search: (prev: typeof urlSearch) => ({ ...prev, ...partial }),
+    });
+  };
 
   // Active background jobs (server-side, survives browser close).
   const lastTerminalToastRef = useRef<Record<string, string>>({});
@@ -185,7 +206,7 @@ function ProjectPage() {
 
   // Reset page when filter/search/pageSize changes
   useEffect(() => {
-    setPage(1);
+    if (page !== 1) updateSearch({ page: 1 });
   }, [filter, search, pageSize]);
 
   const toggleSelected = (pid: string) => {
@@ -490,10 +511,10 @@ function ProjectPage() {
             <Input
               placeholder="Szukaj nazwa/EAN/kod..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => updateSearch({ search: e.target.value })}
               className="w-64"
             />
-            <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+            <Select value={filter} onValueChange={(v) => updateSearch({ filter: v as typeof filter })}>
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">Wszystkie</SelectItem>
@@ -648,7 +669,7 @@ function ProjectPage() {
                           <RefreshCw className="h-4 w-4" />
                         </Button>
                         <Button asChild size="sm" variant="ghost">
-                          <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }}>
+                          <Link to="/projects/$id/products/$pid" params={{ id, pid: p.id }} search={urlSearch}>
                             <ArrowRight className="h-4 w-4" />
                           </Link>
                         </Button>
@@ -662,7 +683,7 @@ function ProjectPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
             <div className="flex items-center gap-2 text-muted-foreground">
               <span>Wierszy na stronę:</span>
-              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+              <Select value={String(pageSize)} onValueChange={(v) => updateSearch({ pageSize: Number(v) })}>
                 <SelectTrigger className="w-20 h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {[10, 25, 50, 100, 200, 500].map((n) => (
@@ -681,7 +702,7 @@ function ProjectPage() {
                 variant="outline"
                 size="sm"
                 disabled={currentPage <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                onClick={() => updateSearch({ page: Math.max(1, currentPage - 1) })}
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
@@ -692,7 +713,7 @@ function ProjectPage() {
                 variant="outline"
                 size="sm"
                 disabled={currentPage >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                onClick={() => updateSearch({ page: Math.min(totalPages, currentPage + 1) })}
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
