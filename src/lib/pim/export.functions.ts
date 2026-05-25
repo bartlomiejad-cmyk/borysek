@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { pickImages, type ImageMeta, type ImageScores } from "./images";
+import { pickImages, pickThumbsForList, type ImageMeta, type ImageScores } from "./images";
 
 export const exportProject = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -25,7 +25,7 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, model, generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
@@ -89,6 +89,9 @@ export const exportProject = createServerFn({ method: "GET" })
       }
       // Scrapowane zdjęcia ze źródeł — bez wymuszania regen. URL AI ma własną kolumnę.
       const images = pickImages(all, meta, hidden, scores);
+      // Te same URL-e i kolejność co widok listy produktów (pinned > >=600 > reszta).
+      const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
+      const listImages = pickThumbsForList(all, meta, hidden, pinned, 12);
       const regen = ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image) ?? "";
       const gallery = (((e as unknown as { ai_gallery_urls?: string[] } | undefined)?.ai_gallery_urls) ?? []) as string[];
       const features = ((e as unknown as { golden_features?: Array<{ key: string; value: string }> } | undefined)?.golden_features ?? []);
@@ -115,6 +118,8 @@ export const exportProject = createServerFn({ method: "GET" })
         image_2: images[1] ?? "",
         image_3: images[2] ?? "",
         images_all: images.join(" | "),
+        Final_main_image: listImages[0] ?? "",
+        Final_images: listImages.join(","),
         ai_image_main: regen,
         ai_gallery_all: gallery.join(" | "),
         ...galleryCols,

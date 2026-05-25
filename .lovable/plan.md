@@ -1,22 +1,29 @@
-# Naprawa pozycji podglądu zdjęć na liście produktów
+## Cel
+Dodać do eksportu CSV dwie kolumny **`Final_main_image`** i **`Final_images`** zwracające dokładnie te same URL-e zdjęć (i w tej samej kolejności) co widok listy produktów.
 
-## Problem
-Po najechaniu na miniaturę zdjęcia, powiększony podgląd pojawia się w niewłaściwym miejscu (środek panelu / góra strony) zamiast tuż obok miniatury — szczególnie po przewinięciu listy w dół.
+## Skąd biorą się zdjęcia na liście
+W `src/lib/pim/queries.functions.ts` funkcja `pickThumbsForList(...)` buduje tablicę `images` w kolejności:
+1. `pinned_main_url` (jeśli ustawione i nie ukryte),
+2. zdjęcia ≥ 600 px sortowane malejąco po polu,
+3. pozostałe zdjęcia sortowane malejąco po polu,
+4. limit 12, bez duplikatów, bez `hidden_images`.
 
-## Przyczyna
-Komponent `ImageStrip` w `src/routes/_auth/projects.$id.index.tsx` (linia ~1137) renderuje podgląd przez `position: fixed` ze współrzędnymi z `getBoundingClientRect()`. To powinno działać względem okna przeglądarki, ale któryś z przodków (animacja `animate-fade-in`, kontenery z `transform`/`filter`) tworzy własny kontekst pozycjonowania — wtedy `fixed` przestaje być względny do viewportu i element ucieka w bok.
+Wartością „głównego zdjęcia” na liście jest `images[0]` (czyli pinned, gdy istnieje, w przeciwnym razie największe niezukryte).
 
-## Rozwiązanie
-Wyrenderować warstwę podglądu w portalu do `document.body` przez `createPortal` z `react-dom`. Wtedy żaden przodek z `transform` nie wpływa na pozycjonowanie, a obliczone współrzędne `clientX/clientY` zawsze pokrywają się z viewportem — podgląd pojawi się dokładnie obok miniatury, niezależnie od scrolla.
-
-## Zmiany w kodzie
-
-Plik: `src/routes/_auth/projects.$id.index.tsx`
-
-1. Dodać import: `import { createPortal } from "react-dom";`
-2. W komponencie `ImageStrip` zawinąć blok `{hovered ? (<div className="fixed …">…</div>) : null}` w `createPortal(…, document.body)`, z fallbackiem na SSR (`typeof document !== "undefined"`).
+## Zmiany w `src/lib/pim/export.functions.ts`
+1. Dociągnąć z `enrichments` pola `pinned_main_url` (`hidden_images`, `image_meta`, `picked_urls` już są).
+2. Wyodrębnić helper `pickThumbsForList` do `src/lib/pim/images.ts` (lub zaimportować go z `queries.functions.ts`, jeśli prościej) — żeby eksport używał **tej samej funkcji** co lista. Preferuję przeniesienie do `images.ts` (czysty moduł), bo `queries.functions.ts` to serverFn.
+3. Dla każdego produktu policzyć `listImages = pickThumbsForList(allFromSources, meta, hidden, pinned, 12)` — identycznie jak w liście (te same dane wejściowe: scrapowane URL-e z `product_sources.images` z `picked_urls`; `extra_images` nie wchodzą do listy, więc też nie tutaj).
+4. Dodać do zwracanego obiektu:
+   - `Final_main_image: listImages[0] ?? ""`
+   - `Final_images: listImages.join(",")`
 
 ## Czego nie ruszam
-- Logiki obliczania pozycji (`onMouseEnter`) — jest poprawna.
-- Pozostałych funkcji (pin/hide/dialog).
-- Backendu i jobów w tle.
+- Logiki `pickImages` używanej dla kolumn `image_1..3`, `images_all`, `ai_image_main`, `ai_gallery_*` — zostają bez zmian.
+- Widoku listy i UI.
+- Backendu/jobów.
+
+## Pliki
+- `src/lib/pim/images.ts` — dodać/wyeksportować `pickThumbsForList`.
+- `src/lib/pim/export.functions.ts` — dociągnąć `pinned_main_url`, policzyć i dodać dwie kolumny.
+- (opcjonalnie) `src/lib/pim/queries.functions.ts` — używać reeksportowanego helpera, żeby nie duplikować logiki.

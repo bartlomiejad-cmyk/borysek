@@ -60,3 +60,40 @@ function rankScore(url: string, meta: ImageMeta, scores: ImageScores): number {
   const packaging = s.has_packaging ?? 0;
   return (central + clean + 1.5 * packaging) * effectiveArea;
 }
+
+// Mirrors the list view ordering: pinned first, then >=600px sorted by area,
+// then the rest. Used by both the product list and the CSV export so the
+// "Final_*" columns stay in sync with what users see.
+export function pickThumbsForList(
+  urls: string[],
+  meta: ImageMeta,
+  hidden: Set<string>,
+  pinned: string | null,
+  max: number,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const candidates = urls.filter((u) => !hidden.has(u));
+  const areaOf = (u: string) => {
+    const m = meta[u];
+    return m ? m.w * m.h : 0;
+  };
+  const big: string[] = [];
+  const rest: string[] = [];
+  for (const u of candidates) {
+    const m = meta[u];
+    if (m && Math.min(m.w, m.h) >= MIN_SIDE) big.push(u);
+    else rest.push(u);
+  }
+  big.sort((a, b) => areaOf(b) - areaOf(a));
+  rest.sort((a, b) => areaOf(b) - areaOf(a));
+  const push = (u: string) => {
+    if (!u || seen.has(u) || out.length >= max) return;
+    seen.add(u);
+    out.push(u);
+  };
+  if (pinned && !hidden.has(pinned)) push(pinned);
+  for (const u of big) push(u);
+  for (const u of rest) push(u);
+  return out;
+}

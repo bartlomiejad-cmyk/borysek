@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { type ImageMeta } from "./images";
+import { type ImageMeta, pickThumbsForList } from "./images";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -97,40 +97,6 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       };
     });
   });
-
-function pickThumbsForList(
-  urls: string[],
-  meta: ImageMeta,
-  hidden: Set<string>,
-  pinned: string | null,
-  max: number,
-): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const candidates = urls.filter((u) => !hidden.has(u));
-  const area = (u: string) => {
-    const m = meta[u];
-    return m ? m.w * m.h : 0;
-  };
-  const big: string[] = [];
-  const rest: string[] = [];
-  for (const u of candidates) {
-    const m = meta[u];
-    if (m && Math.min(m.w, m.h) >= 600) big.push(u);
-    else rest.push(u);
-  }
-  big.sort((a, b) => area(b) - area(a));
-  rest.sort((a, b) => area(b) - area(a));
-  const push = (u: string) => {
-    if (!u || seen.has(u) || out.length >= max) return;
-    seen.add(u);
-    out.push(u);
-  };
-  if (pinned && !hidden.has(pinned)) push(pinned);
-  for (const u of big) push(u);
-  for (const u of rest) push(u);
-  return out;
-}
 
 export const getProductDetail = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
