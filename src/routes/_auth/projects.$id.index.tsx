@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
+import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
@@ -482,6 +483,21 @@ function ProjectPage() {
               description="Zeskrapowane strony produktowe (url, name, description, images)"
               count={meta?.counts.product_sources}
               onFile={handleProductsJson}
+            />
+          </div>
+          <div className="flex items-center justify-between border rounded-lg p-3 bg-muted/30">
+            <div className="text-xs text-muted-foreground">
+              Brakuje kolumny (np. symbol/kod, EAN) w już zaimportowanych produktach? Dograj ją z CSV bez kasowania danych AI.
+            </div>
+            <RemapCsvDialog
+              projectId={id}
+              defaults={{
+                id_column: meta?.project.id_column,
+                name_column: meta?.project.name_column,
+                code_column: meta?.project.code_column,
+                ean_column: meta?.project.ean_column,
+              }}
+              onDone={() => refetchProducts()}
             />
           </div>
         </TabsContent>
