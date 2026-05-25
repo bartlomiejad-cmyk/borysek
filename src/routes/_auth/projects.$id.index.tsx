@@ -122,6 +122,8 @@ function ProjectPage() {
   const [regenProgress, setRegenProgress] = useState<{ done: number; total: number } | null>(null);
   const cancelGenRef = useRef(false);
   const cancelRegenRef = useRef(false);
+  const genAbortRef = useRef<AbortController | null>(null);
+  const regenAbortRef = useRef<AbortController | null>(null);
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -250,6 +252,8 @@ function ProjectPage() {
     }
     setGenProgress({ done: 0, total: targets.length });
     cancelGenRef.current = false;
+    const ac = new AbortController();
+    genAbortRef.current = ac;
     let done = 0;
     let failed = 0;
     const queue = [...targets];
@@ -262,20 +266,24 @@ function ProjectPage() {
           // 1) Verify sources (watermark/mismatch detection + measure image sizes).
           //    Best-effort: a failure here MUST NOT block generation.
           try {
-            await verifyFn({ data: { productId: p.id } });
+            await verifyFn({ data: { productId: p.id }, signal: ac.signal });
           } catch (e) {
             console.warn("verifySources failed for", p.id, e);
           }
+          if (cancelGenRef.current) break;
           // 2) Generate golden record (name + description + features).
-          await genFn({ data: { productId: p.id, mode: "all" } });
+          await genFn({ data: { productId: p.id, mode: "all" }, signal: ac.signal });
         } catch {
           failed++;
         }
-        done++;
-        setGenProgress({ done, total: targets.length });
+        if (!cancelGenRef.current) {
+          done++;
+          setGenProgress({ done, total: targets.length });
+        }
       }
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    genAbortRef.current = null;
     setGenProgress(null);
     if (cancelGenRef.current) {
       toast.info(`Zatrzymano. Wygenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
@@ -301,6 +309,8 @@ function ProjectPage() {
     if (!confirm(`Zregenerować zdjęcia dla ${targets.length} produktów? Do ${1 + max} generacji FAL na produkt.`)) return;
     setRegenProgress({ done: 0, total: targets.length });
     cancelRegenRef.current = false;
+    const ac = new AbortController();
+    regenAbortRef.current = ac;
     let done = 0;
     let failed = 0;
     const queue = [...targets];
@@ -310,16 +320,19 @@ function ProjectPage() {
         const t = queue.shift();
         if (!t) break;
         try {
-          await regenMediaFn({ data: { productId: t.id } });
+          await regenMediaFn({ data: { productId: t.id }, signal: ac.signal });
         } catch (e) {
           console.warn("regen failed", t, e);
           failed++;
         }
-        done++;
-        setRegenProgress({ done, total: targets.length });
+        if (!cancelRegenRef.current) {
+          done++;
+          setRegenProgress({ done, total: targets.length });
+        }
       }
     };
     await Promise.all(Array.from({ length: 2 }, worker));
+    regenAbortRef.current = null;
     setRegenProgress(null);
     if (cancelRegenRef.current) {
       toast.info(`Zatrzymano. Zregenerowano ${done - failed}/${targets.length}${failed ? `, ${failed} błędów` : ""}`);
@@ -403,7 +416,8 @@ function ProjectPage() {
                   variant="destructive"
                   onClick={() => {
                     cancelGenRef.current = true;
-                    toast.message("Zatrzymywanie po bieżących wywołaniach…");
+                    genAbortRef.current?.abort();
+                    toast.message("Zatrzymywanie…");
                   }}
                   disabled={cancelGenRef.current}
                 >
@@ -428,7 +442,8 @@ function ProjectPage() {
                   variant="destructive"
                   onClick={() => {
                     cancelRegenRef.current = true;
-                    toast.message("Zatrzymywanie po bieżących wywołaniach…");
+                    regenAbortRef.current?.abort();
+                    toast.message("Zatrzymywanie…");
                   }}
                   disabled={cancelRegenRef.current}
                 >
