@@ -135,3 +135,87 @@ export const clearProjectData = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+const remapRowSchema = z.object({
+  key: z.string().min(1),
+  ext_id: z.string().nullable().optional(),
+  nazwa: z.string().nullable().optional(),
+  kod: z.string().nullable().optional(),
+  ean: z.string().nullable().optional(),
+});
+
+type RemapField = "ext_id" | "nazwa" | "kod" | "ean";
+
+const normalizeKey = (field: RemapField, v: string | null | undefined) => {
+  if (v === null || v === undefined) return "";
+  const t = String(v).trim();
+  if (!t) return "";
+  return field === "nazwa" ? t.toLowerCase() : t;
+};
+
+export const updateSourceProductsFromCsv = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z.object({
+      projectId: z.string().uuid(),
+      keyField: z.enum(["ext_id", "nazwa", "kod", "ean"]),
+      overwrite: z.boolean(),
+      rows: z.array(remapRowSchema).max(20000),
+    }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: products, error } = await supabase
+      .from("source_products")
+      .select("id, ext_id, nazwa, kod, ean")
+      .eq("project_id", data.projectId)
+      .limit(50000);
+    if (error) throw new Error(error.message);
+
+    const byKey = new Map<string, { id: string; ext_id: string | null; nazwa: string | null; kod: string | null; ean: string | null }>();
+    for (const p of products ?? []) {
+      const k = normalizeKey(data.keyField, (p as Record<string, string | null>)[data.keyField]);
+      if (k && !byKey.has(k)) byKey.set(k, p);
+    }
+
+    let matched = 0;
+    let unmatched = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    const fields: RemapField[] = ["ext_id", "nazwa", "kod", "ean"];
+
+    for (const r of data.rows) {
+      const k = normalizeKey(data.keyField, r.key);
+      if (!k) { unmatched++; continue; }
+      const prod = byKey.get(k);
+      if (!prod) { unmatched++; continue; }
+      matched++;
+
+      const patch: Partial<Record<RemapField, string | null>> = {};
+      for (const f of fields) {
+        const incoming = r[f];
+        if (incoming === undefined) continue;
+        const trimmed = incoming === null ? null : String(incoming).trim();
+        if (trimmed === null || trimmed === "") continue;
+        const current = prod[f];
+        if (!data.overwrite && current !== null && current !== undefined && String(current).trim() !== "") continue;
+        patch[f] = trimmed;
+      }
+
+      if (Object.keys(patch).length === 0) { skipped++; continue; }
+
+      const { error: upErr } = await supabase
+        .from("source_products")
+        .update(patch as never)
+        .eq("id", prod.id);
+      if (upErr) throw new Error(upErr.message);
+      // Reflect locally so duplicate CSV rows hitting the same product behave
+      // consistently with overwrite=false on subsequent iterations.
+      Object.assign(prod, patch);
+      updated++;
+    }
+
+    return { matched, unmatched, updated, skipped, total: data.rows.length };
+  });
