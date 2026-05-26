@@ -388,7 +388,10 @@ function ProjectPage() {
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Weryfikacja i generacja {genJob.processed_count}/{genJob.total} (w tle)</span>
+              <span>
+                {genJob.cancel_requested ? "Zatrzymywanie… " : "Generacja złotych rekordów "}
+                {genJob.processed_count}/{genJob.total} (w tle)
+              </span>
               <div className="flex items-center gap-3">
                 <span className="text-muted-foreground">{Math.round((genJob.processed_count / Math.max(1, genJob.total)) * 100)}%</span>
                 <Button
@@ -414,7 +417,10 @@ function ProjectPage() {
         <Card className="mb-4">
           <CardContent className="py-3">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Regeneracja teł {regenJob.processed_count}/{regenJob.total} (w tle)</span>
+              <span>
+                {regenJob.cancel_requested ? "Zatrzymywanie… " : "Regeneracja teł "}
+                {regenJob.processed_count}/{regenJob.total} (w tle)
+              </span>
               <div className="flex items-center gap-3">
                 <span className="text-muted-foreground">{Math.round((regenJob.processed_count / Math.max(1, regenJob.total)) * 100)}%</span>
                 <Button
