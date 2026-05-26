@@ -90,6 +90,23 @@ export const createBulkJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    // Kick the worker immediately so the user does not wait for the next
+    // cron tick. Failure here is non-fatal — the cron will pick the job up.
+    try {
+      const base =
+        process.env.PUBLIC_APP_URL ||
+        "https://project--a56746f2-6fdf-47b1-8095-043a41af98fd.lovable.app";
+      const apikey = process.env.SUPABASE_PUBLISHABLE_KEY;
+      if (apikey) {
+        void fetch(`${base}/api/public/hooks/process-bulk-jobs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey },
+          body: "{}",
+        }).catch(() => {});
+      }
+    } catch {
+      // ignore — cron will catch up
+    }
     return mapRow(row as Record<string, unknown>);
   });
 
@@ -117,11 +134,26 @@ export const cancelBulkJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({ jobId: z.string().uuid() }).parse(i))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
+    // PENDING jobs were never picked up by the worker, so flip them straight
+    // to CANCELLED — otherwise the UI shows a non-cancellable "Zatrzymywanie…"
+    // forever. PROCESSING jobs only get a cancel flag; the worker finishes
+    // the current item and ends the job.
+    const { error: e1 } = await context.supabase
+      .from("bulk_jobs" as never)
+      .update({
+        status: "CANCELLED",
+        cancel_requested: true,
+        finished_at: new Date().toISOString(),
+      } as never)
+      .eq("id", data.jobId)
+      .eq("status", "PENDING");
+    if (e1) throw new Error(e1.message);
+
+    const { error: e2 } = await context.supabase
       .from("bulk_jobs" as never)
       .update({ cancel_requested: true } as never)
       .eq("id", data.jobId)
-      .in("status", ["PENDING", "PROCESSING"]);
-    if (error) throw new Error(error.message);
+      .eq("status", "PROCESSING");
+    if (e2) throw new Error(e2.message);
     return { ok: true };
   });
