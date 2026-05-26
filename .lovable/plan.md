@@ -1,31 +1,53 @@
-## Problem
+## Cel
+Naprawić dwa problemy:
+- złote rekordy stoją w kolejce bez postępu, a „Zatrzymaj” nie kończy poprawnie zadania,
+- generowane opisy brzmią zbyt sztucznie/marketingowo.
 
-Obecnie „Wgraj produkty" (UploadZone → `handleSourceCsv`) idzie od razu w `parseCsv` z polami `id_column / name_column / code_column / ean_column` wziętymi z konfiguracji projektu. Jeśli któraś nie jest ustawiona w projekcie, kolumna leci jako `null` i potem trzeba ratować się „Uzupełnij dane z CSV". Użytkownik chce mapowania **już na etapie wgrywania**.
+## Co znalazłem
+- W bazie są zadania `GENERATE_GOLDEN` w stanie `PENDING` z `processed_count = 0`, więc nie są podejmowane przez worker.
+- Jedno zadanie ma `cancel_requested = true`, ale nadal ma status `PENDING`, więc UI może wyglądać jak zawieszone.
+- Endpoint workerowy istnieje, ale w kodzie nie widać konfiguracji, która regularnie go uruchamia.
+- Generowanie złotych rekordów w tle robi teraz także weryfikację źródeł/zdjęć przed każdym produktem, co mocno wydłuża wykonanie i utrudnia szybkie zatrzymanie.
 
-## Rozwiązanie
+## Plan zmian
 
-Zamiast jednoklikowego uploadu — dwukrokowy flow w jednym dialogu:
+### 1. Naprawić kolejkę zadań w tle
+- Dodać/uzupełnić mechanizm cyklicznego uruchamiania endpointu `process-bulk-jobs`, żeby zadania `PENDING` faktycznie przechodziły do `PROCESSING` i zwiększały postęp.
+- Dodać natychmiastowe „kopnięcie” zadania po kliknięciu „Generuj złote rekordy”, żeby użytkownik nie czekał na pierwszy cykl.
+- Poprawić obsługę zadań anulowanych:
+  - jeśli zadanie jest jeszcze `PENDING`, kliknięcie „Zatrzymaj” ma od razu ustawić `CANCELLED`,
+  - jeśli zadanie jest `PROCESSING`, ma ustawić `cancel_requested`, a worker ma zakończyć je po aktualnym produkcie.
+- Dodać informację w UI, gdy trwa zatrzymywanie, zamiast wyglądać jak brak reakcji.
 
-1. Wybór pliku CSV.
-2. Dialog z preview nagłówków + 4 selecty mapowania (`ID`, `Nazwa`, `Kod`, `EAN`), prefillowane z ustawień projektu (jeśli są). Każde pole można zmienić lub ustawić „— pomiń —".
-3. Po „Wczytaj" — parsuje, kasuje stare `source_products`, wstawia nowe (jak dziś).
+### 2. Usprawnić worker, żeby nie wisiał bez końca
+- Ograniczyć czas pojedynczego kroku AI / weryfikacji, żeby jeden produkt nie blokował całej kolejki.
+- Przy generowaniu złotych rekordów pominąć ciężką weryfikację zdjęć jako domyślny krok bulk-generacji; zostawić ją jako osobną funkcję/weryfikację tam, gdzie jest potrzebna.
+- Zachować zapisywanie błędów per produkt, żeby jeden problematyczny produkt nie blokował reszty.
 
-Dialog jest osobny od istniejącego `RemapCsvDialog` (tamten patchuje istniejące produkty bez klucza, ten robi pełny import z mapowaniem).
+### 3. Poprawić styl opisów
+- Zmienić prompt generowania w obu ścieżkach:
+  - pojedyncze generowanie produktu,
+  - generowanie bulk przez worker.
+- Nowe zasady opisu:
+  - język naturalny, rzeczowy, katalogowy,
+  - bez marketingowych fraz typu „idealny wybór”, „doskonały”, „zaprojektowany z myślą”, „sprawdzi się w każdej sytuacji”,
+  - bez sztucznych wstępów i pustych ogólników,
+  - krótszy, konkretny opis oparty wyłącznie na danych ze źródeł,
+  - cechy techniczne nadal jako osobna lista.
 
-### Pliki
+### 4. Posprzątać aktualnie zawieszone zadania
+- Po zmianach oznaczyć stare anulowane/puste zadania jako zakończone albo sprawić, że nowy worker sam je domknie.
+- Dzięki temu przycisk generowania nie będzie blokowany przez stare zadanie.
 
-- `src/components/pim/ImportCsvDialog.tsx` — **nowy**. Wybór pliku + selecty mapowania + checkbox „Wyczyść poprzednie produkty" (domyślnie ON, jak dziś). Wywołuje `clearProjectData` + `ingestSourceProducts` w batchach.
-- `src/lib/pim/parsers.ts` — **dodać** wariant `parseCsvWithMapping(file, mapping)` przyjmujący jawne mapowanie nagłówek → pole (zamiast nazw z projektu). Stare `parseCsv` zostaje dla wstecznej kompatybilności / wewnętrznych użyć.
-- `src/routes/_auth/projects.$id.index.tsx` — zastąpić obecny `UploadZone title="Wgraj produkty"` komponentem `ImportCsvDialog` (przekazując projectId, defaults z `meta.project`, callback `refetchProducts`). `handleSourceCsv` usuwam.
+### 5. Weryfikacja
+- Sprawdzić w bazie, czy nowe zadanie przechodzi z `PENDING` do `PROCESSING` i zwiększa `processed_count`.
+- Sprawdzić, czy „Zatrzymaj” zmienia stan na `CANCELLED`.
+- Sprawdzić przykładowy wygenerowany opis pod kątem mniej sztucznego stylu.
 
-### Zachowuję bez zmian
-
-- Pozostałe dwa UploadZone (search JSON, products JSON) — bez zmian, nie mają problemu z mapowaniem.
-- `RemapCsvDialog` — bez zmian, dalej dostępny do post-importowego poprawiania.
-- Konfiguracja kolumn w ustawieniach projektu — bez zmian; służy jako domyślne mapowanie w dialogu.
-
-### Czego świadomie nie robię
-
-- Nie zmieniam schematu bazy ani server functions ingestowych.
-- Nie zmieniam zachowania innych uploadów.
-- Nie zapisuję wybranego mapowania jako nowych ustawień projektu (można dodać później jako checkbox „Zapamiętaj mapowanie").
+## Pliki do zmiany
+- `src/routes/api/public/hooks/process-bulk-jobs.ts`
+- `src/lib/pim/bulk-jobs.functions.ts`
+- `src/lib/pim/_workers.server.ts`
+- `src/lib/pim/ai.functions.ts`
+- `src/routes/_auth/projects.$id.index.tsx`
+- ewentualnie migracja bazy, jeśli trzeba dodać harmonogram uruchamiania workera.
