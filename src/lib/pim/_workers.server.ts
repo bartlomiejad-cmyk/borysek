@@ -305,12 +305,15 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     null;
 
   const systemPrompt = [
-    "Jesteś ekspertem PIM. Twoim zadaniem jest stworzyć jeden, najlepszy 'Złoty Rekord' produktu na podstawie 1-3 źródeł internetowych.",
-    'Twoja odpowiedź MUSI być poprawnym JSON-em o strukturze: {"name": string, "description": string, "features": [{"key": string, "value": string}]}.',
-    "Pisz po polsku. Opis powinien być rzeczowy, dobrze sformatowany (akapity, listy specyfikacji jeśli sensowne), 200-1500 znaków.",
-    "NIE wymyślaj danych technicznych których nie ma w źródłach. NIE umieszczaj URL-i, nazw sklepów ani fraz typu 'kup teraz', 'dostawa', 'gwarancja'.",
-    "Jeśli źródła się różnią - syntetyzuj wiarygodne wspólne fakty.",
-    'FEATURES: wyodrębnij listę cech technicznych (max 60). Klucze po polsku, krótkie. Wartości konkretne, bez marketingu. NIE wymyślaj — pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych do cech, zwróć "features": [].',
+    "Jesteś redaktorem katalogu produktów. Tworzysz jeden zwięzły, naturalny opis produktu na podstawie 1-3 źródeł internetowych.",
+    'Odpowiedź MUSI być poprawnym JSON-em: {"name": string, "description": string, "features": [{"key": string, "value": string}]}.',
+    "Pisz po polsku, neutralnym językiem katalogowym. Konkret zamiast emocji.",
+    "OPIS: 350-900 znaków. Pierwsze zdanie mówi czym produkt jest i do czego służy. Kolejne zdania podają najważniejsze fakty (materiał, wymiary, sposób działania, najważniejsze funkcje) wyłącznie na podstawie źródeł.",
+    "ZAKAZANE: marketingowe ogólniki i fraza-klisze typu: 'idealny wybór', 'doskonały', 'wyjątkowy', 'zaprojektowany z myślą', 'sprawdzi się w każdej sytuacji', 'najwyższa jakość', 'rewolucyjny', 'niezastąpiony', 'spełni oczekiwania', 'cieszy oko', 'gwarantuje', wykrzykniki, drugiej osoby ('Twój', 'Ciebie').",
+    "ZAKAZANE: ceny, dostępność, dostawa, gwarancja, nazwy sklepów, URL-e, frazy typu 'kup teraz'.",
+    "Nie powtarzaj nazwy produktu więcej niż raz. Nie zaczynaj od 'Przedstawiamy', 'Poznaj', 'Odkryj'. Bez nagłówków, bez list w opisie.",
+    "Jeśli źródła się różnią — wybierz wspólny, wiarygodny zbiór faktów. Jeśli czegoś nie ma w źródłach, pomiń to.",
+    'FEATURES: lista konkretnych cech technicznych (max 60). Klucze po polsku, krótkie (np. "Materiał", "Wymiary", "Pojemność", "Kolor"). Wartości konkretne, bez przymiotników marketingowych. Pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych: "features": [].',
   ].join("\n");
 
   const userPrompt = [

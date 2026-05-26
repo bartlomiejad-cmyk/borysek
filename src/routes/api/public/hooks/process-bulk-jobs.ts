@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
-  runVerifySources,
   runGenerateGoldenRecord,
   runRegenerateMedia,
 } from "@/lib/pim/_workers.server";
@@ -27,12 +26,8 @@ type BulkJobRow = {
 
 async function processItem(kind: JobKind, productId: string): Promise<void> {
   if (kind === "GENERATE_GOLDEN") {
-    // Best-effort verify, then generate. Verify failures must not block generation.
-    try {
-      await runVerifySources(productId);
-    } catch (e) {
-      console.warn("verifySources soft-fail", productId, e);
-    }
+    // Verification of source images is a separate, opt-in action. Bulk
+    // golden generation must stay fast so the queue does not appear stuck.
     await runGenerateGoldenRecord(productId, "all");
   } else {
     await runRegenerateMedia(productId);
