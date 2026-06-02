@@ -281,7 +281,7 @@ export async function runVerifySources(productId: string): Promise<void> {
 // Run: generate golden record
 // ---------------------------------------------------------------------------
 
-export async function runGenerateGoldenRecord(productId: string, mode: "all" | "single" = "all"): Promise<void> {
+export async function runGenerateGoldenRecord(productId: string, mode: "all" | "single" = "all", ctx?: WorkerCtx): Promise<void> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
@@ -291,6 +291,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  await emit(ctx, { level: "info", message: `✍️  ${product.nazwa ?? productId} — generuję opis` });
 
   const { data: project } = await supabaseAdmin
     .from("projects")
