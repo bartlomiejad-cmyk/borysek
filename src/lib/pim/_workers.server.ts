@@ -397,12 +397,14 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .update(updatePayload as never)
       .eq("id", enrichment.id);
     if (error) throw new Error(error.message);
+    await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
       .from("enrichments")
       .update({ status: "FAILED", error: msg } as never)
       .eq("id", enrichment.id);
+    await emit(ctx, { level: "error", message: `❌ ${product.nazwa ?? productId} — ${msg}` });
     throw new Error(msg);
   }
 }
