@@ -33,6 +33,7 @@ import {
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -438,6 +439,7 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(genJob.processed_count / Math.max(1, genJob.total)) * 100} />
+            <BulkJobLog jobId={genJob.id} />
           </CardContent>
         </Card>
       )}
@@ -467,6 +469,7 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(regenJob.processed_count / Math.max(1, regenJob.total)) * 100} />
+            <BulkJobLog jobId={regenJob.id} />
           </CardContent>
         </Card>
       )}
@@ -496,6 +499,7 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(discJob.processed_count / Math.max(1, discJob.total)) * 100} />
+            <BulkJobLog jobId={discJob.id} />
           </CardContent>
         </Card>
       )}

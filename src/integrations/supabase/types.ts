@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      bulk_job_events: {
+        Row: {
+          created_at: string
+          details: Json
+          id: string
+          job_id: string
+          level: string
+          message: string
+          project_id: string
+          source_product_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          id?: string
+          job_id: string
+          level?: string
+          message: string
+          project_id: string
+          source_product_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          id?: string
+          job_id?: string
+          level?: string
+          message?: string
+          project_id?: string
+          source_product_id?: string | null
+        }
+        Relationships: []
+      }
       bulk_jobs: {
         Row: {
           cancel_requested: boolean

@@ -4,6 +4,7 @@ import {
   runGenerateGoldenRecord,
   runRegenerateMedia,
   runFirecrawlDiscovery,
+  type WorkerCtx,
 } from "@/lib/pim/_workers.server";
 
 // Total budget per request (Worker hard limit is ~30s). We process items
@@ -25,18 +26,18 @@ type BulkJobRow = {
   last_error: string | null;
 };
 
-async function processItem(kind: JobKind, productId: string): Promise<void> {
+async function processItem(kind: JobKind, productId: string, ctx: WorkerCtx): Promise<void> {
   switch (kind) {
     case "GENERATE_GOLDEN":
       // Verification of source images is a separate, opt-in action. Bulk
       // golden generation must stay fast so the queue does not appear stuck.
-      await runGenerateGoldenRecord(productId, "all");
+      await runGenerateGoldenRecord(productId, "all", ctx);
       return;
     case "REGENERATE_MEDIA":
-      await runRegenerateMedia(productId);
+      await runRegenerateMedia(productId, ctx);
       return;
     case "FIRECRAWL_DISCOVERY":
-      await runFirecrawlDiscovery(productId);
+      await runFirecrawlDiscovery(productId, ctx);
       return;
     default:
       throw new Error(`Unknown job kind: ${kind as string}`);
@@ -90,12 +91,29 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
     }
 
     const pid = remaining.shift()!;
+    const ctx: WorkerCtx = {
+      onEvent: async (e) => {
+        try {
+          await supabaseAdmin.from("bulk_job_events" as never).insert({
+            job_id: job.id,
+            project_id: job.project_id,
+            source_product_id: pid,
+            level: e.level,
+            message: e.message,
+            details: (e.details ?? {}) as never,
+          } as never);
+        } catch {
+          /* logging must never break the worker */
+        }
+      },
+    };
     try {
-      await processItem(job.kind, pid);
+      await processItem(job.kind, pid, ctx);
       processed++;
     } catch (e) {
       failed++;
       lastError = e instanceof Error ? e.message : String(e);
+      await ctx.onEvent?.({ level: "error", message: `❌ ${lastError}` });
     }
 
     // Persist progress + remaining queue after every item so refreshes

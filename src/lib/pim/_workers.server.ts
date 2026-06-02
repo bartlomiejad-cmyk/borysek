@@ -20,6 +20,31 @@ const CLASSIFY_MODEL = "google/gemini-2.5-flash";
 const FAL_BASE = "https://fal.run";
 
 // ---------------------------------------------------------------------------
+// Bulk-job event callback — used by the queue runner to stream live progress
+// into `bulk_job_events` (subscribed to from the UI). Workers call it for
+// human-readable milestones; runner attaches job/project/product IDs.
+// ---------------------------------------------------------------------------
+
+export type JobEvent = {
+  level: "info" | "success" | "warn" | "error";
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type WorkerCtx = {
+  onEvent?: (e: JobEvent) => void | Promise<void>;
+};
+
+async function emit(ctx: WorkerCtx | undefined, e: JobEvent): Promise<void> {
+  if (!ctx?.onEvent) return;
+  try {
+    await ctx.onEvent(e);
+  } catch {
+    /* never let logging break the worker */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generic AI gateway helpers
 // ---------------------------------------------------------------------------
 
@@ -256,7 +281,7 @@ export async function runVerifySources(productId: string): Promise<void> {
 // Run: generate golden record
 // ---------------------------------------------------------------------------
 
-export async function runGenerateGoldenRecord(productId: string, mode: "all" | "single" = "all"): Promise<void> {
+export async function runGenerateGoldenRecord(productId: string, mode: "all" | "single" = "all", ctx?: WorkerCtx): Promise<void> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
@@ -266,6 +291,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  await emit(ctx, { level: "info", message: `✍️  ${product.nazwa ?? productId} — generuję opis` });
 
   const { data: project } = await supabaseAdmin
     .from("projects")
@@ -371,12 +397,14 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .update(updatePayload as never)
       .eq("id", enrichment.id);
     if (error) throw new Error(error.message);
+    await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
       .from("enrichments")
       .update({ status: "FAILED", error: msg } as never)
       .eq("id", enrichment.id);
+    await emit(ctx, { level: "error", message: `❌ ${product.nazwa ?? productId} — ${msg}` });
     throw new Error(msg);
   }
 }
@@ -540,11 +568,12 @@ function buildSeedreamPrompt(opts: {
   return lines.join(" ");
 }
 
-export async function runRegenerateMedia(productId: string): Promise<void> {
+export async function runRegenerateMedia(productId: string, ctx?: WorkerCtx): Promise<void> {
   const FAL_KEY = process.env.FAL_KEY;
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
   if (!apiKey) throw new Error("LOVABLE_API_KEY nie jest skonfigurowany");
+  await emit(ctx, { level: "info", message: `🖼  Regeneruję media dla produktu ${productId.slice(0, 8)}…` });
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
@@ -751,7 +780,7 @@ function pickImagesFromScrape(res: unknown): string[] {
   return out.slice(0, 12);
 }
 
-export async function runFirecrawlDiscovery(productId: string): Promise<void> {
+export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx): Promise<void> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) throw new Error("FIRECRAWL_API_KEY is not configured");
 
@@ -776,6 +805,8 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
   const eanPart = (product.ean ?? "").trim();
   const query = [nazwa, codePart || eanPart].filter(Boolean).join(" ").trim();
 
+  await emit(ctx, { level: "info", message: `🔎 ${nazwa} — szukam: "${query}"`, details: { query } });
+
   const firecrawl = new Firecrawl({ apiKey });
 
   // 1) Search.
@@ -788,7 +819,9 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
     const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
     hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
   } catch (e) {
-    throw new Error(`Firecrawl search: ${e instanceof Error ? e.message : String(e)}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    await emit(ctx, { level: "error", message: `❌ ${nazwa} — Firecrawl search: ${msg}` });
+    throw new Error(`Firecrawl search: ${msg}`);
   }
 
   const allUrls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
@@ -804,9 +837,16 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
 
   // 3) Filter out marketplaces / blacklist, take top 3.
   const filtered = allUrls.filter((u) => !isMarketplaceUrl(u, extraBlacklist)).slice(0, 3);
+  await emit(ctx, {
+    level: filtered.length ? "info" : "warn",
+    message: `   ${nazwa} — ${allUrls.length} wyników, ${filtered.length} po filtrze`,
+    details: { organic_urls: allUrls, filtered_urls: filtered },
+  });
   if (!filtered.length) return;
 
   // 4) Scrape each and upsert into product_sources.
+  let scraped = 0;
+  let totalImages = 0;
   for (const url of filtered) {
     try {
       const scrape = (await firecrawl.scrape(url, {
@@ -831,9 +871,22 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
           } as never,
           { onConflict: "project_id,url" },
         );
+      scraped++;
+      totalImages += images.length;
+      await emit(ctx, {
+        level: "info",
+        message: `   ✓ ${new URL(url).hostname} — ${images.length} zdjęć`,
+        details: { url, images: images.length },
+      });
     } catch (e) {
-      // Skip a single bad URL; continue with the rest.
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("firecrawl scrape failed", url, e);
+      await emit(ctx, { level: "warn", message: `   ⚠️ ${url} — ${msg}`, details: { url, error: msg } });
     }
   }
+  await emit(ctx, {
+    level: scraped ? "success" : "warn",
+    message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć)`,
+    details: { scraped, total: filtered.length, images: totalImages },
+  });
 }
