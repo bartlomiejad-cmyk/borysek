@@ -1,43 +1,88 @@
-## Cel
-Dodać widoczny na żywo log z postępu wyszukiwania źródeł (Firecrawl) — tak, żeby było widać per‑produkt: jakie zapytanie poszło, ile linków znalazł, ile zostało po filtracji, ile zescrape'owało, a w razie błędu — jaki.
+# Cel
+Po scrape'owaniu strony przez Firecrawl AI ma od razu odsiać śmieci i zostawić **tylko dane dotyczące konkretnego produktu** (po nazwie/EAN/kodzie):
+- zdjęcia faktycznie przedstawiające ten produkt,
+- fragment opisu wyłącznie o tym produkcie,
+- cechy techniczne tego produktu.
+
+Wszystko inne (banery, ikony, logo sklepu, "zobacz też", recenzje innych produktów, opisy dostawy, regulaminy itp.) **nie trafia** do bazy i tym samym nie pojawia się w UI ani w eksporcie.
+
+## Gdzie wpiąć
+Plik: `src/lib/pim/_workers.server.ts`, funkcja `runFirecrawlDiscovery` — krok 4 (pętla `for (const url of filtered)`), zaraz po `firecrawl.scrape(...)`, **przed** `upsert` do `product_sources`.
+
+Dziś zapisujemy:
+- `description` = `scrape.markdown.slice(0, 8000)` (cała strona)
+- `images` = `pickImagesFromScrape(...)` (do 12 URL-i, też ikonki/banery)
+
+Po zmianie zapis idzie przez nowy filtr AI.
 
 ## Co dodać
 
-### 1. Tabela `bulk_job_events` (migracja)
+### 1. Nowa funkcja `filterScrapedForProduct(...)` w `_workers.server.ts`
+Wejście:
+- `product`: `{ nazwa, kod, ean }`
+- `pageMarkdown`: surowy markdown ze scrape
+- `candidateImages`: lista URL-i z `pickImagesFromScrape`
+- `pageTitle`, `url`
+
+Działanie (1 wywołanie AI Gateway, `google/gemini-2.5-flash`, `response_format: json_object`):
+- system prompt: "Zwróć tylko dane dotyczące dokładnie tego produktu. Pomiń banery, polecane, recenzje, dostawę, regulaminy, inne warianty/inne produkty."
+- user content: nazwa/EAN/kod produktu + tytuł strony + skrócony markdown (max ~6k zn.) + ponumerowana lista URL-i obrazków
+- response schema (Zod):
 ```
-id uuid pk
-job_id uuid (idx)
-project_id uuid (idx, do RLS)
-source_product_id uuid null
-level text ('info' | 'success' | 'warn' | 'error')
-message text         -- krótki opis np. "Bosch GWS 750 — 5 wyników, 3 po filtrze, 3 scraped"
-details jsonb        -- { query, organic_urls, filtered_urls, scraped, error }
-created_at timestamptz default now()
+{
+  is_product_page: boolean,             // jeśli false – cała strona idzie do kosza
+  product_description: string,          // max 4000 zn., tylko o tym produkcie
+  product_features: [{key, value}],     // max 60
+  product_image_indexes: number[],      // 1-based, tylko zdjęcia przedstawiające produkt
+  rejected_reason?: string
+}
 ```
-RLS przez `project_id` (analogicznie do `search_results`). GRANT dla authenticated + service_role. Realtime publication ON dla tej tabeli.
+- mapowanie indexów → URL-e (tylko te z listy wejściowej)
+- fallback przy błędzie AI: zapis jak dziś (zachowawczo, żeby nie tracić danych) + warn event
 
-### 2. Worker — emitowanie zdarzeń
-W `src/lib/pim/_workers.server.ts` w `runFirecrawlDiscovery` (i analogicznie w `runGenerateGolden`, `runRegenerateMedia`) po każdym produkcie zapisać 1 wiersz do `bulk_job_events`:
-- info na start ("Szukam: <query>")
-- success z liczbami (znalezione / po filtrze / scraped / images)
-- error z komunikatem przy wyjątku
+### 2. Zmiana w `runFirecrawlDiscovery`
+W pętli scrape'a:
+```
+const filteredData = await filterScrapedForProduct(apiKey, product, scrape, candidateImages, url);
 
-### 3. UI — panel "Log na żywo"
-Nowy komponent `BulkJobLog` użyty w `projects.$id.index.tsx` pod paskiem postępu aktywnego joba:
-- subskrypcja realtime na `bulk_job_events` filtrowana po `job_id`
-- przewijana lista (max ~200 ostatnich), kolorowane wg `level`, czas + nazwa produktu + message
-- przycisk "Wyczyść widok" (lokalnie, nie kasuje z bazy)
-- fallback polling co 3s gdy realtime nie zadziała
+if (!filteredData.is_product_page) {
+  emit warn: "strona nie dotyczy tego produktu – pominięto"
+  continue;       // nic nie zapisujemy do product_sources
+}
 
-### 4. Sprzątanie
-Trigger / okresowe usuwanie eventów starszych niż 7 dni — opcjonalne, do późniejszej iteracji.
+upsert product_sources z:
+  description: filteredData.product_description
+  images:      filteredData.product_image_urls
+  raw: {
+    source: "firecrawl",
+    metadata,
+    ai_filter: { features: filteredData.product_features, rejected: candidateImages.filter(...) }
+  }
+```
+
+Cechy lądują w `raw.ai_filter.features` (nie ruszamy schematu `product_sources`). Generator goldena (`runGenerateGoldenRecord`) już dziś robi własne `features` z opisów źródeł — dostanie cleaner wsad, więc będzie celniejszy.
+
+### 3. Eventy live‑log
+W tej samej pętli emitować do `bulk_job_events`:
+- `info`  "🧠 <host> — filtruję dane pod produkt"
+- `success` "   ✓ <host> — opis OK, X/Y zdjęć produktu, Z cech"
+- `warn`  "   ⚠️ <host> — strona nie dotyczy produktu (powód: …) — pominięto"
+- `error` przy wyjątku AI
+
+### 4. Bez zmian schematu DB
+Nie ruszamy tabel — wystarczą pola, które już istnieją (`product_sources.images`, `description`, `raw`). Brak migracji.
+
+## Co dostanie użytkownik
+- W szczegółach produktu i na liście pojawią się **tylko zdjęcia przedstawiające produkt** — bez ikon serwisu, banerów promocyjnych, "polecanych".
+- Opis źródła to **wycięty fragment dotyczący tego produktu**, nie cała strona.
+- Generator opisu (golden) pracuje na czystszych źródłach → mniej halucynacji i marketingowego szumu.
+- Strony, które tak naprawdę nie sprzedają tego produktu (np. trafiony błędnie listing kategorii), zostaną odrzucone i nie zaśmiecą widoku.
 
 ## Pliki
-- `supabase/migrations/<ts>_bulk_job_events.sql` — tabela + RLS + GRANT + realtime
-- `src/lib/pim/_workers.server.ts` — emit eventów
-- `src/components/pim/BulkJobLog.tsx` — nowy komponent
-- `src/routes/_auth/projects.$id.index.tsx` — wpięcie pod aktywnymi jobami
+- `src/lib/pim/_workers.server.ts` — nowa funkcja `filterScrapedForProduct` + zmiana w `runFirecrawlDiscovery`.
+- (opcjonalnie później) widoczny w UI badge "filtr AI: X/Y zdjęć" w karcie źródła — do osobnej iteracji.
 
-## Uwagi
-- Log działa dla wszystkich 3 typów jobów (FIRECRAWL_DISCOVERY, GENERATE_GOLDEN, REGENERATE_MEDIA).
-- Żeby zobaczyć efekt produkcyjnie — po wdrożeniu trzeba opublikować (cron uderza w published URL).
+## Uwagi / koszty
+- +1 wywołanie AI per scrape'owana strona (czyli max 3 na produkt). Model `gemini-2.5-flash` — tani i szybki.
+- Trzeba **opublikować** po wdrożeniu, bo cron uderza w published URL.
+- Nie ruszamy istniejącego flow `runVerifySources` (drugi pass na zdjęciach pod kątem znaków wodnych / mismatchu) — uzupełnia się, nie kłóci.
