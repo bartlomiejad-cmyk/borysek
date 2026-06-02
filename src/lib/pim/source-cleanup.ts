@@ -13,6 +13,7 @@ const JUNK_FILENAME_TOKENS: string[] = [
   "kontakt", "phone", "tel-", "telefon", "envelope", "mail-icon",
   "facebook", "instagram", "youtube", "tiktok", "whatsapp", "messenger", "twitter",
   "banner", "header", "footer", "icon-", "-icon", "sprite", "placeholder", "loader", "spinner",
+  "brand", "producent", "manufacturer", "marka",
 ];
 
 const JUNK_PATH_TOKENS: string[] = [
