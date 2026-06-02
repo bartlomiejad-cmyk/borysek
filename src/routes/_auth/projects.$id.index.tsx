@@ -32,6 +32,7 @@ import {
   getActiveBulkJob,
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
+import { startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -118,6 +119,7 @@ function ProjectPage() {
   const createJobFn = useServerFn(createBulkJob);
   const getActiveJobFn = useServerFn(getActiveBulkJob);
   const cancelJobFn = useServerFn(cancelBulkJob);
+  const firecrawlFn = useServerFn(startFirecrawlDiscovery);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -160,17 +162,28 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "REGENERATE_MEDIA" } }),
     refetchInterval: 3000,
   });
+  const { data: discJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "FIRECRAWL_DISCOVERY" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
+  const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob]) {
+    for (const job of [genJob, regenJob, discJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
       lastTerminalToastRef.current[job.id] = job.status;
-      const label = job.kind === "GENERATE_GOLDEN" ? "Generacja złotych rekordów" : "Regeneracja zdjęć";
+      const label =
+        job.kind === "GENERATE_GOLDEN"
+          ? "Generacja złotych rekordów"
+          : job.kind === "REGENERATE_MEDIA"
+            ? "Regeneracja zdjęć"
+            : "Wyszukiwanie źródeł (Firecrawl)";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -180,7 +193,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, refetchProducts]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -364,6 +377,22 @@ function ProjectPage() {
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
           </Button>
+          <Button
+            variant="outline"
+            disabled={!!discActive}
+            onClick={async () => {
+              if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
+              try {
+                const res = await firecrawlFn({ data: { projectId: id, onlyMissing: true } });
+                toast.success(`Uruchomiono w tle: ${res.total} produktów. Możesz zamknąć kartę.`);
+                qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
+              } catch (e) {
+                toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
+              }
+            }}
+          >
+            <Sparkles className="h-4 w-4 mr-2" /> Wyszukaj źródła (Firecrawl)
+          </Button>
           <Button onClick={() => generateAll()} disabled={!!genActive}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
@@ -438,6 +467,35 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(regenJob.processed_count / Math.max(1, regenJob.total)) * 100} />
+          </CardContent>
+        </Card>
+      )}
+
+      {discActive && discJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {discJob.cancel_requested ? "Zatrzymywanie… " : "Wyszukiwanie źródeł (Firecrawl) "}
+                {discJob.processed_count}/{discJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">{Math.round((discJob.processed_count / Math.max(1, discJob.total)) * 100)}%</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: discJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
+                  }}
+                  disabled={discJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(discJob.processed_count / Math.max(1, discJob.total)) * 100} />
           </CardContent>
         </Card>
       )}

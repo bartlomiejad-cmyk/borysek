@@ -11,6 +11,8 @@
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { probeManySizes } from "./image-size.server";
+import { isMarketplaceUrl } from "./firecrawl.functions";
+import Firecrawl from "@mendable/firecrawl-js";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -708,6 +710,130 @@ export async function runRegenerateMedia(productId: string): Promise<void> {
   } finally {
     for (const p of preparedMain) {
       await supabaseAdmin.storage.from("regenerated-images").remove([p.path]).catch(() => undefined);
+    }
+  }
+}
+// ---------------------------------------------------------------------------
+// Run: Firecrawl discovery — search top stores for a product and scrape 3.
+// ---------------------------------------------------------------------------
+
+type FirecrawlSearchHit = { url?: string; title?: string; description?: string };
+
+function pickImagesFromScrape(res: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (u: unknown) => {
+    if (typeof u !== "string") return;
+    const t = u.trim();
+    if (!t || !/^https?:\/\//i.test(t)) return;
+    if (seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  const r = res as Record<string, unknown> | null;
+  if (!r) return out;
+  const meta = (r.metadata ?? {}) as Record<string, unknown>;
+  push(meta.ogImage);
+  push((meta as { "og:image"?: string })["og:image"]);
+  push(meta.image);
+  const md = typeof r.markdown === "string" ? r.markdown : "";
+  const mdMatches = md.match(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g) ?? [];
+  for (const m of mdMatches) {
+    const m2 = /\((https?:[^)\s]+)\)/.exec(m);
+    if (m2) push(m2[1]);
+  }
+  const html = typeof r.html === "string" ? r.html : "";
+  const imgMatches = html.match(/<img[^>]+src=["']([^"']+)["']/gi) ?? [];
+  for (const m of imgMatches) {
+    const m2 = /src=["']([^"']+)["']/i.exec(m);
+    if (m2) push(m2[1]);
+  }
+  return out.slice(0, 12);
+}
+
+export async function runFirecrawlDiscovery(productId: string): Promise<void> {
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+  if (!apiKey) throw new Error("FIRECRAWL_API_KEY is not configured");
+
+  const { data: product, error: pErr } = await supabaseAdmin
+    .from("source_products")
+    .select("id, project_id, nazwa, kod, ean")
+    .eq("id", productId)
+    .single();
+  if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+  const nazwa = (product.nazwa ?? "").trim();
+  if (!nazwa) throw new Error("Produkt nie ma nazwy");
+
+  const { data: project } = await supabaseAdmin
+    .from("projects")
+    .select("blacklist")
+    .eq("id", product.project_id)
+    .single();
+  const extraBlacklist = ((project?.blacklist as string[] | null) ?? []);
+
+  const codePart = (product.kod ?? "").trim();
+  const eanPart = (product.ean ?? "").trim();
+  const query = [nazwa, codePart || eanPart].filter(Boolean).join(" ").trim();
+
+  const firecrawl = new Firecrawl({ apiKey });
+
+  // 1) Search.
+  let hits: FirecrawlSearchHit[] = [];
+  try {
+    const sr = (await firecrawl.search(query, {
+      limit: 5,
+      sources: ["web"],
+    } as never)) as unknown;
+    const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
+    hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
+  } catch (e) {
+    throw new Error(`Firecrawl search: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const allUrls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
+
+  // 2) Persist raw search result (term = product name lowercased, mirrors matching).
+  await supabaseAdmin
+    .from("search_results")
+    .insert({
+      project_id: product.project_id,
+      term: nazwa,
+      organic_urls: allUrls as never,
+    } as never);
+
+  // 3) Filter out marketplaces / blacklist, take top 3.
+  const filtered = allUrls.filter((u) => !isMarketplaceUrl(u, extraBlacklist)).slice(0, 3);
+  if (!filtered.length) return;
+
+  // 4) Scrape each and upsert into product_sources.
+  for (const url of filtered) {
+    try {
+      const scrape = (await firecrawl.scrape(url, {
+        formats: ["markdown", "html"],
+        onlyMainContent: true,
+      } as never)) as Record<string, unknown>;
+      const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
+      const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
+      const description = typeof scrape.markdown === "string" ? scrape.markdown.slice(0, 8000) : null;
+      const images = pickImagesFromScrape(scrape);
+      await supabaseAdmin
+        .from("product_sources")
+        .upsert(
+          {
+            project_id: product.project_id,
+            url,
+            title,
+            description,
+            images: images as never,
+            extra_images: [] as never,
+            raw: { source: "firecrawl", metadata: meta } as never,
+          } as never,
+          { onConflict: "project_id,url" },
+        );
+    } catch (e) {
+      // Skip a single bad URL; continue with the rest.
+      console.error("firecrawl scrape failed", url, e);
     }
   }
 }
