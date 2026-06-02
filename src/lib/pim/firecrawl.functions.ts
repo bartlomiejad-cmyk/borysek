@@ -168,6 +168,20 @@ export const recleanProductSources = createServerFn({ method: "POST" })
       .eq("project_id", data.projectId);
     if (error) throw new Error(error.message);
 
+    // Zbierz URL-e oznaczone wcześniej przez AI jako baner/śmieć.
+    const { data: ens } = await supabase
+      .from("enrichments")
+      .select("image_scores")
+      .eq("project_id", data.projectId);
+    const trashUrls = new Set<string>();
+    for (const e of ens ?? []) {
+      const scores = (e as { image_scores?: Record<string, { is_banner_or_trash?: boolean }> } | null)?.image_scores ?? {};
+      for (const [u, s] of Object.entries(scores)) {
+        if (s && s.is_banner_or_trash === true) trashUrls.add(u);
+      }
+    }
+    const isTrash = (u: string) => trashUrls.has(u) || isJunkUrl(u);
+
     let scanned = 0;
     let updated = 0;
     let imagesRemoved = 0;
@@ -183,8 +197,8 @@ export const recleanProductSources = createServerFn({ method: "POST" })
       };
       const mainIn = Array.isArray(r.images) ? (r.images as string[]) : [];
       const extraIn = Array.isArray(r.extra_images) ? (r.extra_images as string[]) : [];
-      const mainOut = filterImageUrls(mainIn);
-      const extraOut = filterImageUrls(extraIn);
+      const mainOut = filterImageUrls(mainIn).filter((u) => !trashUrls.has(u));
+      const extraOut = filterImageUrls(extraIn).filter((u) => !trashUrls.has(u));
       const descIn = r.description ?? "";
       const descOut = sanitizeProductDescription(descIn);
 
