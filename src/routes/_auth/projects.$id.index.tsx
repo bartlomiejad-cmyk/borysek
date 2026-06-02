@@ -32,7 +32,7 @@ import {
   getActiveBulkJob,
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
-import { startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,6 +121,7 @@ function ProjectPage() {
   const getActiveJobFn = useServerFn(getActiveBulkJob);
   const cancelJobFn = useServerFn(cancelBulkJob);
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
+  const recleanFn = useServerFn(recleanProductSources);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
