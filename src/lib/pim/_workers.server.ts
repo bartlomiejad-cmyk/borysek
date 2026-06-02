@@ -778,7 +778,7 @@ function pickImagesFromScrape(res: unknown): string[] {
     const m2 = /src=["']([^"']+)["']/i.exec(m);
     if (m2) push(m2[1]);
   }
-  return out.slice(0, 12);
+  return filterImageUrls(out).slice(0, 12);
 }
 
 // ---------------------------------------------------------------------------
