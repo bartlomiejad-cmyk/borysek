@@ -472,7 +472,7 @@ async function collectScrapedUrls(projectId: string, pickedUrls: string[], inclu
     const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
       ? ((s as { extra_images: string[] }).extra_images)
       : [];
-    for (const u of [...main, ...extra]) {
+    for (const u of filterImageUrls([...main, ...extra])) {
       if (!seen.has(u)) { seen.add(u); out.push(u); }
     }
   }
