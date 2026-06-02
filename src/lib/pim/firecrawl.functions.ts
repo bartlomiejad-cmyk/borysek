@@ -180,8 +180,6 @@ export const recleanProductSources = createServerFn({ method: "POST" })
         if (s && s.is_banner_or_trash === true) trashUrls.add(u);
       }
     }
-    const isTrash = (u: string) => trashUrls.has(u) || isJunkUrl(u);
-
     let scanned = 0;
     let updated = 0;
     let imagesRemoved = 0;
