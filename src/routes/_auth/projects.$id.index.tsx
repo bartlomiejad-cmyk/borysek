@@ -395,6 +395,22 @@ function ProjectPage() {
           >
             <Sparkles className="h-4 w-4 mr-2" /> Wyszukaj źródła (Firecrawl)
           </Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const res = await recleanFn({ data: { projectId: id } });
+                toast.success(
+                  `Wyczyszczono: ${res.updated}/${res.scanned} źródeł, usunięto ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków opisu.`,
+                );
+                qc.invalidateQueries({ queryKey: ["project", id] });
+              } catch (e) {
+                toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
+              }
+            }}
+          >
+            <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
+          </Button>
           <Button onClick={() => generateAll()} disabled={!!genActive}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
