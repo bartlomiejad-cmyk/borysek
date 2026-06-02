@@ -33,6 +33,7 @@ import {
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
