@@ -126,6 +126,12 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const picked = ((enrichment?.picked_urls as string[] | null) ?? []);
     const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
     const meta = ((enrichment as unknown as { image_meta?: ImageMeta } | null)?.image_meta ?? {}) as ImageMeta;
+    const scoresEarly = ((enrichment as unknown as { image_scores?: Record<string, { is_banner_or_trash?: boolean }> } | null)?.image_scores ?? {}) as Record<string, { is_banner_or_trash?: boolean }>;
+    const trash = new Set<string>(
+      Object.entries(scoresEarly)
+        .filter(([, s]) => s && s.is_banner_or_trash === true)
+        .map(([u]) => u),
+    );
     let sources: Array<{
       url: string;
       title: string | null;
@@ -152,9 +158,9 @@ export const getProductDetail = createServerFn({ method: "GET" })
       }
       // Gallery shows everything the list shows: drop only hidden URLs.
       // Strict size filtering is reserved for export.
-      const allowedMain = new Set(allMain.filter((u) => !hidden.has(u)));
+      const allowedMain = new Set(allMain.filter((u) => !hidden.has(u) && !trash.has(u)));
       const allowedExtra = new Set(
-        includeExtra ? allExtra.filter((u) => !hidden.has(u)) : [],
+        includeExtra ? allExtra.filter((u) => !hidden.has(u) && !trash.has(u)) : [],
       );
       sources = picked.map((u) => {
         const s = byUrl.get(u);

@@ -48,6 +48,21 @@ function ProductDetail() {
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
   const recleanFn = useServerFn(recleanProductSources);
+  const reclean = useMutation({
+    mutationFn: () => recleanFn({ data: { projectId: id } }),
+    onSuccess: (res) => {
+      if (res.updated === 0 && res.imagesRemoved === 0 && res.charsRemoved === 0) {
+        toast.info(`Sprawdzono ${res.scanned} źródeł — nic do usunięcia.`);
+      } else {
+        toast.success(
+          `Wyczyszczono ${res.updated}/${res.scanned} źródeł — ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków usunięto.`,
+        );
+      }
+      qc.invalidateQueries({ queryKey: ["product", id, pid] });
+      qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+    },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł")),
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
@@ -326,23 +341,15 @@ function ProductDetail() {
         <Button
           variant="outline"
           title="Usuwa logo metod płatności, ikony kontaktu, stopki i bloki adresu sklepu z zapisanych źródeł. Bezpieczne, bez kosztu Firecrawl."
-          onClick={async () => {
-            try {
-              const res = await recleanFn({ data: { projectId: id } });
-              if (res.updated === 0) {
-                toast.info("Wszystkie źródła są już wyczyszczone.");
-              } else {
-                toast.success(
-                  `Wyczyszczono ${res.updated}/${res.scanned} źródeł — ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków usunięto.`,
-                );
-              }
-              invalidate();
-            } catch (e) {
-              toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
-            }
-          }}
+          disabled={reclean.isPending}
+          onClick={() => reclean.mutate()}
         >
-          <Eraser className="h-4 w-4 mr-2" /> Wyczyść źródła
+          {reclean.isPending ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Eraser className="h-4 w-4 mr-2" />
+          )}
+          {reclean.isPending ? "Czyszczenie…" : "Wyczyść źródła"}
         </Button>
         <Button
           onClick={() => regenAll.mutate()}
