@@ -776,7 +776,7 @@ function pickImagesFromScrape(res: unknown): string[] {
   return out.slice(0, 12);
 }
 
-export async function runFirecrawlDiscovery(productId: string): Promise<void> {
+export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx): Promise<void> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) throw new Error("FIRECRAWL_API_KEY is not configured");
 
@@ -801,6 +801,8 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
   const eanPart = (product.ean ?? "").trim();
   const query = [nazwa, codePart || eanPart].filter(Boolean).join(" ").trim();
 
+  await emit(ctx, { level: "info", message: `🔎 ${nazwa} — szukam: "${query}"`, details: { query } });
+
   const firecrawl = new Firecrawl({ apiKey });
 
   // 1) Search.
@@ -813,7 +815,9 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
     const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
     hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
   } catch (e) {
-    throw new Error(`Firecrawl search: ${e instanceof Error ? e.message : String(e)}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    await emit(ctx, { level: "error", message: `❌ ${nazwa} — Firecrawl search: ${msg}` });
+    throw new Error(`Firecrawl search: ${msg}`);
   }
 
   const allUrls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
@@ -829,9 +833,16 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
 
   // 3) Filter out marketplaces / blacklist, take top 3.
   const filtered = allUrls.filter((u) => !isMarketplaceUrl(u, extraBlacklist)).slice(0, 3);
+  await emit(ctx, {
+    level: filtered.length ? "info" : "warn",
+    message: `   ${nazwa} — ${allUrls.length} wyników, ${filtered.length} po filtrze`,
+    details: { organic_urls: allUrls, filtered_urls: filtered },
+  });
   if (!filtered.length) return;
 
   // 4) Scrape each and upsert into product_sources.
+  let scraped = 0;
+  let totalImages = 0;
   for (const url of filtered) {
     try {
       const scrape = (await firecrawl.scrape(url, {
@@ -856,9 +867,22 @@ export async function runFirecrawlDiscovery(productId: string): Promise<void> {
           } as never,
           { onConflict: "project_id,url" },
         );
+      scraped++;
+      totalImages += images.length;
+      await emit(ctx, {
+        level: "info",
+        message: `   ✓ ${new URL(url).hostname} — ${images.length} zdjęć`,
+        details: { url, images: images.length },
+      });
     } catch (e) {
-      // Skip a single bad URL; continue with the rest.
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("firecrawl scrape failed", url, e);
+      await emit(ctx, { level: "warn", message: `   ⚠️ ${url} — ${msg}`, details: { url, error: msg } });
     }
   }
+  await emit(ctx, {
+    level: scraped ? "success" : "warn",
+    message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć)`,
+    details: { scraped, total: filtered.length, images: totalImages },
+  });
 }
