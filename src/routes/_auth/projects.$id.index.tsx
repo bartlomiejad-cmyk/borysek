@@ -471,6 +471,35 @@ function ProjectPage() {
         </Card>
       )}
 
+      {discActive && discJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {discJob.cancel_requested ? "Zatrzymywanie… " : "Wyszukiwanie źródeł (Firecrawl) "}
+                {discJob.processed_count}/{discJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">{Math.round((discJob.processed_count / Math.max(1, discJob.total)) * 100)}%</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: discJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
+                  }}
+                  disabled={discJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(discJob.processed_count / Math.max(1, discJob.total)) * 100} />
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="data" className="mb-4">
         <TabsList>
           <TabsTrigger value="data">Dane</TabsTrigger>
