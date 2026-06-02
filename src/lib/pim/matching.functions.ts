@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { sanitizeProductDescription, filterImageUrls } from "./source-cleanup";
 
 type MatchType = "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH";
 
@@ -180,13 +181,39 @@ export const runMatching = createServerFn({ method: "POST" })
         const chunk = allUrls.slice(i, i + CHUNK);
         const { data: rows } = await supabase
           .from("product_sources")
-          .select("url, title, description")
+          .select("id, url, title, description, images, extra_images")
           .eq("project_id", data.projectId)
           .in("url", chunk);
         for (const r of rows ?? []) {
-          srcMap.set(r.url, {
-            title: (r as { title?: string | null }).title ?? null,
-            description: (r as { description?: string | null }).description ?? null,
+          const rr = r as {
+            id: string;
+            url: string;
+            title: string | null;
+            description: string | null;
+            images: unknown;
+            extra_images: unknown;
+          };
+          const descRaw = rr.description ?? "";
+          const descClean = sanitizeProductDescription(descRaw);
+          const mainIn = Array.isArray(rr.images) ? (rr.images as string[]) : [];
+          const extraIn = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
+          const mainClean = filterImageUrls(mainIn);
+          const extraClean = filterImageUrls(extraIn);
+          const descChanged = descClean !== (descRaw ?? "");
+          const imgsChanged = mainClean.length !== mainIn.length || extraClean.length !== extraIn.length;
+          if (descChanged || imgsChanged) {
+            await supabase
+              .from("product_sources")
+              .update({
+                description: descClean || null,
+                images: mainClean as never,
+                extra_images: extraClean as never,
+              } as never)
+              .eq("id", rr.id);
+          }
+          srcMap.set(rr.url, {
+            title: rr.title ?? null,
+            description: descClean || null,
           });
         }
       }
