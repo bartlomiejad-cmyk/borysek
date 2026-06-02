@@ -26,14 +26,20 @@ type BulkJobRow = {
 };
 
 async function processItem(kind: JobKind, productId: string): Promise<void> {
-  if (kind === "GENERATE_GOLDEN") {
-    // Verification of source images is a separate, opt-in action. Bulk
-    // golden generation must stay fast so the queue does not appear stuck.
-    await runGenerateGoldenRecord(productId, "all");
-  } else if (kind === "REGENERATE_MEDIA") {
-    await runRegenerateMedia(productId);
-  } else {
-    await runFirecrawlDiscovery(productId);
+  switch (kind) {
+    case "GENERATE_GOLDEN":
+      // Verification of source images is a separate, opt-in action. Bulk
+      // golden generation must stay fast so the queue does not appear stuck.
+      await runGenerateGoldenRecord(productId, "all");
+      return;
+    case "REGENERATE_MEDIA":
+      await runRegenerateMedia(productId);
+      return;
+    case "FIRECRAWL_DISCOVERY":
+      await runFirecrawlDiscovery(productId);
+      return;
+    default:
+      throw new Error(`Unknown job kind: ${kind as string}`);
   }
 }
 

@@ -1,53 +1,27 @@
-## Cel
-Dla każdego produktu z `source_products` Firecrawl wyszukuje 5 wyników, odfiltrowuje marketplace'y (Amazon, Allegro, eBay, OLX, Ceneo, AliExpress itp.), wybiera 3 najlepsze sklepy, scrapuje je i zapisuje do `search_results` + `product_sources` — gotowe pod dalszą generację złotych rekordów. Wszystko jako bulk job w tle (jak `GENERATE_GOLDEN`), z postępem i przyciskiem Zatrzymaj.
+## Co się stało
 
-## Krok 1 — Connector Firecrawl
-- Podłączyć connector Firecrawl (`standard_connectors--connect`), żeby `FIRECRAWL_API_KEY` był w `process.env` po stronie serwera.
+Job `FIRECRAWL_DISCOVERY` (632 produkty) zakończył się z `failed_count = 632`, a `last_error = "Skonfiguruj Komponent A w ustawieniach AI"`. To komunikat z `runRegenerateMedia` — czyli każdy produkt został przepuszczony przez worker regeneracji zdjęć, nie przez Firecrawl.
 
-## Krok 2 — Nowy typ bulk job
-- Rozszerzyć enum `bulk_job_kind` o `FIRECRAWL_DISCOVERY` (migracja).
-- `bulk_jobs.items` będzie zawierał listę `source_product_id` do przetworzenia.
+Przyczyna: `pg_cron` co minutę woła **opublikowany** URL:
 
-## Krok 3 — Worker discovery
-Nowa funkcja `runFirecrawlDiscovery(sourceProductId)` w `src/lib/pim/_workers.server.ts`:
-1. Pobiera produkt (nazwa, kod, EAN).
-2. Buduje query: `"{nazwa} {kod}"` (fallback samo `nazwa` lub EAN).
-3. `firecrawl.search(query, { limit: 5, lang: "pl", country: "pl" })` przez SDK `@mendable/firecrawl-js`.
-4. Zapisuje surowe URL-e do `search_results` (term + organic_urls).
-5. Filtr czarnej listy domen marketplace + domeny z `projects.blacklist`:
-   - twarda blacklist: `amazon.*, allegro.pl, ebay.*, aliexpress.*, olx.pl, ceneo.pl, skapiec.pl, nokaut.pl, empik.com, morele.net listings`, fora, blogi (heurystyka po ścieżce `/forum/`, `/blog/`).
-6. Z pozostałych bierze 3 pierwsze (kolejność z Firecrawl = relevancja).
-7. Dla każdego: `firecrawl.scrape(url, { formats: ['markdown'], onlyMainContent: true })` — wyciąga `title`, `description` (markdown skrócony), `images` (z metadata/og:image + obrazów ze scrapa).
-8. Upsert do `product_sources` (już istnieje dedup po `project_id,url`).
-9. Po sukcesie ustawia `enrichments.status = READY_FOR_GOLDEN` (lub odpowiedni — zgodnie z istniejącym flow matching).
+```
+https://project--a56746f2-6fdf-47b1-8095-043a41af98fd.lovable.app/api/public/hooks/process-bulk-jobs
+```
 
-## Krok 4 — Endpoint workerowy
-- Rozszerzyć `src/routes/api/public/hooks/process-bulk-jobs.ts` o gałąź `FIRECRAWL_DISCOVERY` → `runFirecrawlDiscovery`.
-- Cron już jest (1 min), kickstart z `createBulkJob` też.
-- Budżet 25s — discovery na produkt to ~1 search + 3 scrape'y; przy timeoucie kończymy iterację jak dziś.
+Opublikowana wersja appki jest sprzed dodania Firecrawla. W jej `processItem` gałąź `else` (czyli każdy nieznany `kind`, w tym `FIRECRAWL_DISCOVERY`) prowadziła do `runRegenerateMedia`. Stąd seryjny błąd o Komponencie A — nic wspólnego z Firecrawlem ani z samymi produktami.
 
-## Krok 5 — Server function startowa
-`startFirecrawlDiscovery({ projectId, sourceProductIds? })` w nowym `src/lib/pim/firecrawl.functions.ts`:
-- Jeśli brak `sourceProductIds` — bierze wszystkie produkty projektu bez `product_sources` (lub wszystkie — checkbox w UI).
-- Tworzy `bulk_job` typu `FIRECRAWL_DISCOVERY` przez `createBulkJob`.
+W preview (najnowszy kod) wszystko jest poprawnie podpięte: `processItem` ma osobną gałąź `FIRECRAWL_DISCOVERY → runFirecrawlDiscovery`, worker zapisuje do `search_results` / `product_sources`.
 
-## Krok 6 — UI
-W `src/routes/_auth/projects.$id.index.tsx` obok przycisku „Generuj złote rekordy":
-- Nowy przycisk **„Wyszukaj źródła (Firecrawl)"** z dialogiem: opcje „tylko produkty bez źródeł" / „wszystkie", potwierdzenie.
-- Pasek postępu identyczny jak dla `GENERATE_GOLDEN` (czyta `bulk_jobs` po `kind = FIRECRAWL_DISCOVERY`), z przyciskiem Zatrzymaj.
+## Plan naprawy
 
-## Krok 7 — Konfiguracja blacklisty
-- Zaszyta lista marketplace'ów w `src/lib/pim/firecrawl.functions.ts` jako stała `MARKETPLACE_DOMAINS`.
-- Uzupełniana o `projects.blacklist` (już istnieje w schemacie).
+1. **Opublikować projekt** (Publish) — to wgra na `*.lovable.app` aktualnego workera z obsługą `FIRECRAWL_DISCOVERY`. Bez tego kroku cron nadal będzie marszczył failowane joby, niezależnie od zmian w kodzie.
+2. **Wyczyścić feralny job** (`9bb8c4f9-…`) — ustawić go na `CANCELLED` żeby nie mylił UI / historii.
+3. **Zabezpieczyć przed nieznanym `kind`** w `src/routes/api/public/hooks/process-bulk-jobs.ts`: zamiast `else { runFirecrawlDiscovery }` użyć jawnego `switch` i dla nieznanego typu rzucać `Error("Unknown job kind: …")`. Dzięki temu w przyszłości żaden nowy typ zadania nie trafi przypadkiem do złego workera — job się zatrzyma z jasnym komunikatem, zamiast zepsuć 600 rekordów.
+4. **Po publikacji** uruchomić „Wyszukaj źródła (Firecrawl)" raz na małej próbce (np. 5 produktów), zweryfikować w `search_results` i `product_sources`, że wpisy się pojawiają, dopiero potem puścić cały zestaw.
 
-## Pliki
-- migracja: dodanie `FIRECRAWL_DISCOVERY` do enuma `bulk_job_kind`
-- nowy: `src/lib/pim/firecrawl.functions.ts` (server fn + helper scrape/filter)
-- edycja: `src/lib/pim/_workers.server.ts` — `runFirecrawlDiscovery`
-- edycja: `src/routes/api/public/hooks/process-bulk-jobs.ts` — nowa gałąź
-- edycja: `src/routes/_auth/projects.$id.index.tsx` — przycisk + postęp
-- nowy: `src/components/pim/FirecrawlDiscoveryDialog.tsx`
+## Pliki do zmiany
 
-## Weryfikacja
-- Po starcie sprawdzić w bazie: `bulk_jobs` przechodzi PENDING→PROCESSING, `search_results` rosną, `product_sources` rosną o ~3 na produkt, żadnych URL-i z marketplace'ów.
-- Test przyciskiem Zatrzymaj na działającym jobie.
+- `src/routes/api/public/hooks/process-bulk-jobs.ts` — twardy `switch` po `kind`.
+- Migracja jednorazowa (UPDATE) — oznaczyć stary job jako CANCELLED (`processed_count = 0`, `failed_count = 632`, zostawić `last_error` do audytu).
+
+Akcja po Twojej stronie: kliknij **Publish** zaraz po zatwierdzeniu planu — bez tego cron dalej będzie używał starego kodu.
