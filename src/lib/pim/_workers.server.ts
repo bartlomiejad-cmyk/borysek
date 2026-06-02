@@ -20,6 +20,31 @@ const CLASSIFY_MODEL = "google/gemini-2.5-flash";
 const FAL_BASE = "https://fal.run";
 
 // ---------------------------------------------------------------------------
+// Bulk-job event callback — used by the queue runner to stream live progress
+// into `bulk_job_events` (subscribed to from the UI). Workers call it for
+// human-readable milestones; runner attaches job/project/product IDs.
+// ---------------------------------------------------------------------------
+
+export type JobEvent = {
+  level: "info" | "success" | "warn" | "error";
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type WorkerCtx = {
+  onEvent?: (e: JobEvent) => void | Promise<void>;
+};
+
+async function emit(ctx: WorkerCtx | undefined, e: JobEvent): Promise<void> {
+  if (!ctx?.onEvent) return;
+  try {
+    await ctx.onEvent(e);
+  } catch {
+    /* never let logging break the worker */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generic AI gateway helpers
 // ---------------------------------------------------------------------------
 
