@@ -377,6 +377,22 @@ function ProjectPage() {
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
           </Button>
+          <Button
+            variant="outline"
+            disabled={!!discActive}
+            onClick={async () => {
+              if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
+              try {
+                const res = await firecrawlFn({ data: { projectId: id, onlyMissing: true } });
+                toast.success(`Uruchomiono w tle: ${res.total} produktów. Możesz zamknąć kartę.`);
+                qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
+              } catch (e) {
+                toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
+              }
+            }}
+          >
+            <Sparkles className="h-4 w-4 mr-2" /> Wyszukaj źródła (Firecrawl)
+          </Button>
           <Button onClick={() => generateAll()} disabled={!!genActive}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
           </Button>
