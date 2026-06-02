@@ -780,9 +780,112 @@ function pickImagesFromScrape(res: unknown): string[] {
   return out.slice(0, 12);
 }
 
+// ---------------------------------------------------------------------------
+// AI filter: po scrape'owaniu zostawiamy tylko dane dotyczące konkretnego
+// produktu (opis, cechy, zdjęcia). Resztę odrzucamy, żeby UI / eksport nie
+// pokazywały banerów, "polecanych", innych wariantów itp.
+// ---------------------------------------------------------------------------
+
+const FILTER_MODEL = "google/gemini-2.5-flash";
+
+const FilterSchema = z.object({
+  is_product_page: z.boolean(),
+  product_description: z.string().max(8000).default(""),
+  product_features: z
+    .array(z.object({ key: z.string().min(1).max(200), value: z.string().min(1).max(2000) }))
+    .max(60)
+    .default([]),
+  product_image_indexes: z.array(z.number()).default([]),
+  rejected_reason: z.string().max(500).optional().default(""),
+});
+
+type FilteredScrape = {
+  is_product_page: boolean;
+  description: string;
+  features: Array<{ key: string; value: string }>;
+  imageUrls: string[];
+  rejectedReason: string;
+  usedAi: boolean;
+};
+
+async function filterScrapedForProduct(
+  apiKey: string | undefined,
+  product: { nazwa: string | null; kod: string | null; ean: string | null },
+  pageTitle: string | null,
+  pageMarkdown: string,
+  candidateImages: string[],
+  pageUrl: string,
+): Promise<FilteredScrape> {
+  const fallback: FilteredScrape = {
+    is_product_page: true,
+    description: pageMarkdown.slice(0, 8000),
+    features: [],
+    imageUrls: candidateImages,
+    rejectedReason: "",
+    usedAi: false,
+  };
+  if (!apiKey) return fallback;
+  if (!pageMarkdown && !candidateImages.length) return fallback;
+
+  const imgList = candidateImages
+    .map((u, i) => `${i + 1}. ${u}`)
+    .join("\n");
+
+  const system = [
+    "Jesteś filtrem treści w PIM. Otrzymasz dane scrape'owanej strony i informacje o KONKRETNYM produkcie z bazy klienta.",
+    "Zwróć WYŁĄCZNIE dane dotyczące dokładnie tego produktu (ta sama marka, model, wariant — gramatura/kolor/rozmiar).",
+    "POMIŃ: banery, ikony serwisu, logo sklepu, polecane / 'zobacz też', recenzje innych produktów, opisy dostawy, regulaminy, stopki, komentarze, listingi kategorii, opisy ogólne sklepu.",
+    "Jeśli strona NIE dotyczy tego produktu (np. listing kategorii, inny wariant, inny produkt) — ustaw is_product_page=false i podaj krótki powód w rejected_reason.",
+    "product_description: spójny fragment opisu dotyczący tego produktu (max ~3000 znaków). Bez nazw sklepów, bez cen, bez 'kup teraz'.",
+    "product_features: konkretne cechy techniczne pary klucz/wartość (np. Materiał, Wymiary, Pojemność, Kolor). Tylko to, co dotyczy tego produktu.",
+    "product_image_indexes: indeksy (1-based) WYŁĄCZNIE zdjęć przedstawiających ten produkt. Pomiń logo, ikony UI, banery, miniatury innych produktów, zdjęcia kategorii.",
+    'Zwróć JSON: {"is_product_page": boolean, "product_description": string, "product_features": [{"key": string, "value": string}], "product_image_indexes": number[], "rejected_reason": string}.',
+  ].join("\n");
+
+  const user = [
+    "PRODUKT (z bazy klienta):",
+    `nazwa: ${product.nazwa ?? ""}`,
+    `kod: ${product.kod ?? ""}`,
+    `ean: ${product.ean ?? ""}`,
+    "",
+    `STRONA: ${pageUrl}`,
+    `TYTUŁ: ${pageTitle ?? ""}`,
+    "",
+    "MARKDOWN STRONY (skrócony):",
+    pageMarkdown.slice(0, 6000),
+    "",
+    "KANDYDACI ZDJĘĆ (1-based):",
+    imgList || "(brak)",
+  ].join("\n");
+
+  try {
+    const parsed = await callGatewayJson(apiKey, FILTER_MODEL, [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ]);
+    const out = FilterSchema.parse(parsed);
+    const imageUrls = out.product_image_indexes
+      .map((i) => candidateImages[i - 1])
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+    const dedup = Array.from(new Set(imageUrls));
+    return {
+      is_product_page: out.is_product_page,
+      description: (out.product_description || "").slice(0, 8000),
+      features: out.product_features,
+      imageUrls: dedup,
+      rejectedReason: out.rejected_reason ?? "",
+      usedAi: true,
+    };
+  } catch (e) {
+    console.warn("filterScrapedForProduct failed; keeping raw:", e);
+    return fallback;
+  }
+}
+
 export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx): Promise<void> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) throw new Error("FIRECRAWL_API_KEY is not configured");
+  const aiKey = process.env.LOVABLE_API_KEY;
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
@@ -855,8 +958,36 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       } as never)) as Record<string, unknown>;
       const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
       const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
-      const description = typeof scrape.markdown === "string" ? scrape.markdown.slice(0, 8000) : null;
-      const images = pickImagesFromScrape(scrape);
+      const rawMarkdown = typeof scrape.markdown === "string" ? scrape.markdown : "";
+      const candidateImages = pickImagesFromScrape(scrape);
+      const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
+
+      await emit(ctx, {
+        level: "info",
+        message: `   🧠 ${host} — filtruję dane pod produkt (${candidateImages.length} kandydatów zdjęć)`,
+        details: { url, candidates: candidateImages.length },
+      });
+
+      const filteredData = await filterScrapedForProduct(
+        aiKey,
+        { nazwa: product.nazwa ?? null, kod: product.kod ?? null, ean: product.ean ?? null },
+        title,
+        rawMarkdown,
+        candidateImages,
+        url,
+      );
+
+      if (!filteredData.is_product_page && filteredData.usedAi) {
+        await emit(ctx, {
+          level: "warn",
+          message: `   ⚠️ ${host} — strona nie dotyczy produktu, pominięto${filteredData.rejectedReason ? ` (${filteredData.rejectedReason})` : ""}`,
+          details: { url, reason: filteredData.rejectedReason },
+        });
+        continue;
+      }
+
+      const rejectedImages = candidateImages.filter((u) => !filteredData.imageUrls.includes(u));
+
       await supabaseAdmin
         .from("product_sources")
         .upsert(
@@ -864,19 +995,34 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
             project_id: product.project_id,
             url,
             title,
-            description,
-            images: images as never,
+            description: filteredData.description || null,
+            images: filteredData.imageUrls as never,
             extra_images: [] as never,
-            raw: { source: "firecrawl", metadata: meta } as never,
+            raw: {
+              source: "firecrawl",
+              metadata: meta,
+              ai_filter: {
+                used: filteredData.usedAi,
+                features: filteredData.features,
+                rejected_images: rejectedImages,
+                at: new Date().toISOString(),
+              },
+            } as never,
           } as never,
           { onConflict: "project_id,url" },
         );
       scraped++;
-      totalImages += images.length;
+      totalImages += filteredData.imageUrls.length;
       await emit(ctx, {
-        level: "info",
-        message: `   ✓ ${new URL(url).hostname} — ${images.length} zdjęć`,
-        details: { url, images: images.length },
+        level: "success",
+        message: `   ✓ ${host} — ${filteredData.imageUrls.length}/${candidateImages.length} zdjęć produktu, ${filteredData.features.length} cech`,
+        details: {
+          url,
+          kept_images: filteredData.imageUrls.length,
+          total_candidates: candidateImages.length,
+          features: filteredData.features.length,
+          ai: filteredData.usedAi,
+        },
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
