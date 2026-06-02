@@ -151,7 +151,11 @@ export const cancelBulkJob = createServerFn({ method: "POST" })
 
     const { error: e2 } = await context.supabase
       .from("bulk_jobs" as never)
-      .update({ cancel_requested: true } as never)
+      .update({
+        status: "CANCELLED",
+        cancel_requested: true,
+        finished_at: new Date().toISOString(),
+      } as never)
       .eq("id", data.jobId)
       .eq("status", "PROCESSING");
     if (e2) throw new Error(e2.message);

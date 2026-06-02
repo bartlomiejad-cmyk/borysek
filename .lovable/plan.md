@@ -1,88 +1,37 @@
-# Cel
-Po scrape'owaniu strony przez Firecrawl AI ma od razu odsiać śmieci i zostawić **tylko dane dotyczące konkretnego produktu** (po nazwie/EAN/kodzie):
-- zdjęcia faktycznie przedstawiające ten produkt,
-- fragment opisu wyłącznie o tym produkcie,
-- cechy techniczne tego produktu.
+# Problem
+Status zadania utyka na "Zatrzymywanie... 129/632" i nigdy nie kończy się jako CANCELLED. Stop nie działa, bo:
 
-Wszystko inne (banery, ikony, logo sklepu, "zobacz też", recenzje innych produktów, opisy dostawy, regulaminy itp.) **nie trafia** do bazy i tym samym nie pojawia się w UI ani w eksporcie.
+1. `cancelBulkJob` dla `PROCESSING` ustawia **tylko** `cancel_requested=true` — licząc, że następne uruchomienie workera dokończy bieżący item i sfinalizuje status.
+2. Worker (`process-bulk-jobs.ts → pickNextJob`) filtruje `eq("cancel_requested", false)`, więc **nigdy więcej nie pobierze tego joba**. Skoro nie pobierze — nie zaktualizuje statusu na `CANCELLED`.
+3. W efekcie wiersz na zawsze tkwi w `PROCESSING + cancel_requested=true`. UI widzi to jako "Zatrzymywanie…" w nieskończoność, a nowe zadanie tego samego typu nie da się odpalić (blokada `existing` w `startFirecrawlDiscovery` / `createBulkJob`).
 
-## Gdzie wpiąć
-Plik: `src/lib/pim/_workers.server.ts`, funkcja `runFirecrawlDiscovery` — krok 4 (pętla `for (const url of filtered)`), zaraz po `firecrawl.scrape(...)`, **przed** `upsert` do `product_sources`.
+(Dodatkowo: kolejne cron‑ticki naprawdę nie wykonują już żadnych itemów tego joba — ale UI tego nie pokazuje.)
 
-Dziś zapisujemy:
-- `description` = `scrape.markdown.slice(0, 8000)` (cała strona)
-- `images` = `pickImagesFromScrape(...)` (do 12 URL-i, też ikonki/banery)
+# Naprawa
 
-Po zmianie zapis idzie przez nowy filtr AI.
-
-## Co dodać
-
-### 1. Nowa funkcja `filterScrapedForProduct(...)` w `_workers.server.ts`
-Wejście:
-- `product`: `{ nazwa, kod, ean }`
-- `pageMarkdown`: surowy markdown ze scrape
-- `candidateImages`: lista URL-i z `pickImagesFromScrape`
-- `pageTitle`, `url`
-
-Działanie (1 wywołanie AI Gateway, `google/gemini-2.5-flash`, `response_format: json_object`):
-- system prompt: "Zwróć tylko dane dotyczące dokładnie tego produktu. Pomiń banery, polecane, recenzje, dostawę, regulaminy, inne warianty/inne produkty."
-- user content: nazwa/EAN/kod produktu + tytuł strony + skrócony markdown (max ~6k zn.) + ponumerowana lista URL-i obrazków
-- response schema (Zod):
+### 1. `src/lib/pim/bulk-jobs.functions.ts` — `cancelBulkJob`
+Dla `PROCESSING` od razu zapisać terminalny stan:
 ```
-{
-  is_product_page: boolean,             // jeśli false – cała strona idzie do kosza
-  product_description: string,          // max 4000 zn., tylko o tym produkcie
-  product_features: [{key, value}],     // max 60
-  product_image_indexes: number[],      // 1-based, tylko zdjęcia przedstawiające produkt
-  rejected_reason?: string
-}
+update bulk_jobs
+set status = 'CANCELLED',
+    cancel_requested = true,
+    finished_at = now()
+where id = :jobId
+  and status = 'PROCESSING'
 ```
-- mapowanie indexów → URL-e (tylko te z listy wejściowej)
-- fallback przy błędzie AI: zapis jak dziś (zachowawczo, żeby nie tracić danych) + warn event
+(zostaje też istniejący update dla `PENDING`.)
 
-### 2. Zmiana w `runFirecrawlDiscovery`
-W pętli scrape'a:
-```
-const filteredData = await filterScrapedForProduct(apiKey, product, scrape, candidateImages, url);
+Skutek: UI natychmiast widzi "Anulowano", blokada `existing` znika, można odpalić nowe zadanie. Jeśli akurat trwa wywołanie workera, jego pętla i tak przerwie się na kolejnym `cancelCheck`, a zapisy postępu w trakcie nie nadpisują `status`.
 
-if (!filteredData.is_product_page) {
-  emit warn: "strona nie dotyczy tego produktu – pominięto"
-  continue;       // nic nie zapisujemy do product_sources
-}
+### 2. `src/routes/api/public/hooks/process-bulk-jobs.ts` — `pickNextJob`
+Zostawić selektor jak jest (pomija zadania `cancel_requested=true`), tak żeby cron nie próbował już niczego robić z zatrzymanym jobem. Po zmianie z punktu 1 nie ma już ryzyka, że job utknie.
 
-upsert product_sources z:
-  description: filteredData.product_description
-  images:      filteredData.product_image_urls
-  raw: {
-    source: "firecrawl",
-    metadata,
-    ai_filter: { features: filteredData.product_features, rejected: candidateImages.filter(...) }
-  }
-```
+### 3. UI (opcjonalnie, ale czyste) — `BulkJobLog` / pasek postępu w `src/routes/_auth/projects.$id.index.tsx`
+Po pomyślnym `cancelBulkJob` od razu `refetch` aktywnego joba (już to robimy), więc nic dodatkowego nie trzeba — wystarczy fix backendowy.
 
-Cechy lądują w `raw.ai_filter.features` (nie ruszamy schematu `product_sources`). Generator goldena (`runGenerateGoldenRecord`) już dziś robi własne `features` z opisów źródeł — dostanie cleaner wsad, więc będzie celniejszy.
+# Pliki do zmiany
+- `src/lib/pim/bulk-jobs.functions.ts`
+- (bez migracji DB, bez zmian schematu)
 
-### 3. Eventy live‑log
-W tej samej pętli emitować do `bulk_job_events`:
-- `info`  "🧠 <host> — filtruję dane pod produkt"
-- `success` "   ✓ <host> — opis OK, X/Y zdjęć produktu, Z cech"
-- `warn`  "   ⚠️ <host> — strona nie dotyczy produktu (powód: …) — pominięto"
-- `error` przy wyjątku AI
-
-### 4. Bez zmian schematu DB
-Nie ruszamy tabel — wystarczą pola, które już istnieją (`product_sources.images`, `description`, `raw`). Brak migracji.
-
-## Co dostanie użytkownik
-- W szczegółach produktu i na liście pojawią się **tylko zdjęcia przedstawiające produkt** — bez ikon serwisu, banerów promocyjnych, "polecanych".
-- Opis źródła to **wycięty fragment dotyczący tego produktu**, nie cała strona.
-- Generator opisu (golden) pracuje na czystszych źródłach → mniej halucynacji i marketingowego szumu.
-- Strony, które tak naprawdę nie sprzedają tego produktu (np. trafiony błędnie listing kategorii), zostaną odrzucone i nie zaśmiecą widoku.
-
-## Pliki
-- `src/lib/pim/_workers.server.ts` — nowa funkcja `filterScrapedForProduct` + zmiana w `runFirecrawlDiscovery`.
-- (opcjonalnie później) widoczny w UI badge "filtr AI: X/Y zdjęć" w karcie źródła — do osobnej iteracji.
-
-## Uwagi / koszty
-- +1 wywołanie AI per scrape'owana strona (czyli max 3 na produkt). Model `gemini-2.5-flash` — tani i szybki.
-- Trzeba **opublikować** po wdrożeniu, bo cron uderza w published URL.
-- Nie ruszamy istniejącego flow `runVerifySources` (drugi pass na zdjęciach pod kątem znaków wodnych / mismatchu) — uzupełnia się, nie kłóci.
+# Po wdrożeniu
+Publish wymagany, bo cron i worker działają na opublikowanej wersji. Aktualny "zawieszony" wiersz z 23:37 można ręcznie zamknąć — albo wyślij ponownie "Zatrzymaj", po deployu nowa wersja `cancelBulkJob` od razu go zamknie.
