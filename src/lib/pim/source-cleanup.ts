@@ -90,6 +90,24 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
   /mon\.?\s*[-–—]\s*fri\.?/i,
   /pon\.?\s*[-–—]\s*pt\.?/i,
   /google\.com\/maps/i,
+  // recenzje/akcje sklepowe (PL/EN)
+  /\(?\s*write a review\s*\)?/i,
+  /^follow\s*compare\s*$/i,
+  /^follow$/i,
+  /^compare$/i,
+  /^obserwuj$/i,
+  /^por[óo]wnaj$/i,
+  /\bsaturday\b/i,
+  /\bsunday\b/i,
+  /\bmonday\b/i,
+  /\btuesday\b/i,
+  /\bwednesday\b/i,
+  /\bthursday\b/i,
+  /\bfriday\b/i,
+  /\bniedziela\b/i,
+  /\bsobota\b/i,
+  // godziny w formacie "10:00 am - 6:00 pm" lub "10:00 - 18:00"
+  /\d{1,2}:\d{2}\s*(am|pm)?\s*[-–—]\s*\d{1,2}:\d{2}\s*(am|pm)?/i,
 ];
 
 const DESC_CUT_HEADINGS: RegExp[] = [
@@ -99,20 +117,33 @@ const DESC_CUT_HEADINGS: RegExp[] = [
 const PHONE_RE = /\+?\d{2,3}[ \-.]?\d{3}[ \-.]?\d{3}[ \-.]?\d{3}/g;
 const EMAIL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi;
 
+const PRICE_RE = /^\s*\d{1,4}([.,]\d{1,2})?\s*(z[łl]|pln|eur|usd|€|\$)\s*$/i;
+const SKU_LINE_RE = /^\s*\d{2,4}[-\s]\d{2,4}\s*$/;
+
 export function sanitizeProductDescription(input: string | null | undefined): string {
   if (!input) return "";
   const lines = input.replace(/\r\n/g, "\n").split("\n");
   const kept: string[] = [];
   for (const line of lines) {
     if (DESC_CUT_HEADINGS.some((re) => re.test(line.trim()))) break;
-    const imgMatch = /^\s*!\[[^\]]*\]\((https?:[^)\s]+)\)\s*$/i.exec(line);
-    if (imgMatch && isJunkImageUrl(imgMatch[1])) continue;
+    const trimmedRaw = line.trim();
+    // Każdy markdown-image w osobnej linii usuwamy — w opisie nie chcemy
+    // galerii produktu (zdjęcia obsługujemy oddzielnie przez images/extra_images).
+    if (/^\s*!\[[^\]]*\]\((https?:[^)\s]+)\)\s*$/i.test(line)) continue;
+    // Linkowane logo / nagłówek brandu typu: [![Logo ...](img)](url)
+    if (/^\s*\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)\s*$/i.test(line)) continue;
+    // Cena samodzielna w linii.
+    if (PRICE_RE.test(line)) continue;
+    // Numer SKU "242-066" sam w linii.
+    if (SKU_LINE_RE.test(line)) continue;
     if (DESC_BLOCK_PHRASES.some((re) => re.test(line))) continue;
     // Linia adresowa: [KOD-POCZTOWY MIASTO ...] (https://...)
     if (/^\s*\[\d{2}[-\s]?\d{3}[^\]]*\]\s*\(https?:[^)]+\)\s*$/i.test(line)) continue;
+    // Linia zaczynająca się od kodu pocztowego (PL): "41-253 Czeladź..."
+    if (/^\s*\d{2}-\d{3}\s+\S/.test(trimmedRaw)) continue;
     // Standalone link markdown do Google Maps
     if (/^\s*\[[^\]]*\]\(https?:[^)]*google\.com\/maps[^)]*\)\s*$/i.test(line)) continue;
-    const trimmed = line.trim();
+    const trimmed = trimmedRaw;
     PHONE_RE.lastIndex = 0;
     if (trimmed && PHONE_RE.test(trimmed) && trimmed.replace(PHONE_RE, "").trim().length < 8) continue;
     PHONE_RE.lastIndex = 0;
@@ -122,11 +153,17 @@ export function sanitizeProductDescription(input: string | null | undefined): st
     kept.push(line);
   }
   let out = kept.join("\n");
-  out = out.replace(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g, (m, url: string) => (isJunkImageUrl(url) ? "" : m));
+  // Wytnij WSZYSTKIE markdown-images z opisu (galerie produktu obsługujemy osobno).
+  out = out.replace(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g, "");
+  // Linkowane obrazki [![alt](img)](url) — też brand-logo i miniatury.
+  out = out.replace(/\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)/g, "");
   // Inline linki Google Maps wewnątrz akapitów.
   out = out.replace(/\[[^\]]*\]\(https?:[^)]*google\.com\/maps[^)]*\)/gi, "");
   out = out.replace(PHONE_RE, "");
   out = out.replace(EMAIL_RE, "");
+  // Osierocone fragmenty markdown po wycięciu obrazków: "[", "](url)", puste linki.
+  out = out.replace(/\[\]\([^)]*\)/g, "");
+  out = out.replace(/^\s*[\[\]()]+\s*$/gm, "");
   out = out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   if (out.length > 3000) out = `${out.slice(0, 3000).trimEnd()}…`;
   return out;

@@ -1,17 +1,21 @@
 Plan naprawy:
 
-1. Poprawić samo czyszczenie źródeł
-- Rozszerzyć filtr obrazów o placeholdery/banery wykrywane nie tylko po URL, ale też po już zapisanej ocenie AI (`is_banner_or_trash`).
-- Przy czyszczeniu usuwać takie URL-e również z `images` i `extra_images`, nawet gdy nazwa pliku wygląda neutralnie.
+1. Wzmocnię `sanitizeProductDescription`, żeby usuwał całe bloki markdown zawierające:
+   - galerie obrazków produktu powielone na początku opisu,
+   - linkowane logo producenta/brandu,
+   - cenę, „Write a review”, Follow/Compare,
+   - adresy sklepów, godziny otwarcia i pozostałości po mapach,
+   - osierocone linki/urwane fragmenty po czyszczeniu.
 
-2. Naprawić efekt „klikam i nic”
-- Dodać stan ładowania przy przycisku `Wyczyść źródła`, żeby było widać, że akcja trwa.
-- Po zakończeniu wymusić odświeżenie danych produktu i listy źródeł.
-- Pokazać wynik także wtedy, gdy usunięto 0 elementów, ale operacja faktycznie się wykonała.
+2. Podepnę to czyszczenie bezpośrednio w `runMatching` przed walidacją AI źródeł:
+   - po pobraniu `product_sources` opisy będą sanitizowane,
+   - jeśli sanitizacja coś zmieni, zapiszę czysty opis z powrotem do `product_sources`,
+   - walidator AI dostanie już czysty opis, a nie surowy scrape sklepu.
 
-3. Ukryć pozostałości, które już są oznaczone jako śmieć
-- W widoku produktu odfiltrować z galerii i sekcji źródeł zdjęcia, które mają `image_scores[URL].is_banner_or_trash === true`.
-- Dzięki temu istniejące szare placeholdery/banery znikną z UI nawet jeśli nie da się ich jednoznacznie rozpoznać po samym URL.
+3. Wzmocnię etap generowania złotego opisu:
+   - `sourceBlocks` użyje zawsze sanitizowanego opisu,
+   - wynik `golden_description` przejdzie przez `sanitizeProductDescription`, żeby nie przepuścić śmieci nawet jeśli AI je skopiuje.
 
-4. Zweryfikować sygnały
-- Sprawdzić po zmianie, czy klik generuje request do funkcji czyszczącej i czy widok produktu odświeża się bez ręcznego reloadu.
+4. Rozszerzę prompt filtra scrape’u o dokładnie ten przypadek: miniatury galerii, logo brandu, ceny, recenzje, adresy sklepu i godziny otwarcia mają być bezwzględnie pomijane.
+
+5. Po wdrożeniu zweryfikuję składnię i miejsca wywołań, bez zmiany schematu bazy danych.

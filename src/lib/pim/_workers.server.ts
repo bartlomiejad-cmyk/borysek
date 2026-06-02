@@ -320,7 +320,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const sourceBlocks = (srcs ?? [])
     .map((s, idx) => {
-      const desc = (s.description ?? "").slice(0, 4000);
+      const desc = sanitizeProductDescription(s.description ?? "").slice(0, 4000);
       return `### Źródło ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
     })
     .join("\n\n---\n\n");
@@ -370,7 +370,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     ]);
     const out = GoldenSchema.parse(parsed);
     const name = sanitize(out.name, blacklist);
-    const description = sanitize(out.description, blacklist);
+    const description = sanitizeProductDescription(sanitize(out.description, blacklist) ?? "");
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
     const newFeatures = (out.features ?? [])
       .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
@@ -842,6 +842,8 @@ async function filterScrapedForProduct(
     "- przyciski / linki typu „Zapytaj o produkt\", „Udostępnij\", „Dodaj do schowka\", „Napisz opinię\", newsletter",
     "- informacje o dostawie, płatnościach, gwarancji bezpiecznego zakupu, zwrotach, reklamacjach, numery telefonu i e‑maile sklepu",
     "- polecane / „zobacz też\" / „klienci kupili\", recenzje innych produktów, listingi kategorii, regulaminy, stopki, opisy ogólne sklepu",
+    "- galerie/miniatury obrazków, logo brandu/producenta, ceny i kwoty (np. „2,69 zł\"), „Write a review\", Follow/Compare/Obserwuj/Porównuj",
+    "- adresy sklepów stacjonarnych, kody pocztowe, godziny otwarcia, dni tygodnia (Mon-Fri / Pon-Pt), linki do Google Maps",
     "Jeśli strona NIE dotyczy tego produktu (np. listing kategorii, inny wariant, inny produkt) — ustaw is_product_page=false i podaj krótki powód w rejected_reason.",
     "product_description: spójny fragment opisu dotyczący tego produktu (MAX 3000 znaków). Bez nazw sklepów, bez cen, bez „kup teraz\", bez numerów telefonu i adresów e‑mail.",
     "product_features: konkretne cechy techniczne pary klucz/wartość (np. Materiał, Wymiary, Pojemność, Kolor). Tylko to, co dotyczy tego produktu.",
