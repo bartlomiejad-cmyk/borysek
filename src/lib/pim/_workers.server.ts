@@ -11,6 +11,8 @@
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { probeManySizes } from "./image-size.server";
+import { isMarketplaceUrl } from "./firecrawl.functions";
+import Firecrawl from "@mendable/firecrawl-js";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
