@@ -381,7 +381,10 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      bulk_job_kind: "GENERATE_GOLDEN" | "REGENERATE_MEDIA"
+      bulk_job_kind:
+        | "GENERATE_GOLDEN"
+        | "REGENERATE_MEDIA"
+        | "FIRECRAWL_DISCOVERY"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -519,7 +522,11 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      bulk_job_kind: ["GENERATE_GOLDEN", "REGENERATE_MEDIA"],
+      bulk_job_kind: [
+        "GENERATE_GOLDEN",
+        "REGENERATE_MEDIA",
+        "FIRECRAWL_DISCOVERY",
+      ],
       bulk_job_status: [
         "PENDING",
         "PROCESSING",
