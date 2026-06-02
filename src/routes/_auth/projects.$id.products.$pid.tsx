@@ -8,13 +8,14 @@ import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductIm
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
+import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser } from "lucide-react";
 import { ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -46,6 +47,7 @@ function ProductDetail() {
   const regenFn = useServerFn(regenerateMainImage);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
+  const recleanFn = useServerFn(recleanProductSources);
 
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
@@ -320,6 +322,28 @@ function ProductDetail() {
             </div>
           )}
         </div>
+        <div className="flex gap-2">
+        <Button
+          variant="outline"
+          title="Usuwa logo metod płatności, ikony kontaktu, stopki i bloki adresu sklepu z zapisanych źródeł. Bezpieczne, bez kosztu Firecrawl."
+          onClick={async () => {
+            try {
+              const res = await recleanFn({ data: { projectId: id } });
+              if (res.updated === 0) {
+                toast.info("Wszystkie źródła są już wyczyszczone.");
+              } else {
+                toast.success(
+                  `Wyczyszczono ${res.updated}/${res.scanned} źródeł — ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków usunięto.`,
+                );
+              }
+              invalidate();
+            } catch (e) {
+              toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
+            }
+          }}
+        >
+          <Eraser className="h-4 w-4 mr-2" /> Wyczyść źródła
+        </Button>
         <Button
           onClick={() => regenAll.mutate()}
           disabled={regenAll.isPending || sources.length === 0}
@@ -327,6 +351,7 @@ function ProductDetail() {
           <Sparkles className="h-4 w-4 mr-2" />
           {regenAll.isPending ? "Generowanie..." : "Generuj z 3 źródeł"}
         </Button>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">

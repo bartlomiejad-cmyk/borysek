@@ -5,11 +5,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
 import { verifyProduct } from "@/lib/pim/ai.functions";
+import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, ShieldCheck, ImageOff, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ShieldCheck, ImageOff, AlertTriangle, CheckCircle2, Eraser } from "lucide-react";
 
 export const Route = createFileRoute("/_auth/projects/$id/verify")({ component: VerifyPage });
 
@@ -20,6 +21,7 @@ function VerifyPage() {
   const qc = useQueryClient();
   const listFn = useServerFn(listProductsWithEnrichment);
   const verifyFn = useServerFn(verifyProduct);
+  const recleanFn = useServerFn(recleanProductSources);
 
   const { data: products = [] } = useQuery({
     queryKey: ["project", id, "products"],
@@ -75,6 +77,27 @@ function VerifyPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setOnlyProblems((v) => !v)}>
             {onlyProblems ? "Pokaż wszystkie" : "Tylko z problemami"}
+          </Button>
+          <Button
+            variant="outline"
+            title="Usuwa logo metod płatności, ikony kontaktu, stopki i bloki adresu sklepu z zapisanych źródeł. Bezpieczne, bez kosztu Firecrawl."
+            onClick={async () => {
+              try {
+                const res = await recleanFn({ data: { projectId: id } });
+                if (res.updated === 0) {
+                  toast.info("Wszystkie źródła są już wyczyszczone.");
+                } else {
+                  toast.success(
+                    `Wyczyszczono ${res.updated}/${res.scanned} źródeł — ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków usunięto.`,
+                  );
+                }
+                qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Nie udało się wyczyścić źródeł");
+              }
+            }}
+          >
+            <Eraser className="h-4 w-4 mr-2" /> Wyczyść źródła
           </Button>
           <Button onClick={verifyAll} disabled={!!progress}>
             <ShieldCheck className="h-4 w-4 mr-2" /> Sprawdź wszystkie AI
