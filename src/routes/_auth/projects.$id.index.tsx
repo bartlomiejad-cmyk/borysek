@@ -32,6 +32,7 @@ import {
   getActiveBulkJob,
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
+import { startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -118,6 +119,7 @@ function ProjectPage() {
   const createJobFn = useServerFn(createBulkJob);
   const getActiveJobFn = useServerFn(getActiveBulkJob);
   const cancelJobFn = useServerFn(cancelBulkJob);
+  const firecrawlFn = useServerFn(startFirecrawlDiscovery);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -160,17 +162,28 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "REGENERATE_MEDIA" } }),
     refetchInterval: 3000,
   });
+  const { data: discJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "FIRECRAWL_DISCOVERY" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
+  const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob]) {
+    for (const job of [genJob, regenJob, discJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
       lastTerminalToastRef.current[job.id] = job.status;
-      const label = job.kind === "GENERATE_GOLDEN" ? "Generacja złotych rekordów" : "Regeneracja zdjęć";
+      const label =
+        job.kind === "GENERATE_GOLDEN"
+          ? "Generacja złotych rekordów"
+          : job.kind === "REGENERATE_MEDIA"
+            ? "Regeneracja zdjęć"
+            : "Wyszukiwanie źródeł (Firecrawl)";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -180,7 +193,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, refetchProducts]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
