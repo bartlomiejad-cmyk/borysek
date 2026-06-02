@@ -80,10 +80,19 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
   /\[kontakt\]/i,
   /tel:\s*[+\d]/i,
   /mailto:/i,
+  // angielskie chrome sklepu
+  /only available in our stationary store/i,
+  /stationary store/i,
+  /installments? (for|are) /i,
+  /working hours?/i,
+  /opening hours?/i,
+  /mon\.?\s*[-–—]\s*fri\.?/i,
+  /pon\.?\s*[-–—]\s*pt\.?/i,
+  /google\.com\/maps/i,
 ];
 
 const DESC_CUT_HEADINGS: RegExp[] = [
-  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty)\b/i,
+  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store)\b/i,
 ];
 
 const PHONE_RE = /\+?\d{2,3}[ \-.]?\d{3}[ \-.]?\d{3}[ \-.]?\d{3}/g;
@@ -98,6 +107,10 @@ export function sanitizeProductDescription(input: string | null | undefined): st
     const imgMatch = /^\s*!\[[^\]]*\]\((https?:[^)\s]+)\)\s*$/i.exec(line);
     if (imgMatch && isJunkImageUrl(imgMatch[1])) continue;
     if (DESC_BLOCK_PHRASES.some((re) => re.test(line))) continue;
+    // Linia adresowa: [KOD-POCZTOWY MIASTO ...] (https://...)
+    if (/^\s*\[\d{2}[-\s]?\d{3}[^\]]*\]\s*\(https?:[^)]+\)\s*$/i.test(line)) continue;
+    // Standalone link markdown do Google Maps
+    if (/^\s*\[[^\]]*\]\(https?:[^)]*google\.com\/maps[^)]*\)\s*$/i.test(line)) continue;
     const trimmed = line.trim();
     PHONE_RE.lastIndex = 0;
     if (trimmed && PHONE_RE.test(trimmed) && trimmed.replace(PHONE_RE, "").trim().length < 8) continue;
@@ -109,6 +122,8 @@ export function sanitizeProductDescription(input: string | null | undefined): st
   }
   let out = kept.join("\n");
   out = out.replace(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g, (m, url: string) => (isJunkImageUrl(url) ? "" : m));
+  // Inline linki Google Maps wewnątrz akapitów.
+  out = out.replace(/\[[^\]]*\]\(https?:[^)]*google\.com\/maps[^)]*\)/gi, "");
   out = out.replace(PHONE_RE, "");
   out = out.replace(EMAIL_RE, "");
   out = out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
