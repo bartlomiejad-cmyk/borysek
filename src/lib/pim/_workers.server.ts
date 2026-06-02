@@ -12,6 +12,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { probeManySizes } from "./image-size.server";
 import { isMarketplaceUrl } from "./firecrawl.functions";
+import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
 import Firecrawl from "@mendable/firecrawl-js";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
@@ -471,7 +472,7 @@ async function collectScrapedUrls(projectId: string, pickedUrls: string[], inclu
     const extra = includeExtra && Array.isArray((s as { extra_images?: unknown }).extra_images)
       ? ((s as { extra_images: string[] }).extra_images)
       : [];
-    for (const u of [...main, ...extra]) {
+    for (const u of filterImageUrls([...main, ...extra])) {
       if (!seen.has(u)) { seen.add(u); out.push(u); }
     }
   }
@@ -777,7 +778,7 @@ function pickImagesFromScrape(res: unknown): string[] {
     const m2 = /src=["']([^"']+)["']/i.exec(m);
     if (m2) push(m2[1]);
   }
-  return out.slice(0, 12);
+  return filterImageUrls(out).slice(0, 12);
 }
 
 // ---------------------------------------------------------------------------
@@ -834,9 +835,15 @@ async function filterScrapedForProduct(
   const system = [
     "Jesteś filtrem treści w PIM. Otrzymasz dane scrape'owanej strony i informacje o KONKRETNYM produkcie z bazy klienta.",
     "Zwróć WYŁĄCZNIE dane dotyczące dokładnie tego produktu (ta sama marka, model, wariant — gramatura/kolor/rozmiar).",
-    "POMIŃ: banery, ikony serwisu, logo sklepu, polecane / 'zobacz też', recenzje innych produktów, opisy dostawy, regulaminy, stopki, komentarze, listingi kategorii, opisy ogólne sklepu.",
+    "POMIŃ BEZWZGLĘDNIE (to NIE jest produkt):",
+    "- logo metod płatności: Blik, Visa, Mastercard, Przelewy24, PayU, DotPay, BlueMedia, Apple Pay, Google Pay, PayPal",
+    "- logo i banery sklepu, certyfikaty (Bazant, „Gwarancja Najlepszej Ceny\", SSL, Opineo, Ceneo, „Bezpieczne zakupy\")",
+    "- ikony kontaktu (telefon, koperta) i social media (Facebook, Instagram, YouTube, TikTok)",
+    "- przyciski / linki typu „Zapytaj o produkt\", „Udostępnij\", „Dodaj do schowka\", „Napisz opinię\", newsletter",
+    "- informacje o dostawie, płatnościach, gwarancji bezpiecznego zakupu, zwrotach, reklamacjach, numery telefonu i e‑maile sklepu",
+    "- polecane / „zobacz też\" / „klienci kupili\", recenzje innych produktów, listingi kategorii, regulaminy, stopki, opisy ogólne sklepu",
     "Jeśli strona NIE dotyczy tego produktu (np. listing kategorii, inny wariant, inny produkt) — ustaw is_product_page=false i podaj krótki powód w rejected_reason.",
-    "product_description: spójny fragment opisu dotyczący tego produktu (max ~3000 znaków). Bez nazw sklepów, bez cen, bez 'kup teraz'.",
+    "product_description: spójny fragment opisu dotyczący tego produktu (MAX 3000 znaków). Bez nazw sklepów, bez cen, bez „kup teraz\", bez numerów telefonu i adresów e‑mail.",
     "product_features: konkretne cechy techniczne pary klucz/wartość (np. Materiał, Wymiary, Pojemność, Kolor). Tylko to, co dotyczy tego produktu.",
     "product_image_indexes: indeksy (1-based) WYŁĄCZNIE zdjęć przedstawiających ten produkt. Pomiń logo, ikony UI, banery, miniatury innych produktów, zdjęcia kategorii.",
     'Zwróć JSON: {"is_product_page": boolean, "product_description": string, "product_features": [{"key": string, "value": string}], "product_image_indexes": number[], "rejected_reason": string}.',
@@ -867,10 +874,10 @@ async function filterScrapedForProduct(
     const imageUrls = out.product_image_indexes
       .map((i) => candidateImages[i - 1])
       .filter((u): u is string => typeof u === "string" && u.length > 0);
-    const dedup = Array.from(new Set(imageUrls));
+    const dedup = filterImageUrls(imageUrls);
     return {
       is_product_page: out.is_product_page,
-      description: (out.product_description || "").slice(0, 8000),
+      description: sanitizeProductDescription(out.product_description || ""),
       features: out.product_features,
       imageUrls: dedup,
       rejectedReason: out.rejected_reason ?? "",
@@ -878,7 +885,7 @@ async function filterScrapedForProduct(
     };
   } catch (e) {
     console.warn("filterScrapedForProduct failed; keeping raw:", e);
-    return fallback;
+    return { ...fallback, description: sanitizeProductDescription(fallback.description), imageUrls: filterImageUrls(fallback.imageUrls) };
   }
 }
 

@@ -32,7 +32,7 @@ import {
   getActiveBulkJob,
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
-import { startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,6 +121,7 @@ function ProjectPage() {
   const getActiveJobFn = useServerFn(getActiveBulkJob);
   const cancelJobFn = useServerFn(cancelBulkJob);
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
+  const recleanFn = useServerFn(recleanProductSources);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -393,6 +394,22 @@ function ProjectPage() {
             }}
           >
             <Sparkles className="h-4 w-4 mr-2" /> Wyszukaj źródła (Firecrawl)
+          </Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const res = await recleanFn({ data: { projectId: id } });
+                toast.success(
+                  `Wyczyszczono: ${res.updated}/${res.scanned} źródeł, usunięto ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków opisu.`,
+                );
+                qc.invalidateQueries({ queryKey: ["project", id] });
+              } catch (e) {
+                toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
+              }
+            }}
+          >
+            <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
           </Button>
           <Button onClick={() => generateAll()} disabled={!!genActive}>
             <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
 
 /**
  * Marketplace / aggregator domains we never want as scraped sources.
@@ -147,4 +148,65 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
     }
 
     return { jobId: (row as { id: string }).id, total: targetIds.length };
+  });
+
+/**
+ * Reklean istniejących product_sources — deterministyczne sito (logo Blika,
+ * Bazant, ikony kontaktu, stopkowe frazy) bez ponownego scrape'u przez
+ * Firecrawl. Działa wyłącznie na zapisanych już danych. Ownership via RLS.
+ */
+export const recleanProductSources = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({ projectId: z.string().uuid() }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: rows, error } = await supabase
+      .from("product_sources")
+      .select("id, images, extra_images, description")
+      .eq("project_id", data.projectId);
+    if (error) throw new Error(error.message);
+
+    let scanned = 0;
+    let updated = 0;
+    let imagesRemoved = 0;
+    let charsRemoved = 0;
+
+    for (const row of rows ?? []) {
+      scanned++;
+      const r = row as {
+        id: string;
+        images: unknown;
+        extra_images: unknown;
+        description: string | null;
+      };
+      const mainIn = Array.isArray(r.images) ? (r.images as string[]) : [];
+      const extraIn = Array.isArray(r.extra_images) ? (r.extra_images as string[]) : [];
+      const mainOut = filterImageUrls(mainIn);
+      const extraOut = filterImageUrls(extraIn);
+      const descIn = r.description ?? "";
+      const descOut = sanitizeProductDescription(descIn);
+
+      const dImages = mainIn.length - mainOut.length + (extraIn.length - extraOut.length);
+      const dChars = Math.max(0, descIn.length - descOut.length);
+
+      if (dImages === 0 && dChars === 0) continue;
+
+      const { error: uErr } = await supabase
+        .from("product_sources")
+        .update({
+          images: mainOut as never,
+          extra_images: extraOut as never,
+          description: descOut || null,
+        } as never)
+        .eq("id", r.id);
+      if (uErr) throw new Error(uErr.message);
+
+      updated++;
+      imagesRemoved += dImages;
+      charsRemoved += dChars;
+    }
+
+    return { scanned, updated, imagesRemoved, charsRemoved };
   });
