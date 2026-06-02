@@ -568,11 +568,12 @@ function buildSeedreamPrompt(opts: {
   return lines.join(" ");
 }
 
-export async function runRegenerateMedia(productId: string): Promise<void> {
+export async function runRegenerateMedia(productId: string, ctx?: WorkerCtx): Promise<void> {
   const FAL_KEY = process.env.FAL_KEY;
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
   if (!apiKey) throw new Error("LOVABLE_API_KEY nie jest skonfigurowany");
+  await emit(ctx, { level: "info", message: `🖼  Regeneruję media dla produktu ${productId.slice(0, 8)}…` });
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
