@@ -439,6 +439,7 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(genJob.processed_count / Math.max(1, genJob.total)) * 100} />
+            <BulkJobLog jobId={genJob.id} />
           </CardContent>
         </Card>
       )}
@@ -468,6 +469,7 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(regenJob.processed_count / Math.max(1, regenJob.total)) * 100} />
+            <BulkJobLog jobId={regenJob.id} />
           </CardContent>
         </Card>
       )}
@@ -497,6 +499,7 @@ function ProjectPage() {
               </div>
             </div>
             <Progress value={(discJob.processed_count / Math.max(1, discJob.total)) * 100} />
+            <BulkJobLog jobId={discJob.id} />
           </CardContent>
         </Card>
       )}
