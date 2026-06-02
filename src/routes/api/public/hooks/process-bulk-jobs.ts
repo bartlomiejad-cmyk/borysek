@@ -3,13 +3,14 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   runGenerateGoldenRecord,
   runRegenerateMedia,
+  runFirecrawlDiscovery,
 } from "@/lib/pim/_workers.server";
 
 // Total budget per request (Worker hard limit is ~30s). We process items
 // sequentially and stop early if we'd risk timing out.
 const BUDGET_MS = 25_000;
 
-type JobKind = "GENERATE_GOLDEN" | "REGENERATE_MEDIA";
+type JobKind = "GENERATE_GOLDEN" | "REGENERATE_MEDIA" | "FIRECRAWL_DISCOVERY";
 
 type BulkJobRow = {
   id: string;
@@ -29,8 +30,10 @@ async function processItem(kind: JobKind, productId: string): Promise<void> {
     // Verification of source images is a separate, opt-in action. Bulk
     // golden generation must stay fast so the queue does not appear stuck.
     await runGenerateGoldenRecord(productId, "all");
-  } else {
+  } else if (kind === "REGENERATE_MEDIA") {
     await runRegenerateMedia(productId);
+  } else {
+    await runFirecrawlDiscovery(productId);
   }
 }
 
