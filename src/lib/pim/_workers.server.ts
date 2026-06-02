@@ -320,7 +320,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const sourceBlocks = (srcs ?? [])
     .map((s, idx) => {
-      const desc = (s.description ?? "").slice(0, 4000);
+      const desc = sanitizeProductDescription(s.description ?? "").slice(0, 4000);
       return `### Źródło ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
     })
     .join("\n\n---\n\n");
@@ -370,7 +370,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     ]);
     const out = GoldenSchema.parse(parsed);
     const name = sanitize(out.name, blacklist);
-    const description = sanitize(out.description, blacklist);
+    const description = sanitizeProductDescription(sanitize(out.description, blacklist) ?? "");
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
     const newFeatures = (out.features ?? [])
       .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
