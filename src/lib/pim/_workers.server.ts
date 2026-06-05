@@ -772,12 +772,6 @@ function pickImagesFromScrape(res: unknown): string[] {
     const m2 = /\((https?:[^)\s]+)\)/.exec(m);
     if (m2) push(m2[1]);
   }
-  const html = typeof r.html === "string" ? r.html : "";
-  const imgMatches = html.match(/<img[^>]+src=["']([^"']+)["']/gi) ?? [];
-  for (const m of imgMatches) {
-    const m2 = /src=["']([^"']+)["']/i.exec(m);
-    if (m2) push(m2[1]);
-  }
   return filterImageUrls(out).slice(0, 12);
 }
 
@@ -925,7 +919,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   let hits: FirecrawlSearchHit[] = [];
   try {
     const sr = (await firecrawl.search(query, {
-      limit: 5,
+      limit: 3,
       sources: ["web"],
     } as never)) as unknown;
     const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
@@ -962,7 +956,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   for (const url of filtered) {
     try {
       const scrape = (await firecrawl.scrape(url, {
-        formats: ["markdown", "html"],
+        formats: ["markdown"],
         onlyMainContent: true,
       } as never)) as Record<string, unknown>;
       const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
