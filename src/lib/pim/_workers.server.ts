@@ -919,7 +919,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   let hits: FirecrawlSearchHit[] = [];
   try {
     const sr = (await firecrawl.search(query, {
-      limit: 3,
+      limit: 10,
       sources: ["web"],
     } as never)) as unknown;
     const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
@@ -942,7 +942,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     } as never);
 
   // 3) Filter out marketplaces / blacklist, take top 3.
-  const filtered = allUrls.filter((u) => !isMarketplaceUrl(u, extraBlacklist)).slice(0, 3);
+  const filtered = allUrls.filter((u) => !isMarketplaceUrl(u, extraBlacklist)).slice(0, 10);
   await emit(ctx, {
     level: filtered.length ? "info" : "warn",
     message: `   ${nazwa} — ${allUrls.length} wyników, ${filtered.length} po filtrze`,
