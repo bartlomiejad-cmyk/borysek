@@ -749,29 +749,125 @@ export async function runRegenerateMedia(productId: string, ctx?: WorkerCtx): Pr
 
 type FirecrawlSearchHit = { url?: string; title?: string; description?: string };
 
+/**
+ * Sklepy serwują miniatury, a po kliknięciu w galerię pokazuje się duża
+ * wersja. Spróbuj podmienić URL miniatury na URL "powiększonego" wariantu
+ * dla typowych platform e-commerce. Zwracamy oryginał, jeśli żaden wzorzec
+ * nie pasuje — dalsza walidacja wymiarów dzieje się i tak w pipeline.
+ */
+function upgradeToLargeImageUrl(input: string): string {
+  let u = input;
+  // WooCommerce / WP: usuń sufiks rozmiaru "-150x150" / "-1024x768" przed rozszerzeniem.
+  u = u.replace(/-\d{2,4}x\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1");
+  // PrestaShop: -home_default / -cart_default / -small_default / -medium_default → -large_default
+  u = u.replace(/-(?:home|cart|small|medium|thickbox|category|product)_default\./i, "-large_default.");
+  // Shopify CDN: _small / _compact / _medium / _large / _grande / _100x / _240x → _2048x.
+  u = u.replace(/_(?:pico|icon|thumb|small|compact|medium|large|grande)(\.|@)/i, "_2048x$1");
+  u = u.replace(/_\d{1,4}x(?:\d{1,4})?(\.(?:jpe?g|png|webp|avif))/i, "_2048x$1");
+  // Magento: /cache/<hash>/small_image/<W>x<H>/ lub /thumbnail/ — wytnij cały segment /cache/.../  i typ rozmiaru.
+  u = u.replace(/\/cache\/[a-f0-9]+\/(?:small_image|thumbnail|image)\/\d+x\d+\//i, "/");
+  u = u.replace(/\/cache\/[a-f0-9]+\//i, "/");
+  // IdoSell / Shoper: /small/ /s/ /m/ /thumb/ → /source/ lub /big/.
+  u = u.replace(/\/(?:small|thumb|thumbs|thumbnails|mini)\//i, "/source/");
+  u = u.replace(/\/(s|m)\/(\d)/i, "/source/$2");
+  // Google CDN size hint: =s100 / =w200-h200 → =s2048.
+  u = u.replace(/=(?:s|w|h)\d{1,4}(-(?:w|h|s)\d{1,4})*([?&]|$)/i, "=s2048$2");
+  return u;
+}
+
+/**
+ * Z URL-a wyciągnij minimalny zadeklarowany wymiar (px) — jeśli da się
+ * odczytać go z nazwy pliku / query. Zwracamy null gdy URL nie koduje rozmiaru.
+ */
+function inferMinDimensionFromUrl(url: string): number | null {
+  const wh = /[_\-/](\d{2,4})x(\d{2,4})(?:\.|_|-|\/|$)/i.exec(url);
+  if (wh) return Math.min(parseInt(wh[1], 10), parseInt(wh[2], 10));
+  const s = /[=_\-/](?:s|w|h)(\d{2,4})(?:[?&\-]|$)/i.exec(url);
+  if (s) return parseInt(s[1], 10);
+  return null;
+}
+
+const PRODUCT_PATH_HINTS = [
+  "/product", "/products", "/galeria", "/gallery", "/media/catalog/product",
+  "/zdjecia", "/zdjęcia", "/upload/product", "/uploads/product", "/produkty",
+  "/_data/products", "/photos/products",
+];
+
+function looksLikeProductPath(url: string): boolean {
+  try {
+    const p = new URL(url).pathname.toLowerCase();
+    return PRODUCT_PATH_HINTS.some((h) => p.includes(h));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wyciąga URL-e zdjęć produktu wyłącznie z galerii (lightbox/zoom).
+ * Pomijamy `metadata.ogImage` i markdown `![](...)` (to zwykle banery
+ * udostępnień, polecane produkty albo logo brandu).
+ */
 function pickImagesFromScrape(res: unknown): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  const push = (u: unknown) => {
-    if (typeof u !== "string") return;
-    const t = u.trim();
+  const push = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const t = upgradeToLargeImageUrl(raw.trim());
     if (!t || !/^https?:\/\//i.test(t)) return;
     if (seen.has(t)) return;
+    const minDim = inferMinDimensionFromUrl(t);
+    if (minDim !== null && minDim < 400) return;
     seen.add(t);
     out.push(t);
   };
+
   const r = res as Record<string, unknown> | null;
   if (!r) return out;
-  const meta = (r.metadata ?? {}) as Record<string, unknown>;
-  push(meta.ogImage);
-  push((meta as { "og:image"?: string })["og:image"]);
-  push(meta.image);
-  const md = typeof r.markdown === "string" ? r.markdown : "";
-  const mdMatches = md.match(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g) ?? [];
-  for (const m of mdMatches) {
-    const m2 = /\((https?:[^)\s]+)\)/.exec(m);
-    if (m2) push(m2[1]);
+
+  const html = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
+
+  if (html) {
+    // 1) Lightbox/zoom: <a href="...jpg|png|webp">...<img...></a>
+    const anchorRe = /<a\b[^>]*\bhref\s*=\s*["']([^"']+\.(?:jpe?g|png|webp|avif))(?:\?[^"']*)?["'][^>]*>[\s\S]{0,800}?<img\b/gi;
+    for (let m: RegExpExecArray | null; (m = anchorRe.exec(html)); ) push(m[1]);
+
+    // 2) data-* atrybuty na <img> sugerujące "powiększenie".
+    const dataAttrs = [
+      "data-zoom-image", "data-large", "data-large_image", "data-src-large",
+      "data-image", "data-full", "data-original", "data-big", "data-hires",
+      "data-zoom", "data-zoom-src",
+    ];
+    for (const attr of dataAttrs) {
+      const re = new RegExp(`<img\\b[^>]*\\b${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
+      for (let m: RegExpExecArray | null; (m = re.exec(html)); ) push(m[1]);
+    }
+
+    // 3) srcset — bierz największy wariant.
+    const srcsetRe = /<(?:img|source)\b[^>]*\bsrcset\s*=\s*["']([^"']+)["']/gi;
+    for (let m: RegExpExecArray | null; (m = srcsetRe.exec(html)); ) {
+      const list = m[1].split(",").map((s) => s.trim()).filter(Boolean);
+      let bestUrl: string | null = null;
+      let bestW = -1;
+      for (const item of list) {
+        const parts = item.split(/\s+/);
+        const u = parts[0];
+        const desc = parts[1] ?? "";
+        const w = /^(\d+)w$/i.exec(desc);
+        const width = w ? parseInt(w[1], 10) : 0;
+        if (width >= bestW) { bestW = width; bestUrl = u; }
+      }
+      if (bestUrl && bestW >= 400) push(bestUrl);
+      else if (bestUrl && bestW < 0) push(bestUrl); // brak deklaracji szer. — wpuść
+    }
+
+    // 4) <img src=...> tylko jeśli ścieżka wygląda na katalog produktów.
+    const imgRe = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi;
+    for (let m: RegExpExecArray | null; (m = imgRe.exec(html)); ) {
+      const src = m[1];
+      if (looksLikeProductPath(src)) push(src);
+    }
   }
+
   return filterImageUrls(out).slice(0, 12);
 }
 
@@ -921,6 +1017,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     const sr = (await firecrawl.search(query, {
       limit: 10,
       sources: ["web"],
+      location: "Poland",
+      lang: "pl",
+      country: "pl",
     } as never)) as unknown;
     const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
     hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
@@ -956,7 +1055,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   for (const url of filtered) {
     try {
       const scrape = (await firecrawl.scrape(url, {
-        formats: ["markdown"],
+        formats: ["markdown", "rawHtml"],
         onlyMainContent: true,
       } as never)) as Record<string, unknown>;
       const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
