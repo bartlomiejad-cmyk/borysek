@@ -959,7 +959,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   for (const url of filtered) {
     try {
       const scrape = (await firecrawl.scrape(url, {
-        formats: ["markdown"],
+        formats: ["markdown", "rawHtml"],
         onlyMainContent: true,
       } as never)) as Record<string, unknown>;
       const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
