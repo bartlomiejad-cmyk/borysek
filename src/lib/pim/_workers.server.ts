@@ -921,6 +921,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     const sr = (await firecrawl.search(query, {
       limit: 10,
       sources: ["web"],
+      location: "Poland",
+      lang: "pl",
+      country: "pl",
     } as never)) as unknown;
     const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
     hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
