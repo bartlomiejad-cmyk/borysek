@@ -13,6 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Loader2, FileCheck } from "lucide-react";
 import {
   parseCsvRaw,
@@ -57,6 +66,17 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
   const clearFn = useServerFn(clearProjectData);
 
   const headers = csv?.headers ?? [];
+  const previewRows = csv?.rows.slice(0, 20) ?? [];
+
+  // Map header -> short label of which field it's mapped to
+  const headerToFieldLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of FIELDS) {
+      const col = mapping[f.value];
+      if (col && col !== SKIP) m.set(col, f.label);
+    }
+    return m;
+  }, [mapping]);
 
   const reset = () => {
     setCsv(null);
