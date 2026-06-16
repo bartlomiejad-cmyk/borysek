@@ -918,7 +918,8 @@ async function filterScrapedForProduct(
   if (!apiKey) return fallback;
   if (!pageMarkdown && !candidateImages.length) return fallback;
 
-  const imgList = candidateImages
+  const cappedImages = candidateImages.slice(0, 20);
+  const imgList = cappedImages
     .map((u, i) => `${i + 1}. ${u}`)
     .join("\n");
 
@@ -951,7 +952,7 @@ async function filterScrapedForProduct(
     `TYTUŁ: ${pageTitle ?? ""}`,
     "",
     "MARKDOWN STRONY (skrócony):",
-    pageMarkdown.slice(0, 6000),
+    pageMarkdown.slice(0, 3500),
     "",
     "KANDYDACI ZDJĘĆ (1-based):",
     imgList || "(brak)",
@@ -964,7 +965,7 @@ async function filterScrapedForProduct(
     ]);
     const out = FilterSchema.parse(parsed);
     const imageUrls = out.product_image_indexes
-      .map((i) => candidateImages[i - 1])
+      .map((i) => cappedImages[i - 1])
       .filter((u): u is string => typeof u === "string" && u.length > 0);
     const dedup = filterImageUrls(imageUrls);
     return {
@@ -1040,8 +1041,23 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       organic_urls: allUrls as never,
     } as never);
 
-  // 3) Filter out marketplaces / blacklist, take top 3.
-  const filtered = allUrls.filter((u) => !isMarketplaceUrl(u, extraBlacklist)).slice(0, 10);
+  // 3) Filter out marketplaces / blacklist, dedup po hoście (max 1 URL/host), top 5.
+  const seenHosts = new Set<string>();
+  const filtered = allUrls
+    .filter((u) => !isMarketplaceUrl(u, extraBlacklist))
+    .filter((u) => {
+      const h = (() => {
+        try {
+          return new URL(u).hostname.replace(/^www\./, "");
+        } catch {
+          return null;
+        }
+      })();
+      if (!h || seenHosts.has(h)) return false;
+      seenHosts.add(h);
+      return true;
+    })
+    .slice(0, 5);
   await emit(ctx, {
     level: filtered.length ? "info" : "warn",
     message: `   ${nazwa} — ${allUrls.length} wyników, ${filtered.length} po filtrze`,
@@ -1049,10 +1065,40 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   });
   if (!filtered.length) return;
 
+  // 3b) Cache: pomiń URL-e już zescrape'owane w tym projekcie w ciągu 24h.
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: cachedRows } = await supabaseAdmin
+    .from("product_sources")
+    .select("url, created_at")
+    .eq("project_id", product.project_id)
+    .in("url", filtered)
+    .gte("created_at", dayAgo);
+  const cachedUrls = new Set((cachedRows ?? []).map((r) => (r as { url: string }).url));
+
   // 4) Scrape each and upsert into product_sources.
   let scraped = 0;
+  let cacheHits = 0;
   let totalImages = 0;
+  let goodHits = 0;
   for (const url of filtered) {
+    if (goodHits >= 3) {
+      await emit(ctx, {
+        level: "info",
+        message: `   ⏩ ${nazwa} — early-exit po 3 dobrych trafieniach (pomijam pozostałe ${filtered.length - scraped - cacheHits} URL-i)`,
+      });
+      break;
+    }
+    if (cachedUrls.has(url)) {
+      cacheHits++;
+      goodHits++;
+      const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
+      await emit(ctx, {
+        level: "info",
+        message: `   ♻️ ${host} — cache hit (<24h), pomijam scrape`,
+        details: { url },
+      });
+      continue;
+    }
     try {
       const scrape = (await firecrawl.scrape(url, {
         formats: ["markdown", "rawHtml"],
@@ -1115,6 +1161,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         );
       scraped++;
       totalImages += filteredData.imageUrls.length;
+      if (filteredData.imageUrls.length > 0) goodHits++;
       await emit(ctx, {
         level: "success",
         message: `   ✓ ${host} — ${filteredData.imageUrls.length}/${candidateImages.length} zdjęć produktu, ${filteredData.features.length} cech`,
@@ -1134,7 +1181,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   }
   await emit(ctx, {
     level: scraped ? "success" : "warn",
-    message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć)`,
-    details: { scraped, total: filtered.length, images: totalImages },
+    message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
+    details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
   });
 }
