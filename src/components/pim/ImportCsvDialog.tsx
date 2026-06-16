@@ -13,6 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Loader2, FileCheck } from "lucide-react";
 import {
   parseCsvRaw,
@@ -57,6 +66,17 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
   const clearFn = useServerFn(clearProjectData);
 
   const headers = csv?.headers ?? [];
+  const previewRows = csv?.rows.slice(0, 20) ?? [];
+
+  // Map header -> short label of which field it's mapped to
+  const headerToFieldLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of FIELDS) {
+      const col = mapping[f.value];
+      if (col && col !== SKIP) m.set(col, f.label);
+    }
+    return m;
+  }, [mapping]);
 
   const reset = () => {
     setCsv(null);
@@ -163,7 +183,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         </Button>
       </div>
 
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>Wgraj produkty z CSV</DialogTitle>
         </DialogHeader>
@@ -216,6 +236,63 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs">Podgląd danych</Label>
+                <span className="text-xs text-muted-foreground">
+                  {csv.rows.length > previewRows.length
+                    ? `Pokazano ${previewRows.length} z ${csv.rows.length} wierszy`
+                    : `${csv.rows.length} wierszy`}
+                </span>
+              </div>
+              <ScrollArea className="h-[280px] w-full rounded-md border">
+                <div className="min-w-max">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {headers.map((h) => {
+                          const label = headerToFieldLabel.get(h);
+                          return (
+                            <TableHead
+                              key={h}
+                              className={`whitespace-nowrap ${label ? "bg-primary/10" : ""}`}
+                            >
+                              <div className="font-medium">{h}</div>
+                              {label && (
+                                <div className="text-[10px] uppercase tracking-wider text-primary">
+                                  {label}
+                                </div>
+                              )}
+                            </TableHead>
+                          );
+                        })}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {previewRows.map((row, i) => (
+                        <TableRow key={i}>
+                          {headers.map((h) => {
+                            const v = row[h] ?? "";
+                            const short = v.length > 80 ? v.slice(0, 80) + "…" : v;
+                            const mapped = headerToFieldLabel.has(h);
+                            return (
+                              <TableCell
+                                key={h}
+                                title={v}
+                                className={`whitespace-nowrap text-xs ${mapped ? "bg-primary/5" : ""}`}
+                              >
+                                {short}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </ScrollArea>
             </div>
 
             <div className="flex items-center gap-2">
