@@ -918,7 +918,8 @@ async function filterScrapedForProduct(
   if (!apiKey) return fallback;
   if (!pageMarkdown && !candidateImages.length) return fallback;
 
-  const imgList = candidateImages
+  const cappedImages = candidateImages.slice(0, 20);
+  const imgList = cappedImages
     .map((u, i) => `${i + 1}. ${u}`)
     .join("\n");
 
@@ -951,7 +952,7 @@ async function filterScrapedForProduct(
     `TYTUŁ: ${pageTitle ?? ""}`,
     "",
     "MARKDOWN STRONY (skrócony):",
-    pageMarkdown.slice(0, 6000),
+    pageMarkdown.slice(0, 3500),
     "",
     "KANDYDACI ZDJĘĆ (1-based):",
     imgList || "(brak)",
@@ -964,7 +965,7 @@ async function filterScrapedForProduct(
     ]);
     const out = FilterSchema.parse(parsed);
     const imageUrls = out.product_image_indexes
-      .map((i) => candidateImages[i - 1])
+      .map((i) => cappedImages[i - 1])
       .filter((u): u is string => typeof u === "string" && u.length > 0);
     const dedup = filterImageUrls(imageUrls);
     return {
