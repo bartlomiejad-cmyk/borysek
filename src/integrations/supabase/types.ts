@@ -108,7 +108,10 @@ export type Database = {
           generated_at: string | null
           golden_description: string | null
           golden_features: Json
+          golden_meta_description: string | null
           golden_name: string | null
+          golden_seo_keywords: Json | null
+          golden_slug: string | null
           hidden_images: Json
           id: string
           image_meta: Json
@@ -133,7 +136,10 @@ export type Database = {
           generated_at?: string | null
           golden_description?: string | null
           golden_features?: Json
+          golden_meta_description?: string | null
           golden_name?: string | null
+          golden_seo_keywords?: Json | null
+          golden_slug?: string | null
           hidden_images?: Json
           id?: string
           image_meta?: Json
@@ -158,7 +164,10 @@ export type Database = {
           generated_at?: string | null
           golden_description?: string | null
           golden_features?: Json
+          golden_meta_description?: string | null
           golden_name?: string | null
+          golden_seo_keywords?: Json | null
+          golden_slug?: string | null
           hidden_images?: Json
           id?: string
           image_meta?: Json

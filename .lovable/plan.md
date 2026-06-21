@@ -1,45 +1,104 @@
 ## Cel
-Zredukować zużycie tokenów Firecrawl + AI Gateway w `runFirecrawlDiscovery` o ~60-70% bez utraty jakości.
 
-## Zmiany (jeden plik: `src/lib/pim/_workers.server.ts`)
+Rozszerzyć generowanie "golden" treści produktu o pełen zestaw SEO best practices. Output AI ma zawierać nie tylko nazwę/opis/cechy, ale również elementy bezpośrednio konsumowane przez wyszukiwarki i platformy e-commerce.
 
-### 1. Dedup po hoście + mniej scrape'ów
-Po `filtered = allUrls.filter(...)` dodać deduplikację — max **1 URL na hosta** (pierwszy w kolejności), a następnie `.slice(0, 5)` zamiast `.slice(0, 10)`.
+## Zmiany w bazie (migracja)
+
+Dodać do `public.enrichments` 3 nowe kolumny:
+
+- `golden_slug text` — SEO-friendly URL slug (kebab-case, bez polskich znaków, max 75 zn.)
+- `golden_meta_description text` — meta description 150-160 zn.
+- `golden_seo_keywords jsonb` — `string[]` z naturalnymi frazami (main + long-tail), max 8
+
+`golden_features` zostaje (jsonb), ale od teraz klucze będą standaryzowane pod schema.org Product (patrz niżej).
+
+## Zmiany w `src/lib/pim/_workers.server.ts`
+
+### 1. Rozszerzenie `GoldenSchema` (z.object)
 
 ```ts
-const seenHosts = new Set<string>();
-const filtered = allUrls
-  .filter((u) => !isMarketplaceUrl(u, extraBlacklist))
-  .filter((u) => {
-    const h = (() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } })();
-    if (!h || seenHosts.has(h)) return false;
-    seenHosts.add(h);
-    return true;
-  })
-  .slice(0, 5);
+{
+  name: string (min 1, max 150),
+  slug: string (regex kebab-case, max 75),
+  description: string (min 1, max 20000),
+  meta_description: string (max 200),
+  seo_keywords: string[] (max 8),
+  features: [{ key: string, value: string }] (max 60)
+}
 ```
 
-### 2. Cache URL → pomiń scrape, jeśli istnieje świeży `product_sources`
-Przed pętlą scrape'ującą jednym zapytaniem pobrać `product_sources` (tego projektu) dla `filtered` URL-i zaktualizowane w ciągu ostatnich **24h**. Dla trafień: pominąć `firecrawl.scrape` + AI, tylko `upsert` linku do bieżącego produktu (jeśli trzeba) i `emit` info „cache hit".
+### 2. Nowy `systemPrompt` w `generateGolden` — best practices SEO
 
-### 3. Early-exit po 3 dobrych trafieniach
-Licznik `goodHits` — inkrementowany gdy `filteredData.is_product_page === true` i `filteredData.imageUrls.length > 0`. Gdy `goodHits >= 3` — `break` z pętli (emit info).
+Sekcja **NAZWA (`name`)**:
+- 40-70 znaków (optymalne pod `<title>`)
+- Format: `[marka] [model/typ produktu] [kluczowa cecha różnicująca]`
+- Najważniejsze słowo kluczowe (typ produktu) w pierwszych 30 znakach
+- Bez ALL CAPS, bez znaków specjalnych poza myślnikiem
 
-### 4. Skrócić wejście do AI
-W `filterScrapedForProduct`:
-- `pageMarkdown.slice(0, 6000)` → `pageMarkdown.slice(0, 3500)`.
-- `candidateImages` przed wysłaniem do promptu: `.slice(0, 20)` (zabezpieczenie, normalnie i tak ≤12).
+Sekcja **SLUG (`slug`)**:
+- kebab-case (`buty-trekkingowe-meskie-salomon-x-ultra-4`)
+- Transliteracja polskich znaków (ą→a, ć→c, ę→e, ł→l, ń→n, ó→o, ś→s, ź/ż→z)
+- Max 75 znaków, tylko `[a-z0-9-]`
+- Bez stop-words (`i`, `oraz`, `dla`, `z`, `w`, `na`) gdy nie zmieniają sensu
+- Zawiera główne słowo kluczowe na początku
 
-### 5. Naprawić niespójny komentarz
-Komentarz „top 3" przy `.slice(0, 10)` → zaktualizować na realny limit (5 po dedup).
+Sekcja **DESCRIPTION** (rozszerzenie istniejących reguł):
+- 350-900 znaków (bez zmian)
+- **Główne słowo kluczowe (typ produktu) MUSI pojawić się w pierwszych 100 znakach**
+- Pierwsze zdanie odpowiada na pytanie "co to jest i dla kogo"
+- W treści wpleść 2-3 naturalne warianty frazy (synonimy, long-tail) — bez upychania (keyword stuffing)
+- Akapity 2-4 zdania (czytelność = pośredni sygnał rankingowy)
+- Pozostałe dotychczasowe zakazy (marketingowe ogólniki, ceny, sklepy, "kup teraz") bez zmian
 
-## Co NIE zmienia się
-- `firecrawl.search` `limit: 10`, `location: "Poland"` — bez zmian.
-- `firecrawl.scrape` `formats: ["markdown", "rawHtml"]` — bez zmian (rawHtml jest potrzebny do `pickImagesFromScrape` i NIE jest wysyłany do AI).
-- `pickImagesFromScrape`, `sanitizeProductDescription`, model AI — bez zmian.
-- Schema bazy, RLS, inne workery — bez zmian.
+Sekcja **META_DESCRIPTION**:
+- 150-160 znaków (twardy limit; odcięcie w Google ~160)
+- Streszczenie + jedna konkretna korzyść/cecha + naturalna fraza kluczowa
+- Brak cudzysłowów (psuje renderowanie w SERP)
+- Brak duplikatu pierwszego zdania opisu — komplementarny, nie identyczny
+
+Sekcja **SEO_KEYWORDS**:
+- 3-8 fraz, lower-case
+- 1 fraza główna (typ produktu) + 2-3 średnie (typ + cecha) + 2-4 long-tail (3-5 słów, intencja kupującego)
+- Tylko frazy realnie wynikające ze źródeł i właściwości produktu — bez halucynacji marek
+- Brak duplikatów i fraz < 2 słów (poza nazwą kategorii)
+
+Sekcja **FEATURES — standaryzacja pod schema.org/Product**:
+- Preferowane klucze (gdy aplikowalne, po polsku jako display, ale spójne nazwy):
+  `Marka`, `Model`, `Materiał`, `Kolor`, `Wymiary`, `Waga`, `Pojemność`, `Moc`, `Zasilanie`, `Wydajność`, `Gwarancja`, `Kraj produkcji`, `EAN`, `Rozmiar`, `Płeć`, `Wiek`, `Przeznaczenie`
+- Te kluczowe atrybuty trafiają potem do JSON-LD Product (`brand`, `material`, `color`, `weight`, `gtin13` itd.)
+- Pozostałe reguły bez zmian (max 60, konkrety, bez marketingu)
+
+### 3. Walidacja po stronie kodu (post-processing w handlerze)
+
+Po `GoldenSchema.parse`:
+- Wymusić limit długości `meta_description` (truncate do 160 z kropką jeśli AI przesadzi)
+- Wymusić limit nazwy (truncate do 70 jeśli > 70, z zachowaniem słów)
+- Re-slugify `slug` po stronie kodu (helper `slugifyPl`) — niezależnie od tego co zwróciło AI, gwarantujemy poprawność
+- De-duplikacja `seo_keywords` (lowercase + trim)
+- Wszystko przepuszczane przez istniejący `sanitize(..., blacklist)`
+
+### 4. Zapis do bazy
+
+`updatePayload` w `generateGolden` rozszerzony o:
+```ts
+golden_slug, golden_meta_description, golden_seo_keywords
+```
+
+`previous` (jsonb) zachowuje też poprzednie wartości nowych pól — żeby regeneracja pozwalała wrócić.
+
+### 5. Helper `slugifyPl` (nowy, w tym samym pliku)
+
+Czysta funkcja: input string → kebab-case bez diakrytyków, max 75 zn., bez stop-words.
+
+## Co NIE jest w zakresie tego planu
+
+- UI: ten plan nie zmienia komponentów PIM. Nowe pola będą dostępne w bazie i można je w kolejnym kroku pokazać w `ProductDetailDrawer`/edytorze i eksporcie CSV. Powiedz, jeśli chcesz to zrobić od razu — wrzucę osobnym krokiem.
+- Eksport do Shopify / sitemap.xml / JSON-LD na publicznych stronach produktów — to byłby osobny moduł (i wymaga ustalenia gdzie strony produktów mają żyć).
+- Zmiana modelu AI ani limitów Firecrawl/tokenów (zostawiamy ostatnie optymalizacje).
 
 ## Weryfikacja
-- Uruchomić discovery dla 1 produktu z dobrze pokrytą nazwą → w logach `bulk_job_events` widoczne: „N wyników, M po filtrze" (M ≤ 5, unikalne hosty), ewentualnie „cache hit" lub „early-exit po 3 trafieniach".
-- Ponowne uruchomienie dla tego samego produktu w ciągu 24h → wszystkie URL-e cache hit, zero wywołań Firecrawl/AI.
-- Porównać liczbę wywołań Firecrawl per produkt: przed ~10, po ≤5 (lub 0 przy cache).
+
+1. Migracja przechodzi, kolumny widoczne w `enrichments`.
+2. Uruchomić generowanie dla 1 produktu → w bazie `golden_slug`, `golden_meta_description`, `golden_seo_keywords` zapisane i niepuste.
+3. Sprawdzić: `meta_description ≤ 160`, `slug` matchuje `/^[a-z0-9-]+$/`, `seo_keywords` to tablica 3-8 fraz.
+4. Sprawdzić, że `golden_name`, `golden_description`, `golden_features` dalej działają (regresja).
