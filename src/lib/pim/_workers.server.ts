@@ -101,6 +101,69 @@ function sanitize(text: string | null, blacklist: string[]): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// SEO helpers
+// ---------------------------------------------------------------------------
+
+const PL_DIACRITICS: Record<string, string> = {
+  ą: "a", ć: "c", ę: "e", ł: "l", ń: "n", ó: "o", ś: "s", ź: "z", ż: "z",
+  Ą: "a", Ć: "c", Ę: "e", Ł: "l", Ń: "n", Ó: "o", Ś: "s", Ź: "z", Ż: "z",
+};
+const SLUG_STOPWORDS = new Set([
+  "i", "oraz", "lub", "albo", "a", "o", "u", "w", "we", "z", "ze", "do", "na", "po",
+  "za", "od", "dla", "the", "and", "or", "of", "for",
+]);
+
+export function slugifyPl(input: string, maxLen = 75): string {
+  if (!input) return "";
+  let s = input;
+  s = s.replace(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, (c) => PL_DIACRITICS[c] ?? c);
+  s = s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  s = s.toLowerCase();
+  s = s.replace(/[^a-z0-9]+/g, "-");
+  s = s.replace(/^-+|-+$/g, "");
+  if (!s) return "";
+  const parts = s.split("-").filter((p) => p && !SLUG_STOPWORDS.has(p));
+  let out = parts.length ? parts.join("-") : s;
+  if (out.length > maxLen) {
+    out = out.slice(0, maxLen);
+    const lastDash = out.lastIndexOf("-");
+    if (lastDash > maxLen * 0.6) out = out.slice(0, lastDash);
+  }
+  return out.replace(/^-+|-+$/g, "");
+}
+
+function clampName(name: string, maxLen = 70): string {
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (trimmed.length <= maxLen) return trimmed;
+  const cut = trimmed.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > maxLen * 0.6 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+function clampMetaDescription(desc: string, maxLen = 160): string {
+  let s = desc.trim().replace(/\s+/g, " ").replace(/["„""]/g, "");
+  if (s.length <= maxLen) return s;
+  const cut = s.slice(0, maxLen - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  s = (lastSpace > maxLen * 0.6 ? cut.slice(0, lastSpace) : cut).trim();
+  if (!/[.!?]$/.test(s)) s += ".";
+  return s;
+}
+
+function dedupeKeywords(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of arr) {
+    const norm = k.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!norm || norm.length < 2 || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(norm);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // FAL helpers (shared with media regen)
 // ---------------------------------------------------------------------------
 
