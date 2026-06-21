@@ -25,7 +25,7 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
@@ -125,6 +125,9 @@ export const exportProject = createServerFn({ method: "GET" })
         ...galleryCols,
         golden_name: e?.golden_name ?? "",
         golden_description: e?.golden_description ?? "",
+        golden_slug: ((e as { golden_slug?: string | null } | undefined)?.golden_slug) ?? "",
+        golden_meta_description: ((e as { golden_meta_description?: string | null } | undefined)?.golden_meta_description) ?? "",
+        golden_seo_keywords: (((e as { golden_seo_keywords?: string[] | null } | undefined)?.golden_seo_keywords) ?? []).join(" | "),
         features_text: features.map((f) => `${f.key}: ${f.value}`).join(" | "),
         ...featureCols,
         model: e?.model ?? "",

@@ -21,7 +21,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image, ai_gallery_urls",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -88,6 +88,9 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         regenerated_main_image: ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image ?? null) as string | null,
         ai_gallery_urls: (((e as { ai_gallery_urls?: string[] } | undefined)?.ai_gallery_urls) ?? []) as string[],
         golden_features: ((e as { golden_features?: unknown } | undefined)?.golden_features ?? []) as Array<{ key: string; value: string }>,
+        golden_slug: ((e as { golden_slug?: string | null } | undefined)?.golden_slug ?? null) as string | null,
+        golden_meta_description: ((e as { golden_meta_description?: string | null } | undefined)?.golden_meta_description ?? null) as string | null,
+        golden_seo_keywords: (((e as { golden_seo_keywords?: unknown } | undefined)?.golden_seo_keywords ?? []) as string[]),
         quality: ((e as { quality?: unknown } | undefined)?.quality ?? null) as unknown as null | {
           watermark_urls?: string[];
           name_mismatch?: boolean;
@@ -197,6 +200,9 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
       enrichmentId: z.string().uuid(),
       golden_name: z.string().max(500).nullable(),
       golden_description: z.string().max(20000).nullable(),
+      golden_slug: z.string().max(200).nullable().optional(),
+      golden_meta_description: z.string().max(400).nullable().optional(),
+      golden_seo_keywords: z.array(z.string().max(120)).max(20).nullable().optional(),
     }).parse(i),
   )
   .handler(async ({ data, context }) => {
@@ -206,6 +212,9 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
       .update({
         golden_name: data.golden_name,
         golden_description: data.golden_description,
+        golden_slug: data.golden_slug ?? null,
+        golden_meta_description: data.golden_meta_description ?? null,
+        golden_seo_keywords: data.golden_seo_keywords ?? null,
       } as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);

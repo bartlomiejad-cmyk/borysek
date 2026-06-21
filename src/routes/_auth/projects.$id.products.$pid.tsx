@@ -72,6 +72,9 @@ function ProductDetail() {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [features, setFeatures] = useState<Array<{ key: string; value: string }>>([]);
+  const [slug, setSlug] = useState("");
+  const [metaDesc, setMetaDesc] = useState("");
+  const [seoKeywords, setSeoKeywords] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
@@ -83,6 +86,14 @@ function ProductDetail() {
       setDesc(data.enrichment.golden_description ?? "");
       const f = (data.enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features;
       setFeatures(Array.isArray(f) ? f : []);
+      const en = data.enrichment as unknown as {
+        golden_slug?: string | null;
+        golden_meta_description?: string | null;
+        golden_seo_keywords?: string[] | null;
+      };
+      setSlug(en.golden_slug ?? "");
+      setMetaDesc(en.golden_meta_description ?? "");
+      setSeoKeywords(Array.isArray(en.golden_seo_keywords) ? en.golden_seo_keywords.join(", ") : "");
     }
   }, [data?.enrichment]);
 
@@ -178,6 +189,12 @@ function ProductDetail() {
           enrichmentId: data!.enrichment!.id,
           golden_name: name || null,
           golden_description: desc || null,
+          golden_slug: slug.trim() || null,
+          golden_meta_description: metaDesc.trim() || null,
+          golden_seo_keywords: seoKeywords
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
         },
       }),
     onSuccess: () => { toast.success("Zapisano"); invalidate(); },
