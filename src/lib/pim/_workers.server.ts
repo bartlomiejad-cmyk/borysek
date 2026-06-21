@@ -51,7 +51,10 @@ async function emit(ctx: WorkerCtx | undefined, e: JobEvent): Promise<void> {
 
 const GoldenSchema = z.object({
   name: z.string().min(1).max(500),
+  slug: z.string().max(120).optional().default(""),
   description: z.string().min(1).max(20000),
+  meta_description: z.string().max(400).optional().default(""),
+  seo_keywords: z.array(z.string().min(1).max(120)).max(12).optional().default([]),
   features: z
     .array(z.object({ key: z.string().min(1).max(200), value: z.string().min(1).max(2000) }))
     .max(60)
