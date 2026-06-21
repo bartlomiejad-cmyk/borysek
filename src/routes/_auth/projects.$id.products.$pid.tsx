@@ -530,6 +530,50 @@ function ProductDetail() {
               />
               <p className="text-xs text-muted-foreground mt-1">{desc.length} znaków</p>
             </div>
+            <div className="space-y-3 rounded border bg-muted/30 p-3">
+              <p className="text-sm font-medium">SEO</p>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Slug (URL)</label>
+                <Input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="np. brand-model-typ"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Kebab-case, bez polskich znaków, maks. 75. {slug.length} znaków.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Meta description</label>
+                <Textarea
+                  value={metaDesc}
+                  onChange={(e) => setMetaDesc(e.target.value)}
+                  rows={3}
+                  placeholder="150–160 znaków, jedno zdanie sprzedażowe z nazwą produktu."
+                />
+                <p
+                  className={cn(
+                    "text-[11px] mt-1",
+                    metaDesc.length > 160 || (metaDesc.length > 0 && metaDesc.length < 120)
+                      ? "text-amber-600"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {metaDesc.length} / 160 znaków (zalecane 150–160)
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">SEO keywords</label>
+                <Input
+                  value={seoKeywords}
+                  onChange={(e) => setSeoKeywords(e.target.value)}
+                  placeholder="frazy oddzielone przecinkami"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  3–8 fraz: główna + long-tail. Oddziel przecinkami.
+                </p>
+              </div>
+            </div>
             <Button onClick={() => save.mutate()} disabled={!enrichment || save.isPending}>
               <Save className="h-4 w-4 mr-2" /> Zapisz
             </Button>
