@@ -72,6 +72,9 @@ function ProductDetail() {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [features, setFeatures] = useState<Array<{ key: string; value: string }>>([]);
+  const [slug, setSlug] = useState("");
+  const [metaDesc, setMetaDesc] = useState("");
+  const [seoKeywords, setSeoKeywords] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
@@ -83,6 +86,14 @@ function ProductDetail() {
       setDesc(data.enrichment.golden_description ?? "");
       const f = (data.enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features;
       setFeatures(Array.isArray(f) ? f : []);
+      const en = data.enrichment as unknown as {
+        golden_slug?: string | null;
+        golden_meta_description?: string | null;
+        golden_seo_keywords?: string[] | null;
+      };
+      setSlug(en.golden_slug ?? "");
+      setMetaDesc(en.golden_meta_description ?? "");
+      setSeoKeywords(Array.isArray(en.golden_seo_keywords) ? en.golden_seo_keywords.join(", ") : "");
     }
   }, [data?.enrichment]);
 
@@ -178,6 +189,12 @@ function ProductDetail() {
           enrichmentId: data!.enrichment!.id,
           golden_name: name || null,
           golden_description: desc || null,
+          golden_slug: slug.trim() || null,
+          golden_meta_description: metaDesc.trim() || null,
+          golden_seo_keywords: seoKeywords
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
         },
       }),
     onSuccess: () => { toast.success("Zapisano"); invalidate(); },
@@ -512,6 +529,50 @@ function ProductDetail() {
                 placeholder="Wygeneruj opis lub wpisz ręcznie..."
               />
               <p className="text-xs text-muted-foreground mt-1">{desc.length} znaków</p>
+            </div>
+            <div className="space-y-3 rounded border bg-muted/30 p-3">
+              <p className="text-sm font-medium">SEO</p>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Slug (URL)</label>
+                <Input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="np. brand-model-typ"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Kebab-case, bez polskich znaków, maks. 75. {slug.length} znaków.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Meta description</label>
+                <Textarea
+                  value={metaDesc}
+                  onChange={(e) => setMetaDesc(e.target.value)}
+                  rows={3}
+                  placeholder="150–160 znaków, jedno zdanie sprzedażowe z nazwą produktu."
+                />
+                <p
+                  className={cn(
+                    "text-[11px] mt-1",
+                    metaDesc.length > 160 || (metaDesc.length > 0 && metaDesc.length < 120)
+                      ? "text-amber-600"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {metaDesc.length} / 160 znaków (zalecane 150–160)
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">SEO keywords</label>
+                <Input
+                  value={seoKeywords}
+                  onChange={(e) => setSeoKeywords(e.target.value)}
+                  placeholder="frazy oddzielone przecinkami"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  3–8 fraz: główna + long-tail. Oddziel przecinkami.
+                </p>
+              </div>
             </div>
             <Button onClick={() => save.mutate()} disabled={!enrichment || save.isPending}>
               <Save className="h-4 w-4 mr-2" /> Zapisz
