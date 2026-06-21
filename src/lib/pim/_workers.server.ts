@@ -460,7 +460,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     `ŹRÓDŁA:`,
     sourceBlocks || "(brak)",
     "",
-    'Wygeneruj JSON {"name", "description", "features"}.',
+    'Wygeneruj JSON {"name", "slug", "description", "meta_description", "seo_keywords", "features"} zgodnie z regułami SEO opisanymi w system prompt.',
   ].join("\n");
 
   try {
@@ -469,23 +469,44 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       { role: "user", content: userPrompt },
     ]);
     const out = GoldenSchema.parse(parsed);
-    const name = sanitize(out.name, blacklist);
-    const description = sanitizeProductDescription(sanitize(out.description, blacklist) ?? "");
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
+    const rawName = sanitize(out.name, blacklist) ?? "";
+    const name = clampName(rawName, 70);
+    const description = sanitizeProductDescription(sanitize(out.description, blacklist) ?? "");
+    const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
+    // Re-slugify by ourselves — gwarantujemy poprawność niezależnie od tego co zwróciło AI.
+    const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
+    const slug = slugifyPl(slugSource, 75);
+    const seoKeywords = dedupeKeywords((out.seo_keywords ?? []).map(sanitizeStr));
     const newFeatures = (out.features ?? [])
       .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
       .filter((f) => f.key && f.value);
     const existingFeatures = ((enrichment as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
     const shouldWriteFeatures = newFeatures.length > 0 && (mode === "all" || !existingFeatures.length);
 
+    const prevRow = enrichment as typeof enrichment & {
+      golden_slug?: string | null;
+      golden_meta_description?: string | null;
+      golden_seo_keywords?: unknown;
+    };
     const previous = enrichment.golden_name
-      ? { name: enrichment.golden_name, description: enrichment.golden_description, at: enrichment.generated_at }
+      ? {
+          name: enrichment.golden_name,
+          description: enrichment.golden_description,
+          slug: prevRow.golden_slug ?? null,
+          meta_description: prevRow.golden_meta_description ?? null,
+          seo_keywords: prevRow.golden_seo_keywords ?? null,
+          at: enrichment.generated_at,
+        }
       : null;
 
     const updatePayload: Record<string, unknown> = {
       status: "GENERATED",
       golden_name: name,
       golden_description: description,
+      golden_slug: slug || null,
+      golden_meta_description: metaDescription || null,
+      golden_seo_keywords: seoKeywords.length ? seoKeywords : null,
       model: GOLDEN_MODEL,
       generated_at: new Date().toISOString(),
       error: null,
