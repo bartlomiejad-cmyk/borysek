@@ -4,6 +4,7 @@ import {
   runGenerateGoldenRecord,
   runRegenerateMedia,
   runFirecrawlDiscovery,
+  runPhotoToolGenerate,
   type WorkerCtx,
 } from "@/lib/pim/_workers.server";
 
@@ -11,7 +12,11 @@ import {
 // sequentially and stop early if we'd risk timing out.
 const BUDGET_MS = 25_000;
 
-type JobKind = "GENERATE_GOLDEN" | "REGENERATE_MEDIA" | "FIRECRAWL_DISCOVERY";
+type JobKind =
+  | "GENERATE_GOLDEN"
+  | "REGENERATE_MEDIA"
+  | "FIRECRAWL_DISCOVERY"
+  | "PHOTO_TOOL_GENERATE";
 
 type BulkJobRow = {
   id: string;
@@ -38,6 +43,9 @@ async function processItem(kind: JobKind, productId: string, ctx: WorkerCtx): Pr
       return;
     case "FIRECRAWL_DISCOVERY":
       await runFirecrawlDiscovery(productId, ctx);
+      return;
+    case "PHOTO_TOOL_GENERATE":
+      await runPhotoToolGenerate(productId, ctx);
       return;
     default:
       throw new Error(`Unknown job kind: ${kind as string}`);
