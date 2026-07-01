@@ -250,6 +250,89 @@ export type Database = {
           },
         ]
       }
+      photo_products: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          last_error: string | null
+          lifestyle_urls: Json
+          name: string | null
+          project_id: string
+          source_image_url: string
+          status: string
+          thumbnail_url: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          last_error?: string | null
+          lifestyle_urls?: Json
+          name?: string | null
+          project_id: string
+          source_image_url: string
+          status?: string
+          thumbnail_url?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          last_error?: string | null
+          lifestyle_urls?: Json
+          name?: string | null
+          project_id?: string
+          source_image_url?: string
+          status?: string
+          thumbnail_url?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "photo_products_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "photo_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      photo_projects: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          style_prompt: string | null
+          updated_at: string
+          user_id: string
+          variants_per_product: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          style_prompt?: string | null
+          updated_at?: string
+          user_id: string
+          variants_per_product?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          style_prompt?: string | null
+          updated_at?: string
+          user_id?: string
+          variants_per_product?: number
+        }
+        Relationships: []
+      }
       product_sources: {
         Row: {
           created_at: string
