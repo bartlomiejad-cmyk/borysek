@@ -518,6 +518,32 @@ function PhotoProjectPage() {
                   {p.last_error}
                 </div>
               )}
+
+              {(p.generated_thumb_prompt || p.generated_lifestyle_prompt) && (
+                <details className="mt-3 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Prompty EN użyte do generacji
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {p.generated_thumb_prompt && (
+                      <div>
+                        <div className="text-[10px] uppercase text-muted-foreground mb-1">Miniaturka</div>
+                        <div className="p-2 rounded bg-muted/40 whitespace-pre-wrap break-words">
+                          {p.generated_thumb_prompt}
+                        </div>
+                      </div>
+                    )}
+                    {p.generated_lifestyle_prompt && (
+                      <div>
+                        <div className="text-[10px] uppercase text-muted-foreground mb-1">Wizualizacja</div>
+                        <div className="p-2 rounded bg-muted/40 whitespace-pre-wrap break-words">
+                          {p.generated_lifestyle_prompt}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
             </div>
           ))}
         </div>
