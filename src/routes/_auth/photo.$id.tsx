@@ -371,21 +371,7 @@ function PhotoProjectPage() {
 
       {/* Settings */}
       <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-6 grid md:grid-cols-3 gap-4">
-        <div>
-          <Label className="text-xs">Wizualizacje na produkt</Label>
-          <Input
-            type="number"
-            min={0}
-            max={4}
-            value={variants ?? 2}
-            onChange={(e) => setVariants(Math.max(0, Math.min(4, Number(e.target.value) || 0)))}
-          />
-          <p className="text-[11px] text-muted-foreground mt-1">
-            0–4. Używane tylko gdy produkt ma <b>jedno</b> zdjęcie źródłowe.
-            Gdy jest ich więcej, liczba wizualizacji = liczba zdjęć − 1.
-          </p>
-        </div>
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <Label className="text-xs">Styl / scena dla wizualizacji (opcjonalnie)</Label>
           <Textarea
             rows={2}
