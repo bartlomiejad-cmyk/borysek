@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, Loader2, Plus, Sparkles, StopCircle, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, Sparkles, StopCircle, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
@@ -75,24 +75,73 @@ function PhotoProjectPage() {
   }, [id, qc]);
 
   // Add-product form state
-  const [imgUrl, setImgUrl] = useState("");
+  const [urlInput, setUrlInput] = useState("");
+  const [pending, setPending] = useState<
+    { key: string; name: string; localUrl: string; status: "uploading" | "done" | "error"; publicUrl?: string; error?: string }[]
+  >([]);
   const [pName, setPName] = useState("");
   const [pDesc, setPDesc] = useState("");
 
+  const readyUrls = pending.filter((f) => f.status === "done" && f.publicUrl).map((f) => f.publicUrl as string);
+  const totalSources = readyUrls.length + (urlInput.trim() ? 1 : 0);
+
+  async function uploadFiles(files: File[]) {
+    const { data: userRes } = await supabase.auth.getUser();
+    const uid = userRes.user?.id;
+    if (!uid) { toast.error("Zaloguj się ponownie"); return; }
+    for (const file of files) {
+      const key = `${file.name}-${file.size}-${Date.now()}-${Math.random()}`;
+      if (!/^image\/(jpe?g|png|webp)$/i.test(file.type)) {
+        toast.error(`${file.name}: dozwolone JPG/PNG/WebP`);
+        continue;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        toast.error(`${file.name}: max 20 MB`);
+        continue;
+      }
+      const localUrl = URL.createObjectURL(file);
+      setPending((prev) => [...prev, { key, name: file.name, localUrl, status: "uploading" }]);
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      const path = `photo-tool-sources/${uid}/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage
+        .from("regenerated-images")
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (error) {
+        setPending((prev) => prev.map((p) => (p.key === key ? { ...p, status: "error", error: error.message } : p)));
+        toast.error(`${file.name}: ${error.message}`);
+        continue;
+      }
+      const { data: pub } = supabase.storage.from("regenerated-images").getPublicUrl(path);
+      setPending((prev) => prev.map((p) => (p.key === key ? { ...p, status: "done", publicUrl: pub.publicUrl } : p)));
+    }
+  }
+
+  function removePending(key: string) {
+    setPending((prev) => {
+      const item = prev.find((p) => p.key === key);
+      if (item?.localUrl) URL.revokeObjectURL(item.localUrl);
+      return prev.filter((p) => p.key !== key);
+    });
+  }
+
   const add = useMutation({
     mutationFn: async () => {
-      if (!imgUrl.trim()) throw new Error("Podaj URL zdjęcia źródłowego");
+      const urls = [...readyUrls];
+      if (urlInput.trim()) urls.push(urlInput.trim());
+      if (!urls.length) throw new Error("Dodaj przynajmniej jedno zdjęcie źródłowe (upload lub URL)");
+      if (pending.some((p) => p.status === "uploading")) throw new Error("Poczekaj aż uploady się zakończą");
       await addFn({
         data: {
           projectId: id,
-          source_image_url: imgUrl.trim(),
+          source_image_urls: urls,
           name: pName.trim() || null,
           description: pDesc.trim() || null,
         },
       });
     },
     onSuccess: () => {
-      setImgUrl(""); setPName(""); setPDesc("");
+      for (const p of pending) if (p.localUrl) URL.revokeObjectURL(p.localUrl);
+      setPending([]); setUrlInput(""); setPName(""); setPDesc("");
       qc.invalidateQueries({ queryKey: ["photo-project", id] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
@@ -245,34 +294,105 @@ function PhotoProjectPage() {
       {/* Add product */}
       <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-8">
         <h2 className="font-serif text-xl mb-3">Dodaj produkt</h2>
-        <div className="grid md:grid-cols-3 gap-3">
+        <div className="space-y-4">
           <div>
-            <Label className="text-xs">URL zdjęcia źródłowego *</Label>
+            <Label className="text-xs">Zdjęcia źródłowe *</Label>
+            <label
+              className="mt-1 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border/60 p-6 cursor-pointer hover:bg-muted/40 transition"
+              onDragOver={(e) => { e.preventDefault(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const files = Array.from(e.dataTransfer.files || []);
+                if (files.length) void uploadFiles(files);
+              }}
+            >
+              <Upload className="h-6 w-6 text-muted-foreground" />
+              <div className="text-sm">Przeciągnij zdjęcia lub kliknij, żeby wybrać</div>
+              <div className="text-[11px] text-muted-foreground">
+                JPG / PNG / WebP · do 20 MB każde · bez limitu ilości
+              </div>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length) void uploadFiles(files);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
+            {pending.length > 0 && (
+              <div className="mt-3 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                {pending.map((f) => (
+                  <div key={f.key} className="relative group">
+                    <img src={f.localUrl} alt="" className="w-full aspect-square object-cover rounded-md border" />
+                    {f.status === "uploading" && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/70 rounded-md">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      </div>
+                    )}
+                    {f.status === "error" && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-destructive/70 text-white text-[10px] p-1 rounded-md text-center">
+                        {f.error?.slice(0, 40)}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removePending(f.key)}
+                      className="absolute -top-1.5 -right-1.5 rounded-full bg-background border shadow p-0.5 opacity-0 group-hover:opacity-100 transition"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <Label className="text-xs">…lub wklej URL zdjęcia (opcjonalnie, dodatkowe źródło)</Label>
             <Input
               placeholder="https://…"
-              value={imgUrl}
-              onChange={(e) => setImgUrl(e.target.value)}
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
             />
           </div>
-          <div>
-            <Label className="text-xs">Nazwa produktu</Label>
-            <Input
-              placeholder="np. Kubek ceramiczny 300 ml"
-              value={pName}
-              onChange={(e) => setPName(e.target.value)}
-            />
+
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Nazwa produktu</Label>
+              <Input
+                placeholder="np. Kubek ceramiczny 300 ml"
+                value={pName}
+                onChange={(e) => setPName(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Opis produktu (kluczowe cechy)</Label>
+              <Textarea
+                rows={2}
+                placeholder="Cechy, materiał, kolor, przeznaczenie… używane do wiernego odwzorowania."
+                value={pDesc}
+                onChange={(e) => setPDesc(e.target.value)}
+              />
+            </div>
           </div>
-          <div className="md:row-span-2">
-            <Label className="text-xs">Opis produktu (kluczowe cechy)</Label>
-            <Textarea
-              rows={4}
-              placeholder="Cechy, materiał, kolor, przeznaczenie… używane do wiernego odwzorowania."
-              value={pDesc}
-              onChange={(e) => setPDesc(e.target.value)}
-            />
-          </div>
-          <div className="md:col-span-2 flex items-end">
-            <Button onClick={() => add.mutate()} disabled={add.isPending || !imgUrl.trim()}>
+
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">
+              {totalSources > 0 ? (
+                <>
+                  {totalSources} {totalSources === 1 ? "zdjęcie" : "zdjęć"} źródłowych ={" "}
+                  <b>1 miniaturka</b>
+                  {totalSources > 1 && <> + <b>{totalSources - 1} wizualizacji</b></>}
+                </>
+              ) : (
+                <>Dodaj zdjęcia — z N zdjęć powstaje 1 miniaturka + (N-1) wizualizacji.</>
+              )}
+            </div>
+            <Button onClick={() => add.mutate()} disabled={add.isPending || totalSources === 0 || pending.some((p) => p.status === "uploading")}>
               {add.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
               Dodaj do projektu
             </Button>
