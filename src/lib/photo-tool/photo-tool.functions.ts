@@ -7,6 +7,7 @@ export type PhotoProject = {
   name: string;
   variants_per_product: number;
   style_prompt: string | null;
+  requirements_pl: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -24,6 +25,8 @@ export type PhotoProduct = {
   lifestyle_urls: string[];
   status: PhotoProductStatus;
   last_error: string | null;
+  generated_thumb_prompt: string | null;
+  generated_lifestyle_prompt: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -42,6 +45,8 @@ function mapProduct(row: Record<string, unknown>): PhotoProduct {
     lifestyle_urls: Array.isArray(row.lifestyle_urls) ? (row.lifestyle_urls as string[]) : [],
     status: (row.status as PhotoProductStatus) ?? "PENDING",
     last_error: (row.last_error as string | null) ?? null,
+    generated_thumb_prompt: (row.generated_thumb_prompt as string | null) ?? null,
+    generated_lifestyle_prompt: (row.generated_lifestyle_prompt as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -89,6 +94,7 @@ export const updatePhotoProject = createServerFn({ method: "POST" })
         name: z.string().min(1).max(120).optional(),
         variants_per_product: z.number().int().min(0).max(4).optional(),
         style_prompt: z.string().max(2000).nullable().optional(),
+        requirements_pl: z.string().max(4000).nullable().optional(),
       })
       .parse(i),
   )
