@@ -492,12 +492,11 @@ function PhotoProjectPage() {
             <div className="text-xs text-muted-foreground">
               {totalSources > 0 ? (
                 <>
-                  {totalSources} {totalSources === 1 ? "zdjęcie" : "zdjęć"} źródłowych ={" "}
-                  <b>1 miniaturka</b>
-                  {totalSources > 1 && <> + <b>{totalSources - 1} wizualizacji</b></>}
+                  {totalSources} {totalSources === 1 ? "zdjęcie" : "zdjęć"} źródłowych →{" "}
+                  <b>1 miniaturka + 5 wizualizacji</b>
                 </>
               ) : (
-                <>Dodaj zdjęcia — z N zdjęć powstaje 1 miniaturka + (N-1) wizualizacji.</>
+                <>Dodaj zdjęcia — z każdego produktu powstaje <b>1 miniaturka + 5 wizualizacji</b>.</>
               )}
             </div>
             <Button onClick={() => add.mutate()} disabled={add.isPending || totalSources === 0 || pending.some((p) => p.status === "uploading")}>
