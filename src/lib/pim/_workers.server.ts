@@ -1318,7 +1318,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
 
   const { data: prodRow } = await supabaseAdmin
     .from("photo_products" as never)
-    .select("id, project_id, name, description, source_image_url, source_image_urls")
+    .select("id, project_id, name, description, source_image_url, source_image_urls, generated_thumb_prompt, generated_lifestyle_prompt, prompt_source_hash")
     .eq("id", photoProductId)
     .maybeSingle();
   if (!prodRow) throw new Error("Photo product not found");
@@ -1329,14 +1329,17 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
     description: string | null;
     source_image_url: string;
     source_image_urls: string[] | null;
+    generated_thumb_prompt: string | null;
+    generated_lifestyle_prompt: string | null;
+    prompt_source_hash: string | null;
   };
 
   const { data: projRow } = await supabaseAdmin
     .from("photo_projects" as never)
-    .select("variants_per_product, style_prompt")
+    .select("variants_per_product, style_prompt, requirements_pl")
     .eq("id", p.project_id)
     .maybeSingle();
-  const proj = (projRow as { variants_per_product?: number; style_prompt?: string | null } | null) ?? {};
+  const proj = (projRow as { variants_per_product?: number; style_prompt?: string | null; requirements_pl?: string | null } | null) ?? {};
   const allSources = (p.source_image_urls && p.source_image_urls.length > 0)
     ? p.source_image_urls
     : [p.source_image_url];
@@ -1360,6 +1363,59 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
 
   const productDesc = (p.description ?? "").trim();
   const productName = (p.name ?? "product").trim();
+  const requirementsPl = (proj.requirements_pl ?? "").trim();
+  const projectStyle = (proj.style_prompt ?? "").trim();
+
+  // Build (or reuse cached) EN prompts translated from Polish requirements
+  // via Gemini Pro. Cache is keyed on a hash of the inputs — if any of them
+  // change, we regenerate the prompts.
+  const sourceHashInput = [
+    productName,
+    productDesc,
+    requirementsPl,
+    projectStyle,
+  ].join("\u0001");
+  const sourceHash = await sha256Hex(sourceHashInput);
+
+  let thumbPrompt: string;
+  let lifePrompt: string;
+
+  const cacheHit =
+    p.prompt_source_hash === sourceHash &&
+    p.generated_thumb_prompt &&
+    p.generated_lifestyle_prompt;
+
+  if (cacheHit) {
+    thumbPrompt = p.generated_thumb_prompt as string;
+    lifePrompt = p.generated_lifestyle_prompt as string;
+    await emit(ctx, { level: "info", message: `   • prompty EN z cache` });
+  } else {
+    try {
+      await emit(ctx, { level: "info", message: `   • buduję prompty EN z wytycznych PL (gemini-3.1-pro)…` });
+      const built = await buildFalPromptsFromPolish({
+        productName,
+        productDesc,
+        requirementsPl,
+        projectStyle,
+      });
+      thumbPrompt = built.thumbnail_prompt;
+      lifePrompt = built.lifestyle_prompt;
+      await supabaseAdmin
+        .from("photo_products" as never)
+        .update({
+          generated_thumb_prompt: thumbPrompt,
+          generated_lifestyle_prompt: lifePrompt,
+          prompt_source_hash: sourceHash,
+        } as never)
+        .eq("id", p.id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
+      const fb = fallbackPrompts({ productName, productDesc, requirementsPl, projectStyle });
+      thumbPrompt = fb.thumbnail_prompt;
+      lifePrompt = fb.lifestyle_prompt;
+    }
+  }
 
   const prepared: { url: string; path: string }[] = [];
   for (const u of allSources) {
@@ -1367,21 +1423,6 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
   }
   const referenceUrls = prepared.map((x) => x.url);
   try {
-    // 1) Thumbnail — packshot on pure white, identical product preserved.
-    const thumbPrompt = [
-      `Product packshot for an e-commerce catalog thumbnail.`,
-      `SUBJECT: The exact product visible in the source image — "${productName}".`,
-      productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
-      `BACKGROUND: Pure white #FFFFFF seamless studio; corners exactly #FFFFFF; no gradient, vignette or paper texture.`,
-      `FRAMING: Square 1:1, product centered, scaled to fill roughly 85% of the frame in both dimensions.`,
-      `SHADOW: Soft realistic contact shadow directly under the product only.`,
-      `PRESERVE: Every label, logo, brand mark, color, material, texture and proportion — pixel-faithful to the source.`,
-      `REMOVE: Watermarks, store logos, price tags and overlay text that are NOT physically printed on the product itself.`,
-      `AVOID: Cream/beige/gray tint, changed shape, hallucinated markings, blurred labels, extra props.`,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
     await emit(ctx, { level: "info", message: `   • miniaturka…` });
     const thumbResp = await callFal(
       "fal-ai/nano-banana-pro/edit",
@@ -1411,19 +1452,6 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
     const lifestyleUrls: string[] = [];
     for (let i = 0; i < variants; i++) {
       await emit(ctx, { level: "info", message: `   • wizualizacja ${i + 1}/${variants}…` });
-      const lifePrompt = [
-        `Realistic lifestyle product photograph for a catalog visualisation.`,
-        `SUBJECT: The EXACT product from the source image — "${productName}". Keep it visually identical: same shape, labels, colors, materials, proportions.`,
-        productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
-        proj.style_prompt && proj.style_prompt.trim()
-          ? `SCENE STYLE: ${proj.style_prompt.trim()}`
-          : `SCENE: A natural, realistic environment appropriate for how this product is actually used. Soft daylight, believable materials and props, tasteful composition.`,
-        `FRAMING: Square 1:1, the product is clearly the hero, in sharp focus, at realistic scale.`,
-        `PRESERVE: Every label, logo, brand mark, color and material — the product must be visually identical to the source.`,
-        `AVOID: Fantasy elements, unrealistic scale, floating objects, distorted labels, duplicate products, watermarks or text overlays.`,
-      ]
-        .filter(Boolean)
-        .join(" ");
       try {
         const resp = await callFal(
           "fal-ai/nano-banana-pro/edit",
