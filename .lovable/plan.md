@@ -1,46 +1,42 @@
-## Cel
+# Wytyczne PL → prompty EN + bogatsza miniaturka
 
-W narzędziu „Zdjęcia" pozwolić dodać wiele zdjęć źródłowych z dysku dla jednego produktu. Liczba wygenerowanych efektów wynika bezpośrednio z liczby wgranych zdjęć: **1 miniaturka packshot + (N-1) wizualizacji** (np. wgrane 10 → 1 + 9, wgrane 3 → 1 + 2, wgrane 1 → 1 + 0). Wszystkie wgrane zdjęcia trafiają do Nano Banana Pro jako referencje, żeby produkt na wyjściu był wierny.
+## Co powstanie
 
-## Zmiany
+1. **Nowe pole „Wymagania (PL)" na poziomie projektu zdjęciowego.** W panelu ustawień projektu (obok „Styl / scena") dojdzie duże pole tekstowe, gdzie po polsku opisujesz oczekiwania — np. „miniaturka: produkt na białym tle z 2–3 listkami i wiórami trawy z lewej strony; wizualizacja: ogród, poranne światło, dłoń trzymająca sekator".
+2. **Automatyczne przepisanie na profesjonalny prompt EN.** Przed każdą generacją worker wywołuje `google/gemini-3.1-pro-preview` przez Lovable AI Gateway z: nazwą produktu, opisem produktu, wytycznymi PL i informacją, czy to miniaturka czy wizualizacja. Gemini zwraca dwa gotowe prompty EN (jeden dla miniaturki, jeden dla wizualizacji) w ustalonym formacie JSON. Prompty są cache'owane per produkt, żeby nie mielić tego samego wywołania przy każdej wizualizacji.
+3. **Nowy styl miniaturki — packshot+.** Domyślny szablon promptu miniaturki dopuszcza teraz białe tło + 1–3 kontekstowe elementy związane z produktem (np. listki dla sekatora, ziarna kawy dla młynka, deska + noże dla ostrzarki). AI samo dobiera dodatki na podstawie opisu produktu; jeśli wytyczne PL zawierają konkretne wskazówki, one mają pierwszeństwo.
+4. **Wizualizacje bez zmian jakościowych, tylko sterowane z PL.** Aktualne prompty lifestyle zostają jako baza; wytyczne PL nadpisują scenę i rekwizyty.
+5. **Podgląd wygenerowanego promptu (opcjonalnie).** W panelu produktu — po wygenerowaniu — pokazujemy w rozwijanym akapicie prompty EN, których użyliśmy dla miniaturki i wizualizacji, żebyś mógł zweryfikować co poszło do FAL.
 
-### 1. Storage
-- Nowy publiczny bucket `photo-tool-sources` na wgrywki z dysku (private nie zadziała, bo model musi pobrać URL). Pliki wgrywane pod ścieżką `${userId}/${photoProductId}/${uuid}.<ext>`.
-- RLS na `storage.objects`: INSERT/DELETE tylko dla właściciela (`auth.uid()`), SELECT publiczny (bucket publiczny).
+## Jak to zadziała krok po kroku
 
-### 2. Schema `photo_products`
-- Dodaj kolumnę `source_image_urls text[] not null default '{}'`.
-- Zachowaj istniejące `source_image_url` jako pierwszy element (kompatybilność ze starymi rekordami).
-- Backfill: `UPDATE photo_products SET source_image_urls = ARRAY[source_image_url] WHERE array_length(source_image_urls,1) IS NULL;`
+```text
+[Panel projektu]
+  └ pole „Wymagania (PL)" ─────────────┐
+                                       ▼
+[Worker: runPhotoToolGenerate(product)]
+  1. pobiera projekt (styl + wytyczne PL) + produkt (nazwa, opis, źródła)
+  2. jeśli wytyczne PL się zmieniły od ostatniego cache → wywołanie Gemini Pro
+     ├─ input: nazwa, opis, wytyczne PL, liczba wizualizacji
+     └─ output JSON: { thumbnail_prompt, lifestyle_prompt }
+  3. cache promptów w polu enrichments produktu (żeby nie płacić za każdą wiz.)
+  4. FAL nano-banana-pro/edit × (1 + N) używa gotowych promptów EN
+  5. zapis miniaturki + wizualizacji jak dziś
+```
 
-### 3. Server functions (`photo-tool.functions.ts`)
-- `addPhotoProduct` — przyjmuje `source_image_urls: string[] (min 1)`, ustawia `source_image_url` = `[0]`.
-- Nowa `deletePhotoSourceImage({ productId, url })` — usuwa plik ze storage i z tablicy (opcjonalnie, do usuwania pojedynczych zdjęć przed generacją).
-- Upload robimy bezpośrednio z klienta przez `supabase.storage.from('photo-tool-sources').upload(...)` — nie potrzeba server fn.
+## Szczegóły techniczne
 
-### 4. Worker (`_workers.server.ts` → `runPhotoToolGenerate`)
-- Zamiast pojedynczego `image_urls: [source]` przekaż **wszystkie** `source_image_urls` produktu jako `image_urls` do `fal-ai/nano-banana-pro/edit` (model wspiera wiele referencji).
-- Miniaturka: 1 wywołanie, packshot na białym tle 2048×2048.
-- Wizualizacje: dokładnie `max(0, source_image_urls.length - 1)`. Ignoruj `variants_per_product` z projektu, gdy produkt ma > 1 źródła; przy dokładnie 1 źródle używaj wartości z ustawień projektu (zachowany dotychczasowy tryb).
-- Log w `bulk_job_events`: „N źródeł → 1 miniaturka + (N-1) wizualizacji".
+- **Schemat**: do `photo_projects` dodajemy kolumnę `requirements_pl text`. Do `photo_products` dodajemy `generated_thumb_prompt text`, `generated_lifestyle_prompt text`, `prompt_source_hash text` (hash z `requirements_pl + name + description + style_prompt` — jeśli się zmieni, generujemy prompty od nowa).
+- **Nowa funkcja `buildFalPromptsFromPolish` w `src/lib/pim/_workers.server.ts`**: strukturalne wywołanie `generateText` z `Output.object({ schema: z.object({ thumbnail_prompt: z.string(), lifestyle_prompt: z.string() }) })` do `google/gemini-3.1-pro-preview`. System prompt instruuje model, że pisze prompty do modelu edycji obrazu FAL nano-banana-pro, ma zachować wierność produktowi i przetłumaczyć PL wytyczne na precyzyjne angielskie instrukcje (framing, tło, rekwizyty, oświetlenie, zakazy).
+- **Nowy szablon miniaturki**: jeśli `requirements_pl` jest puste, używamy rozbudowanego promptu bazowego z instrukcją „white seamless background BUT include 1–3 contextual props/materials clearly related to the product (leaves, wood shavings, coffee beans, fabric etc.) arranged asymmetrically around the product" — czyli styl jak na przesłanym przykładzie. Reszta reguł (preserve labels, no watermarks) zostaje.
+- **UI**:
+  - `src/routes/_auth/photo.$id.tsx` — dodane pole `Textarea` „Wymagania (PL)" w bloku ustawień projektu, z placeholderem-przykładem.
+  - Nowy zwijany blok „Prompty EN użyte do generacji" pod kafelkiem produktu (widoczny gdy prompty są zapisane).
+- **`src/lib/photo-tool/photo-tool.functions.ts`** — `updatePhotoProject` przyjmuje nowe pole `requirements_pl`; `getPhotoProject` je zwraca; typ `PhotoProduct` dostaje 2 nowe pola z promptami do wyświetlenia.
+- **Bez zmian**: model FAL (`fal-ai/nano-banana-pro/edit`), rozdzielczość 2K, reguła N zdjęć = 1 miniaturka + N-1 wizualizacji, kolejkowanie i logi.
 
-### 5. UI (`src/routes/_auth/photo.$id.tsx`)
-- W sekcji „Dodaj produkt" zamień pole „URL zdjęcia" na komponent uploadu wielu plików (drag & drop + input file `multiple`):
-  - Miniaturki wgranych plików, przycisk „x" do usunięcia.
-  - Progress uploadu per plik.
-  - Walidacja typu (jpg/png/webp) i rozmiaru (≤ 20 MB/plik).
-  - Wciąż dostępne pole „lub wklej URL" jako dodatkowe źródło (można mieszać upload + URL).
-- Po kliknięciu „Dodaj do projektu": najpierw upload wszystkich plików do bucketu, potem `addPhotoProduct` z pełną listą URLi.
-- W kaflu produktu pokaż miniaturę **każdego** wgranego źródła (galeria wierszowa), obok wyników.
-- Sekcja „Wizualizacje na produkt" (0-4) zostaje jako fallback tylko dla produktów z 1 źródłem — dopisz notkę.
+## Poza zakresem tej iteracji
 
-### 6. Komunikaty i licznik
-- Etykieta liczby: „N zdjęć źródłowych = 1 miniaturka + (N-1) wizualizacji".
-- Brak twardego limitu ilości plików (miękkie ostrzeżenie przy > 20 plikach ze względu na koszt).
-
-## Techniczne detale (dla programisty)
-
-- Migracja SQL: `ALTER TABLE photo_products ADD COLUMN source_image_urls text[] NOT NULL DEFAULT '{}';` + backfill + `CHECK (array_length(source_image_urls,1) >= 1)` dodać **po** backfillu.
-- Bucket: `supabase--storage_create_bucket(name: 'photo-tool-sources', public: true)`, następnie migracja z policies na `storage.objects` (INSERT/DELETE `auth.uid()::text = (storage.foldername(name))[1]`, SELECT `bucket_id = 'photo-tool-sources'`).
-- `prepareFalSource` w workerze wywołaj w pętli po `source_image_urls`, zbierz upload paths, przekaż jako `image_urls` do `fal-ai/nano-banana-pro/edit`; posprzątaj po wywołaniu.
-- W UI: prosty `UploadZone`-podobny komponent lokalny w pliku route (albo reużyć `src/components/pim/UploadZone.tsx` po sprawdzeniu API).
+- Edycja promptów EN ręcznie w UI (można dodać później jako „nadpisz prompt").
+- Osobne wytyczne per produkt (na razie tylko globalne per projekt — możemy dodać override, gdy okaże się potrzebne).
+- Regeneracja tylko miniaturki bez wizualizacji (dziś generuje się cała paczka).

@@ -161,10 +161,12 @@ function PhotoProjectPage() {
 
   const [variants, setVariants] = useState<number | null>(null);
   const [style, setStyle] = useState<string | null>(null);
+  const [reqPl, setReqPl] = useState<string | null>(null);
   useEffect(() => {
     if (data?.project) {
       if (variants === null) setVariants(data.project.variants_per_product);
       if (style === null) setStyle(data.project.style_prompt ?? "");
+      if (reqPl === null) setReqPl((data.project as any).requirements_pl ?? "");
     }
   }, [data?.project]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -175,6 +177,7 @@ function PhotoProjectPage() {
           id,
           variants_per_product: variants ?? 2,
           style_prompt: (style ?? "").trim() || null,
+          requirements_pl: (reqPl ?? "").trim() || null,
         },
       }),
     onSuccess: () => {
@@ -291,6 +294,18 @@ function PhotoProjectPage() {
             value={style ?? ""}
             onChange={(e) => setStyle(e.target.value)}
           />
+        </div>
+        <div className="md:col-span-3">
+          <Label className="text-xs">Wymagania (PL) — AI przepisze je na profesjonalny prompt EN dla generatora</Label>
+          <Textarea
+            rows={4}
+            placeholder={"np. Miniaturka: produkt na białym tle z 2–3 świeżymi listkami po lewej stronie i drobnymi ścinkami trawy. Wizualizacja: ogród, poranne światło, dłoń w rękawicy trzymająca produkt, w tle rozmyty żywopłot."}
+            value={reqPl ?? ""}
+            onChange={(e) => setReqPl(e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Piszesz po polsku co ma być na miniaturce i wizualizacji. Gemini 3.1 Pro tłumaczy to na precyzyjny prompt EN, dbając równocześnie, żeby produkt pozostał wierny oryginałowi.
+          </p>
         </div>
         <div className="md:col-span-3 flex justify-end">
           <Button size="sm" variant="outline" onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
@@ -502,6 +517,32 @@ function PhotoProjectPage() {
                 <div className="mt-3 text-xs text-destructive">
                   {p.last_error}
                 </div>
+              )}
+
+              {(p.generated_thumb_prompt || p.generated_lifestyle_prompt) && (
+                <details className="mt-3 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Prompty EN użyte do generacji
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {p.generated_thumb_prompt && (
+                      <div>
+                        <div className="text-[10px] uppercase text-muted-foreground mb-1">Miniaturka</div>
+                        <div className="p-2 rounded bg-muted/40 whitespace-pre-wrap break-words">
+                          {p.generated_thumb_prompt}
+                        </div>
+                      </div>
+                    )}
+                    {p.generated_lifestyle_prompt && (
+                      <div>
+                        <div className="text-[10px] uppercase text-muted-foreground mb-1">Wizualizacja</div>
+                        <div className="p-2 rounded bg-muted/40 whitespace-pre-wrap break-words">
+                          {p.generated_lifestyle_prompt}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </details>
               )}
             </div>
           ))}
