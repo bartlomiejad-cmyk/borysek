@@ -19,6 +19,7 @@ export type PhotoProduct = {
   name: string | null;
   description: string | null;
   source_image_url: string;
+  source_image_urls: string[];
   thumbnail_url: string | null;
   lifestyle_urls: string[];
   status: PhotoProductStatus;
@@ -34,6 +35,9 @@ function mapProduct(row: Record<string, unknown>): PhotoProduct {
     name: (row.name as string | null) ?? null,
     description: (row.description as string | null) ?? null,
     source_image_url: row.source_image_url as string,
+    source_image_urls: Array.isArray(row.source_image_urls)
+      ? (row.source_image_urls as string[])
+      : (row.source_image_url ? [row.source_image_url as string] : []),
     thumbnail_url: (row.thumbnail_url as string | null) ?? null,
     lifestyle_urls: Array.isArray(row.lifestyle_urls) ? (row.lifestyle_urls as string[]) : [],
     status: (row.status as PhotoProductStatus) ?? "PENDING",
@@ -129,7 +133,7 @@ export const addPhotoProduct = createServerFn({ method: "POST" })
         projectId: z.string().uuid(),
         name: z.string().max(400).optional().nullable(),
         description: z.string().max(8000).optional().nullable(),
-        source_image_url: z.string().url().max(2000),
+        source_image_urls: z.array(z.string().url().max(2000)).min(1).max(50),
       })
       .parse(i),
   )
@@ -141,7 +145,8 @@ export const addPhotoProduct = createServerFn({ method: "POST" })
         user_id: context.userId,
         name: data.name ?? null,
         description: data.description ?? null,
-        source_image_url: data.source_image_url,
+        source_image_url: data.source_image_urls[0],
+        source_image_urls: data.source_image_urls,
       } as never)
       .select("id")
       .single();
