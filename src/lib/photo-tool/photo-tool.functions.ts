@@ -168,3 +168,70 @@ export const deletePhotoProduct = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+// Queue a per-image edit job. The worker pipeline (bulk_jobs → dispatcher →
+// runPhotoToolEditImage) does the actual FAL call so long requests never time
+// out the browser, and progress shows up in the shared BulkJobLog.
+export const editPhotoImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        photoProductId: z.string().uuid(),
+        slot: z.enum(["thumbnail", "lifestyle"]),
+        lifestyleIndex: z.number().int().min(0).max(20).optional(),
+        requirementsPl: z.string().min(2).max(2000),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    // Look up the product to (a) confirm the user owns it via RLS and (b)
+    // grab the project_id we need to queue the job under.
+    const { data: prod, error: pErr } = await supabase
+      .from("photo_products" as never)
+      .select("id, project_id")
+      .eq("id", data.photoProductId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!prod) throw new Error("Nie znaleziono zdjęcia");
+    const projectId = (prod as { project_id: string }).project_id;
+
+    const { data: row, error } = await supabase
+      .from("bulk_jobs" as never)
+      .insert({
+        project_id: projectId,
+        user_id: userId,
+        kind: "PHOTO_TOOL_EDIT_IMAGE",
+        items: [data.photoProductId] as never,
+        total: 1,
+        payload: {
+          slot: data.slot,
+          lifestyleIndex: data.lifestyleIndex ?? 0,
+          requirementsPl: data.requirementsPl,
+        } as never,
+      } as never)
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+
+    // Kick the worker immediately so the user doesn't wait for the next cron tick.
+    try {
+      const base =
+        process.env.PUBLIC_APP_URL ||
+        "https://project--a56746f2-6fdf-47b1-8095-043a41af98fd.lovable.app";
+      const apikey = process.env.SUPABASE_PUBLISHABLE_KEY;
+      if (apikey) {
+        void fetch(`${base}/api/public/hooks/process-bulk-jobs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey },
+          body: "{}",
+        }).catch(() => {});
+      }
+    } catch {
+      // ignore — cron will pick it up
+    }
+
+    return { jobId: (row as { id: string }).id };
+  });

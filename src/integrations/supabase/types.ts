@@ -57,6 +57,7 @@ export type Database = {
           items: Json
           kind: Database["public"]["Enums"]["bulk_job_kind"]
           last_error: string | null
+          payload: Json | null
           processed_count: number
           project_id: string
           started_at: string | null
@@ -74,6 +75,7 @@ export type Database = {
           items?: Json
           kind: Database["public"]["Enums"]["bulk_job_kind"]
           last_error?: string | null
+          payload?: Json | null
           processed_count?: number
           project_id: string
           started_at?: string | null
@@ -91,6 +93,7 @@ export type Database = {
           items?: Json
           kind?: Database["public"]["Enums"]["bulk_job_kind"]
           last_error?: string | null
+          payload?: Json | null
           processed_count?: number
           project_id?: string
           started_at?: string | null
@@ -526,6 +529,7 @@ export type Database = {
         | "REGENERATE_MEDIA"
         | "FIRECRAWL_DISCOVERY"
         | "PHOTO_TOOL_GENERATE"
+        | "PHOTO_TOOL_EDIT_IMAGE"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -668,6 +672,7 @@ export const Constants = {
         "REGENERATE_MEDIA",
         "FIRECRAWL_DISCOVERY",
         "PHOTO_TOOL_GENERATE",
+        "PHOTO_TOOL_EDIT_IMAGE",
       ],
       bulk_job_status: [
         "PENDING",

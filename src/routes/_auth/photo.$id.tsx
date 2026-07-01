@@ -7,6 +7,7 @@ import {
   addPhotoProduct,
   deletePhotoProduct,
   updatePhotoProject,
+  editPhotoImage,
   type PhotoProduct,
 } from "@/lib/photo-tool/photo-tool.functions";
 import {
@@ -20,7 +21,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, Loader2, Plus, Sparkles, StopCircle, Trash2, Upload, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Loader2, Pencil, Plus, Sparkles, StopCircle, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
@@ -46,6 +54,7 @@ function PhotoProjectPage() {
   const addFn = useServerFn(addPhotoProduct);
   const delFn = useServerFn(deletePhotoProduct);
   const updFn = useServerFn(updatePhotoProject);
+  const editFn = useServerFn(editPhotoImage);
   const createJob = useServerFn(createBulkJob);
   const cancelJob = useServerFn(cancelBulkJob);
   const activeJob = useServerFn(getActiveBulkJob);
@@ -159,12 +168,10 @@ function PhotoProjectPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project", id] }),
   });
 
-  const [variants, setVariants] = useState<number | null>(null);
   const [style, setStyle] = useState<string | null>(null);
   const [reqPl, setReqPl] = useState<string | null>(null);
   useEffect(() => {
     if (data?.project) {
-      if (variants === null) setVariants(data.project.variants_per_product);
       if (style === null) setStyle(data.project.style_prompt ?? "");
       if (reqPl === null) setReqPl((data.project as any).requirements_pl ?? "");
     }
@@ -175,7 +182,6 @@ function PhotoProjectPage() {
       updFn({
         data: {
           id,
-          variants_per_product: variants ?? 2,
           style_prompt: (style ?? "").trim() || null,
           requirements_pl: (reqPl ?? "").trim() || null,
         },
@@ -186,6 +192,99 @@ function PhotoProjectPage() {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
+
+  // --- Per-image edit state ---------------------------------------------------
+  // busyEdits tracks slot keys currently being processed by FAL. We remember
+  // the URL that was showing when the user submitted so we know when it has
+  // been replaced and can lift the "editing…" overlay.
+  type EditKey = string; // `${productId}:${slot}:${index}`
+  const editKey = (productId: string, slot: "thumbnail" | "lifestyle", i: number) =>
+    `${productId}:${slot}:${i}`;
+  const [busyEdits, setBusyEdits] = useState<Record<EditKey, string /* url snapshot */>>({});
+  const [editDialog, setEditDialog] = useState<null | {
+    productId: string;
+    slot: "thumbnail" | "lifestyle";
+    lifestyleIndex: number;
+    currentUrl: string;
+    productName: string;
+  }>(null);
+  const [editText, setEditText] = useState("");
+
+  // When product data refreshes, clear busy overlays whose target url changed.
+  useEffect(() => {
+    if (!data?.products) return;
+    setBusyEdits((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [k, snapshot] of Object.entries(prev)) {
+        const [productId, slot, idxStr] = k.split(":");
+        const prod = data.products.find((pp) => pp.id === productId);
+        if (!prod) continue;
+        const cur =
+          slot === "thumbnail"
+            ? prod.thumbnail_url
+            : prod.lifestyle_urls[Number(idxStr)];
+        if (cur && cur !== snapshot) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [data?.products]);
+
+  // Poll while any edit is in flight so realtime hiccups don't strand the UI.
+  useEffect(() => {
+    if (Object.keys(busyEdits).length === 0) return;
+    const t = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ["photo-project", id] });
+    }, 2500);
+    return () => clearInterval(t);
+  }, [busyEdits, id, qc]);
+
+  const submitEdit = useMutation({
+    mutationFn: async () => {
+      if (!editDialog) throw new Error("brak kontekstu");
+      const txt = editText.trim();
+      if (txt.length < 2) throw new Error("Opisz co poprawić (min. 2 znaki)");
+      const key = editKey(editDialog.productId, editDialog.slot, editDialog.lifestyleIndex);
+      setBusyEdits((prev) => ({ ...prev, [key]: editDialog.currentUrl }));
+      try {
+        await editFn({
+          data: {
+            photoProductId: editDialog.productId,
+            slot: editDialog.slot,
+            lifestyleIndex: editDialog.lifestyleIndex,
+            requirementsPl: txt,
+          },
+        });
+      } catch (e) {
+        setBusyEdits((prev) => {
+          const n = { ...prev };
+          delete n[key];
+          return n;
+        });
+        throw e;
+      }
+    },
+    onSuccess: () => {
+      toast.success("Poprawka wysłana. Wygenerowana wersja pojawi się za chwilę.");
+      setEditDialog(null);
+      setEditText("");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  function openEdit(
+    productId: string,
+    productName: string,
+    slot: "thumbnail" | "lifestyle",
+    lifestyleIndex: number,
+    currentUrl: string,
+  ) {
+    setEditText("");
+    setEditDialog({ productId, productName, slot, lifestyleIndex, currentUrl });
+  }
 
   const generateAll = useMutation({
     mutationFn: async () => {
@@ -272,21 +371,7 @@ function PhotoProjectPage() {
 
       {/* Settings */}
       <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-6 grid md:grid-cols-3 gap-4">
-        <div>
-          <Label className="text-xs">Wizualizacje na produkt</Label>
-          <Input
-            type="number"
-            min={0}
-            max={4}
-            value={variants ?? 2}
-            onChange={(e) => setVariants(Math.max(0, Math.min(4, Number(e.target.value) || 0)))}
-          />
-          <p className="text-[11px] text-muted-foreground mt-1">
-            0–4. Używane tylko gdy produkt ma <b>jedno</b> zdjęcie źródłowe.
-            Gdy jest ich więcej, liczba wizualizacji = liczba zdjęć − 1.
-          </p>
-        </div>
-        <div className="md:col-span-2">
+        <div className="md:col-span-3">
           <Label className="text-xs">Styl / scena dla wizualizacji (opcjonalnie)</Label>
           <Textarea
             rows={2}
@@ -407,12 +492,11 @@ function PhotoProjectPage() {
             <div className="text-xs text-muted-foreground">
               {totalSources > 0 ? (
                 <>
-                  {totalSources} {totalSources === 1 ? "zdjęcie" : "zdjęć"} źródłowych ={" "}
-                  <b>1 miniaturka</b>
-                  {totalSources > 1 && <> + <b>{totalSources - 1} wizualizacji</b></>}
+                  {totalSources} {totalSources === 1 ? "zdjęcie" : "zdjęć"} źródłowych →{" "}
+                  <b>1 miniaturka + 5 wizualizacji</b>
                 </>
               ) : (
-                <>Dodaj zdjęcia — z N zdjęć powstaje 1 miniaturka + (N-1) wizualizacji.</>
+                <>Dodaj zdjęcia — z każdego produktu powstaje <b>1 miniaturka + 5 wizualizacji</b>.</>
               )}
             </div>
             <Button onClick={() => add.mutate()} disabled={add.isPending || totalSources === 0 || pending.some((p) => p.status === "uploading")}>
@@ -470,48 +554,84 @@ function PhotoProjectPage() {
                 </div>
               </div>
 
+              {/* Output grid — always 1 miniaturka + 5 wizualizacji */}
               <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground mb-1">Miniaturka</div>
-                  {p.thumbnail_url ? (
-                    <a href={p.thumbnail_url} target="_blank" rel="noreferrer" className="block">
-                      <img
-                        src={p.thumbnail_url}
-                        alt=""
-                        className="w-full aspect-square object-cover rounded-md border bg-white"
-                        loading="lazy"
-                      />
-                    </a>
-                  ) : (
-                    <div className="w-full aspect-square rounded-md border border-dashed" />
-                  )}
-                </div>
-                {Array.from({ length: 2 }).map((_, i) => {
-                  const u = p.lifestyle_urls[i];
-                  return (
-                    <div key={i}>
-                      <div className="text-[10px] uppercase text-muted-foreground mb-1">Wiz. {i + 1}</div>
-                      {u ? (
-                        <a href={u} target="_blank" rel="noreferrer" className="block">
-                          <img src={u} alt="" className="w-full aspect-square object-cover rounded-md border" loading="lazy" />
-                        </a>
-                      ) : (
-                        <div className="w-full aspect-square rounded-md border border-dashed" />
-                      )}
-                    </div>
-                  );
-                })}
+                {(() => {
+                  const slots: Array<
+                    | { kind: "thumbnail"; url: string | null }
+                    | { kind: "lifestyle"; index: number; url: string | null }
+                  > = [
+                    { kind: "thumbnail", url: p.thumbnail_url },
+                    ...Array.from({ length: 5 }, (_, i) => ({
+                      kind: "lifestyle" as const,
+                      index: i,
+                      url: p.lifestyle_urls[i] ?? null,
+                    })),
+                  ];
+                  return slots.map((s, k) => {
+                    const label =
+                      s.kind === "thumbnail" ? "Miniaturka" : `Wiz. ${s.index + 1}`;
+                    const key =
+                      s.kind === "thumbnail"
+                        ? editKey(p.id, "thumbnail", 0)
+                        : editKey(p.id, "lifestyle", s.index);
+                    const isBusy = !!busyEdits[key];
+                    const canEdit = !!s.url && !isBusy;
+                    return (
+                      <div key={k}>
+                        <div className="text-[10px] uppercase text-muted-foreground mb-1">
+                          {label}
+                        </div>
+                        <div className="relative group">
+                          {s.url ? (
+                            <a
+                              href={s.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block"
+                            >
+                              <img
+                                src={s.url}
+                                alt=""
+                                className={`w-full aspect-square object-cover rounded-md border ${s.kind === "thumbnail" ? "bg-white" : ""}`}
+                                loading="lazy"
+                              />
+                            </a>
+                          ) : (
+                            <div className="w-full aspect-square rounded-md border border-dashed" />
+                          )}
+                          {isBusy && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-background/80 rounded-md text-[10px] text-muted-foreground">
+                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                              Edytuję…
+                            </div>
+                          )}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openEdit(
+                                  p.id,
+                                  p.name || "(bez nazwy)",
+                                  s.kind === "thumbnail" ? "thumbnail" : "lifestyle",
+                                  s.kind === "thumbnail" ? 0 : s.index,
+                                  s.url as string,
+                                );
+                              }}
+                              className="absolute inset-0 flex items-center justify-center rounded-md bg-background/70 opacity-0 group-hover:opacity-100 transition text-xs font-medium"
+                            >
+                              <Pencil className="h-3.5 w-3.5 mr-1" />
+                              Edytuj promptem
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
-
-              {p.lifestyle_urls.length > 2 && (
-                <div className="grid grid-cols-4 gap-2 mt-2">
-                  {p.lifestyle_urls.slice(2).map((u, i) => (
-                    <a key={i} href={u} target="_blank" rel="noreferrer" className="block">
-                      <img src={u} alt="" className="w-full aspect-square object-cover rounded-md border" loading="lazy" />
-                    </a>
-                  ))}
-                </div>
-              )}
 
               {p.status === "FAILED" && p.last_error && (
                 <div className="mt-3 text-xs text-destructive">
@@ -556,6 +676,54 @@ function PhotoProjectPage() {
         <span className="mx-1" />
         rozdzielczość 2K (~2048×2048).
       </div>
+
+      <Dialog open={!!editDialog} onOpenChange={(o) => { if (!o) setEditDialog(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Popraw {editDialog?.slot === "thumbnail" ? "miniaturkę" : `wizualizację ${(editDialog?.lifestyleIndex ?? 0) + 1}`}
+            </DialogTitle>
+          </DialogHeader>
+          {editDialog && (
+            <div className="space-y-3">
+              <div className="flex gap-3">
+                <img
+                  src={editDialog.currentUrl}
+                  alt=""
+                  className="w-32 h-32 rounded-md border object-cover bg-white shrink-0"
+                />
+                <div className="text-xs text-muted-foreground">
+                  <div className="font-medium text-foreground mb-1">{editDialog.productName}</div>
+                  AI (Gemini) przetłumaczy Twoje wskazówki na precyzyjny prompt EN i wyśle je do FAL razem z tym zdjęciem jako referencją. Produkt zostanie zachowany bez zmian.
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Co poprawić? (po polsku)</Label>
+                <Textarea
+                  rows={5}
+                  placeholder={"np. Usuń liście z lewej strony i dodaj kubek kawy w tle. Zmień światło na cieplejsze, poranne. Tło jaśniejsze."}
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditDialog(null)} disabled={submitEdit.isPending}>
+              Anuluj
+            </Button>
+            <Button onClick={() => submitEdit.mutate()} disabled={submitEdit.isPending || editText.trim().length < 2}>
+              {submitEdit.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Pencil className="h-4 w-4 mr-2" />
+              )}
+              Wygeneruj poprawkę
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

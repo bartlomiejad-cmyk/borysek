@@ -1,42 +1,64 @@
-# Wytyczne PL → prompty EN + bogatsza miniaturka
+## Cel
 
-## Co powstanie
+1. Ustalić stałą liczbę: **1 miniaturka + 5 wizualizacji** (niezależnie od liczby zdjęć źródłowych).
+2. Dodać **edycję pojedynczego zdjęcia promptem PL** — po najechaniu na miniaturkę lub wizualizację pojawia się przycisk „Edytuj", który otwiera pole tekstowe; wpisany po polsku opis poprawki jest tłumaczony przez Gemini na prompt EN i wysyłany do `fal-ai/nano-banana-pro/edit` z aktualnym zdjęciem jako referencją. Wynik podmienia to konkretne zdjęcie.
 
-1. **Nowe pole „Wymagania (PL)" na poziomie projektu zdjęciowego.** W panelu ustawień projektu (obok „Styl / scena") dojdzie duże pole tekstowe, gdzie po polsku opisujesz oczekiwania — np. „miniaturka: produkt na białym tle z 2–3 listkami i wiórami trawy z lewej strony; wizualizacja: ogród, poranne światło, dłoń trzymająca sekator".
-2. **Automatyczne przepisanie na profesjonalny prompt EN.** Przed każdą generacją worker wywołuje `google/gemini-3.1-pro-preview` przez Lovable AI Gateway z: nazwą produktu, opisem produktu, wytycznymi PL i informacją, czy to miniaturka czy wizualizacja. Gemini zwraca dwa gotowe prompty EN (jeden dla miniaturki, jeden dla wizualizacji) w ustalonym formacie JSON. Prompty są cache'owane per produkt, żeby nie mielić tego samego wywołania przy każdej wizualizacji.
-3. **Nowy styl miniaturki — packshot+.** Domyślny szablon promptu miniaturki dopuszcza teraz białe tło + 1–3 kontekstowe elementy związane z produktem (np. listki dla sekatora, ziarna kawy dla młynka, deska + noże dla ostrzarki). AI samo dobiera dodatki na podstawie opisu produktu; jeśli wytyczne PL zawierają konkretne wskazówki, one mają pierwszeństwo.
-4. **Wizualizacje bez zmian jakościowych, tylko sterowane z PL.** Aktualne prompty lifestyle zostają jako baza; wytyczne PL nadpisują scenę i rekwizyty.
-5. **Podgląd wygenerowanego promptu (opcjonalnie).** W panelu produktu — po wygenerowaniu — pokazujemy w rozwijanym akapicie prompty EN, których użyliśmy dla miniaturki i wizualizacji, żebyś mógł zweryfikować co poszło do FAL.
+## Zmiany
 
-## Jak to zadziała krok po kroku
+### 1. Stała liczba wariantów (1 + 5)
 
-```text
-[Panel projektu]
-  └ pole „Wymagania (PL)" ─────────────┐
-                                       ▼
-[Worker: runPhotoToolGenerate(product)]
-  1. pobiera projekt (styl + wytyczne PL) + produkt (nazwa, opis, źródła)
-  2. jeśli wytyczne PL się zmieniły od ostatniego cache → wywołanie Gemini Pro
-     ├─ input: nazwa, opis, wytyczne PL, liczba wizualizacji
-     └─ output JSON: { thumbnail_prompt, lifestyle_prompt }
-  3. cache promptów w polu enrichments produktu (żeby nie płacić za każdą wiz.)
-  4. FAL nano-banana-pro/edit × (1 + N) używa gotowych promptów EN
-  5. zapis miniaturki + wizualizacji jak dziś
+- `src/lib/pim/_workers.server.ts` → `runPhotoToolGenerate`: usuwam logikę „gdy zdjęć > 1, wariantów = N−1". Zawsze `variants = 5`, jeden request na miniaturkę + 5 na wizualizacje. Wszystkie zdjęcia źródłowe pozostają jako referencje w `image_urls`.
+- `src/routes/_auth/photo.$id.tsx`: usuwam z panelu ustawień pole „Wizualizacje na produkt" oraz krótką notkę. Zostaje tylko styl sceny + „Wymagania (PL)".
+- `src/lib/photo-tool/photo-tool.functions.ts`: `updatePhotoProject` przestaje przyjmować `variants_per_product` (albo ignoruje). Kolumna w bazie zostaje (bez migracji), po prostu nieużywana.
+
+### 2. Edycja pojedynczego zdjęcia promptem
+
+**Backend**
+
+- Nowa server function `editPhotoImage` w `src/lib/photo-tool/photo-tool.functions.ts`:
+  - input: `{ photoProductId, slot: "thumbnail" | "lifestyle", lifestyleIndex?: number, requirementsPl: string }`
+  - waliduje własność (RLS przez `requireSupabaseAuth`)
+  - kolejkuje nowy `bulk_job` typu `PHOTO_TOOL_EDIT_IMAGE` z payloadem `{ photoProductId, slot, lifestyleIndex, requirementsPl }`
+- Nowy wariant enuma `bulk_job_kind`: `PHOTO_TOOL_EDIT_IMAGE` (migracja `ALTER TYPE ... ADD VALUE`).
+- Nowy worker `runPhotoToolEditImage` w `src/lib/pim/_workers.server.ts`:
+  1. Pobiera `photo_products` (nazwa, opis, aktualny `thumbnail_url` / `lifestyle_urls[i]`, `generated_thumb_prompt` / `generated_lifestyle_prompt` jako kontekst „poprzedniego promptu").
+  2. Woła nowy helper `buildFalEditPromptFromPolish` (Gemini 3.1 Pro) — wejście: nazwa produktu, opis, oryginalny prompt EN dla tego slotu, wytyczne PL od użytkownika; wyjście: pojedynczy prompt EN dla `fal-ai/nano-banana-pro/edit`, zachowujący wierność produktowi i uwzględniający poprawkę.
+  3. Woła `callFal("fal-ai/nano-banana-pro/edit", { prompt, image_urls: [<edytowane zdjęcie>], aspect_ratio: "1:1", resolution: "2K", output_format: "jpeg", num_images: 1 })`. Jako referencję używam **tylko edytowanego zdjęcia** (nie surowych źródeł) — to jest edycja istniejącego wyniku.
+  4. Zapisuje wynik pod `photo-tool/{projectId}/{productId}/thumb.jpg` (nadpisując miniaturkę) lub `lifestyle_{i}.jpg` (nadpisując konkretną wizualizację), aktualizuje URL w bazie.
+  5. Loguje postęp w `bulk_job_events`.
+- Rozszerzenie dispatchera `src/routes/api/public/hooks/process-bulk-jobs.ts` o `case "PHOTO_TOOL_EDIT_IMAGE"`.
+- Realtime na `photo_products` już włączone → UI odświeży się automatycznie; polling co 2s już działa.
+
+**Frontend — `src/routes/_auth/photo.$id.tsx`**
+
+- Wydzielenie komponentu `PhotoImageCard` renderującego pojedyncze zdjęcie (miniaturka lub wizualizacja):
+  - Overlay pojawiający się na `group-hover` z przyciskiem **„Edytuj promptem"**.
+  - Kliknięcie otwiera `Dialog` (shadcn) z:
+    - podglądem aktualnego zdjęcia
+    - `Textarea` „Co poprawić? (po polsku)" — np. „usuń liście z lewej strony, dodaj drewniany blat"
+    - przyciskiem „Wygeneruj poprawkę" → `editPhotoImage` mutation
+  - Po submicie: dialog zamyka się, na kaflu pokazuje się overlay „Edytuję…" (spinner) dopóki job aktywny; log pojawia się w istniejącym `BulkJobLog`.
+- Blok „Prompty EN" pod produktem dostaje trzeci wpis: ostatnio użyty prompt edycji (opcjonalnie, jeśli jest — wymaga dodania kolumny `last_edit_prompt` do `photo_products`, lub prościej: pokazujemy prompt tylko w logu joba).
+
+### 3. Migracje bazy
+
+Jedna migracja:
+
+```sql
+ALTER TYPE public.bulk_job_kind ADD VALUE IF NOT EXISTS 'PHOTO_TOOL_EDIT_IMAGE';
 ```
 
-## Szczegóły techniczne
+Nic więcej — reużywamy `bulk_jobs`, `bulk_job_events`, `photo_products.thumbnail_url` i `lifestyle_urls`.
 
-- **Schemat**: do `photo_projects` dodajemy kolumnę `requirements_pl text`. Do `photo_products` dodajemy `generated_thumb_prompt text`, `generated_lifestyle_prompt text`, `prompt_source_hash text` (hash z `requirements_pl + name + description + style_prompt` — jeśli się zmieni, generujemy prompty od nowa).
-- **Nowa funkcja `buildFalPromptsFromPolish` w `src/lib/pim/_workers.server.ts`**: strukturalne wywołanie `generateText` z `Output.object({ schema: z.object({ thumbnail_prompt: z.string(), lifestyle_prompt: z.string() }) })` do `google/gemini-3.1-pro-preview`. System prompt instruuje model, że pisze prompty do modelu edycji obrazu FAL nano-banana-pro, ma zachować wierność produktowi i przetłumaczyć PL wytyczne na precyzyjne angielskie instrukcje (framing, tło, rekwizyty, oświetlenie, zakazy).
-- **Nowy szablon miniaturki**: jeśli `requirements_pl` jest puste, używamy rozbudowanego promptu bazowego z instrukcją „white seamless background BUT include 1–3 contextual props/materials clearly related to the product (leaves, wood shavings, coffee beans, fabric etc.) arranged asymmetrically around the product" — czyli styl jak na przesłanym przykładzie. Reszta reguł (preserve labels, no watermarks) zostaje.
-- **UI**:
-  - `src/routes/_auth/photo.$id.tsx` — dodane pole `Textarea` „Wymagania (PL)" w bloku ustawień projektu, z placeholderem-przykładem.
-  - Nowy zwijany blok „Prompty EN użyte do generacji" pod kafelkiem produktu (widoczny gdy prompty są zapisane).
-- **`src/lib/photo-tool/photo-tool.functions.ts`** — `updatePhotoProject` przyjmuje nowe pole `requirements_pl`; `getPhotoProject` je zwraca; typ `PhotoProduct` dostaje 2 nowe pola z promptami do wyświetlenia.
-- **Bez zmian**: model FAL (`fal-ai/nano-banana-pro/edit`), rozdzielczość 2K, reguła N zdjęć = 1 miniaturka + N-1 wizualizacji, kolejkowanie i logi.
+## Szczegóły techniczne dla programisty
 
-## Poza zakresem tej iteracji
+- **Prompt Gemini dla edycji** (`buildFalEditPromptFromPolish`) trzyma te same zasady wierności produktowi co obecny generator, ale otrzymuje dodatkowo „ORIGINAL PROMPT" (żeby wiedział co było tłem) i „USER CORRECTION (PL)". Zwraca pojedynczy string `edit_prompt`. Fallback: łączy oryginalny prompt + `EXTRA CORRECTION (translated from Polish): <...>`.
+- **Storage upsert**: `upload(..., { upsert: true })` zastąpi plik; do URL doklejam `?v=${Date.now()}` żeby wymusić refresh w `<img>`.
+- **Cache promptów** dla generacji (`prompt_source_hash`) zostaje bez zmian; edycja nie modyfikuje `generated_thumb_prompt` / `generated_lifestyle_prompt`, bo to ma być jednorazowa poprawka na tym konkretnym zdjęciu, a nie zmiana promptu bazowego (jeśli userowi ma się zmienić baza — edytuje pole „Wymagania (PL)" na projekcie i klika „Generuj" jeszcze raz).
+- **Kolejność w UI**: kafle miniaturki i wizualizacji renderują ten sam komponent `PhotoImageCard` z propem `slot`.
 
-- Edycja promptów EN ręcznie w UI (można dodać później jako „nadpisz prompt").
-- Osobne wytyczne per produkt (na razie tylko globalne per projekt — możemy dodać override, gdy okaże się potrzebne).
-- Regeneracja tylko miniaturki bez wizualizacji (dziś generuje się cała paczka).
+## Efekt
+
+- Zawsze 6 zdjęć na produkt (1 + 5).
+- Każde zdjęcie ma na hoverze przycisk edycji → dialog → wpisujesz po polsku co poprawić → Gemini pisze prompt → FAL edytuje → wynik podmienia się w tym samym slocie.
+- Reszta workflow (generowanie od zera, log jobów, cache promptów bazowych) bez zmian.

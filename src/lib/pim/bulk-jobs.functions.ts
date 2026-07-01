@@ -6,7 +6,8 @@ export type BulkJobKind =
   | "GENERATE_GOLDEN"
   | "REGENERATE_MEDIA"
   | "FIRECRAWL_DISCOVERY"
-  | "PHOTO_TOOL_GENERATE";
+  | "PHOTO_TOOL_GENERATE"
+  | "PHOTO_TOOL_EDIT_IMAGE";
 export type BulkJobStatus =
   | "PENDING"
   | "PROCESSING"
@@ -37,6 +38,7 @@ const KindSchema = z.enum([
   "REGENERATE_MEDIA",
   "FIRECRAWL_DISCOVERY",
   "PHOTO_TOOL_GENERATE",
+  "PHOTO_TOOL_EDIT_IMAGE",
 ]);
 
 function mapRow(row: Record<string, unknown>): BulkJob {
@@ -67,6 +69,7 @@ export const createBulkJob = createServerFn({ method: "POST" })
         projectId: z.string().uuid(),
         kind: KindSchema,
         items: z.array(z.string().uuid()).min(1).max(20000),
+        payload: z.record(z.string(), z.unknown()).optional(),
       })
       .parse(i),
   )
@@ -74,17 +77,20 @@ export const createBulkJob = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
 
     // Check there isn't already an active job of this kind for this project.
-    const { data: existing } = await supabase
-      .from("bulk_jobs" as never)
-      .select("id, status")
-      .eq("project_id", data.projectId)
-      .eq("kind", data.kind)
-      .in("status", ["PENDING", "PROCESSING"])
-      .maybeSingle();
-    if (existing) {
-      throw new Error(
-        "Zadanie tego typu już działa w tle dla tego projektu. Poczekaj na zakończenie lub je zatrzymaj.",
-      );
+    // Per-image edits are cheap and independent, so we allow many in parallel.
+    if (data.kind !== "PHOTO_TOOL_EDIT_IMAGE") {
+      const { data: existing } = await supabase
+        .from("bulk_jobs" as never)
+        .select("id, status")
+        .eq("project_id", data.projectId)
+        .eq("kind", data.kind)
+        .in("status", ["PENDING", "PROCESSING"])
+        .maybeSingle();
+      if (existing) {
+        throw new Error(
+          "Zadanie tego typu już działa w tle dla tego projektu. Poczekaj na zakończenie lub je zatrzymaj.",
+        );
+      }
     }
 
     const { data: row, error } = await supabase
@@ -95,6 +101,7 @@ export const createBulkJob = createServerFn({ method: "POST" })
         kind: data.kind,
         items: data.items as never,
         total: data.items.length,
+        payload: (data.payload ?? null) as never,
       } as never)
       .select("*")
       .single();

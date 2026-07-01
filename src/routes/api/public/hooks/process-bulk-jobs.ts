@@ -5,6 +5,7 @@ import {
   runRegenerateMedia,
   runFirecrawlDiscovery,
   runPhotoToolGenerate,
+  runPhotoToolEditImage,
   type WorkerCtx,
 } from "@/lib/pim/_workers.server";
 
@@ -16,7 +17,8 @@ type JobKind =
   | "GENERATE_GOLDEN"
   | "REGENERATE_MEDIA"
   | "FIRECRAWL_DISCOVERY"
-  | "PHOTO_TOOL_GENERATE";
+  | "PHOTO_TOOL_GENERATE"
+  | "PHOTO_TOOL_EDIT_IMAGE";
 
 type BulkJobRow = {
   id: string;
@@ -29,9 +31,15 @@ type BulkJobRow = {
   cancel_requested: boolean;
   status: string;
   last_error: string | null;
+  payload: Record<string, unknown> | null;
 };
 
-async function processItem(kind: JobKind, productId: string, ctx: WorkerCtx): Promise<void> {
+async function processItem(
+  kind: JobKind,
+  productId: string,
+  ctx: WorkerCtx,
+  payload: Record<string, unknown> | null,
+): Promise<void> {
   switch (kind) {
     case "GENERATE_GOLDEN":
       // Verification of source images is a separate, opt-in action. Bulk
@@ -47,6 +55,13 @@ async function processItem(kind: JobKind, productId: string, ctx: WorkerCtx): Pr
     case "PHOTO_TOOL_GENERATE":
       await runPhotoToolGenerate(productId, ctx);
       return;
+    case "PHOTO_TOOL_EDIT_IMAGE": {
+      const slot = (payload?.slot as "thumbnail" | "lifestyle") ?? "thumbnail";
+      const idx = typeof payload?.lifestyleIndex === "number" ? (payload!.lifestyleIndex as number) : 0;
+      const requirementsPl = typeof payload?.requirementsPl === "string" ? (payload!.requirementsPl as string) : "";
+      await runPhotoToolEditImage(productId, { slot, lifestyleIndex: idx, requirementsPl }, ctx);
+      return;
+    }
     default:
       throw new Error(`Unknown job kind: ${kind as string}`);
   }
@@ -55,7 +70,7 @@ async function processItem(kind: JobKind, productId: string, ctx: WorkerCtx): Pr
 async function pickNextJob(): Promise<BulkJobRow | null> {
   const { data } = await supabaseAdmin
     .from("bulk_jobs" as never)
-    .select("id, project_id, kind, items, total, processed_count, failed_count, cancel_requested, status, last_error")
+    .select("id, project_id, kind, items, total, processed_count, failed_count, cancel_requested, status, last_error, payload")
     .in("status", ["PENDING", "PROCESSING"])
     .eq("cancel_requested", false)
     .order("created_at", { ascending: true })
@@ -116,7 +131,7 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
       },
     };
     try {
-      await processItem(job.kind, pid, ctx);
+      await processItem(job.kind, pid, ctx, job.payload);
       processed++;
     } catch (e) {
       failed++;
