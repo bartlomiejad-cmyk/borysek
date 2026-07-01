@@ -295,6 +295,18 @@ function PhotoProjectPage() {
             onChange={(e) => setStyle(e.target.value)}
           />
         </div>
+        <div className="md:col-span-3">
+          <Label className="text-xs">Wymagania (PL) — AI przepisze je na profesjonalny prompt EN dla generatora</Label>
+          <Textarea
+            rows={4}
+            placeholder={"np. Miniaturka: produkt na białym tle z 2–3 świeżymi listkami po lewej stronie i drobnymi ścinkami trawy. Wizualizacja: ogród, poranne światło, dłoń w rękawicy trzymająca produkt, w tle rozmyty żywopłot."}
+            value={reqPl ?? ""}
+            onChange={(e) => setReqPl(e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Piszesz po polsku co ma być na miniaturce i wizualizacji. Gemini 3.1 Pro tłumaczy to na precyzyjny prompt EN, dbając równocześnie, żeby produkt pozostał wierny oryginałowi.
+          </p>
+        </div>
         <div className="md:col-span-3 flex justify-end">
           <Button size="sm" variant="outline" onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
             Zapisz ustawienia
