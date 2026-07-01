@@ -77,17 +77,20 @@ export const createBulkJob = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
 
     // Check there isn't already an active job of this kind for this project.
-    const { data: existing } = await supabase
-      .from("bulk_jobs" as never)
-      .select("id, status")
-      .eq("project_id", data.projectId)
-      .eq("kind", data.kind)
-      .in("status", ["PENDING", "PROCESSING"])
-      .maybeSingle();
-    if (existing) {
-      throw new Error(
-        "Zadanie tego typu już działa w tle dla tego projektu. Poczekaj na zakończenie lub je zatrzymaj.",
-      );
+    // Per-image edits are cheap and independent, so we allow many in parallel.
+    if (data.kind !== "PHOTO_TOOL_EDIT_IMAGE") {
+      const { data: existing } = await supabase
+        .from("bulk_jobs" as never)
+        .select("id, status")
+        .eq("project_id", data.projectId)
+        .eq("kind", data.kind)
+        .in("status", ["PENDING", "PROCESSING"])
+        .maybeSingle();
+      if (existing) {
+        throw new Error(
+          "Zadanie tego typu już działa w tle dla tego projektu. Poczekaj na zakończenie lub je zatrzymaj.",
+        );
+      }
     }
 
     const { data: row, error } = await supabase
