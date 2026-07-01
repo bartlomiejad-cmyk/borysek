@@ -513,6 +513,7 @@ export type Database = {
         | "GENERATE_GOLDEN"
         | "REGENERATE_MEDIA"
         | "FIRECRAWL_DISCOVERY"
+        | "PHOTO_TOOL_GENERATE"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -654,6 +655,7 @@ export const Constants = {
         "GENERATE_GOLDEN",
         "REGENERATE_MEDIA",
         "FIRECRAWL_DISCOVERY",
+        "PHOTO_TOOL_GENERATE",
       ],
       bulk_job_status: [
         "PENDING",
