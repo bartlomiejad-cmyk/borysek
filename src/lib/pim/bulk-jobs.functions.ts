@@ -2,7 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-export type BulkJobKind = "GENERATE_GOLDEN" | "REGENERATE_MEDIA" | "FIRECRAWL_DISCOVERY";
+export type BulkJobKind =
+  | "GENERATE_GOLDEN"
+  | "REGENERATE_MEDIA"
+  | "FIRECRAWL_DISCOVERY"
+  | "PHOTO_TOOL_GENERATE";
 export type BulkJobStatus =
   | "PENDING"
   | "PROCESSING"
@@ -28,7 +32,12 @@ export type BulkJob = {
   updated_at: string;
 };
 
-const KindSchema = z.enum(["GENERATE_GOLDEN", "REGENERATE_MEDIA", "FIRECRAWL_DISCOVERY"]);
+const KindSchema = z.enum([
+  "GENERATE_GOLDEN",
+  "REGENERATE_MEDIA",
+  "FIRECRAWL_DISCOVERY",
+  "PHOTO_TOOL_GENERATE",
+]);
 
 function mapRow(row: Record<string, unknown>): BulkJob {
   return {

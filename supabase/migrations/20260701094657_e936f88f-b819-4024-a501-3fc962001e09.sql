@@ -1,0 +1,1 @@
+CREATE POLICY "bje via photo_project" ON public.bulk_job_events FOR ALL USING (EXISTS (SELECT 1 FROM public.photo_projects pp WHERE pp.id = bulk_job_events.project_id AND pp.user_id = auth.uid())) WITH CHECK (EXISTS (SELECT 1 FROM public.photo_projects pp WHERE pp.id = bulk_job_events.project_id AND pp.user_id = auth.uid()));

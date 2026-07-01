@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, ArrowRight, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { TopTabs } from "@/components/TopTabs";
 
 export const Route = createFileRoute("/_auth/projects/")({ component: ProjectsPage });
 
@@ -40,7 +41,9 @@ function ProjectsPage() {
   });
 
   return (
-    <div className="container mx-auto px-6 py-12 max-w-5xl">
+    <div className="container mx-auto max-w-5xl pb-12">
+      <TopTabs />
+      <div className="px-6 pt-8">
       {/* Hero */}
       <section className="text-center mb-12 animate-fade-in">
         <h1 className="font-serif text-5xl md:text-6xl tracking-tight">Projekty</h1>
@@ -137,6 +140,7 @@ function ProjectsPage() {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

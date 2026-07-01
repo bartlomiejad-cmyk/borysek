@@ -1,104 +1,94 @@
 ## Cel
 
-Rozszerzyć generowanie "golden" treści produktu o pełen zestaw SEO best practices. Output AI ma zawierać nie tylko nazwę/opis/cechy, ale również elementy bezpośrednio konsumowane przez wyszukiwarki i platformy e-commerce.
+Dodać na stronie głównej nową zakładkę „Zdjęcia" (obok obecnej listy projektów PIM), która uruchamia osobny typ projektu do generowania **miniatur (packshot 2560×2560 na białym tle)** i **wizualizacji lifestyle (2560×2560)** przez `fal-ai/nano-banana/pro`, zawsze bazując na opisie produktu i zdjęciu źródłowym, żeby wynik był zgodny z rzeczywistością.
+
+## Założenia (do potwierdzenia w trakcie budowy jeśli się zmieni)
+
+- **Wejście**: CSV + pojedynczy upload — CSV z kolumnami `name`, `description`, `source_image_url` (dopuszczamy też własne mapowanie kolumn, tak jak w PIM); alternatywnie drag&drop pliku + textarea z opisem dla pojedynczych sztuk.
+- **Generacja per produkt**: 1× miniatura (obowiązkowa) + 1–4 warianty wizualizacji lifestyle (wybór użytkownika, domyślnie 2).
+- **Model**: `fal-ai/nano-banana/pro/edit` (image-to-image) dla miniatury oraz `fal-ai/nano-banana/pro` (t2i) dla lifestyle — oba dostają prompt zbudowany z opisu produktu, żeby scena/kompozycja pasowała do rzeczywistego produktu. Rozmiar wymuszony 2560×2560.
+- **Kolejkowanie**: reużywamy istniejącej infrastruktury `bulk_jobs` + `pg_cron` + `bulk_job_events` (live log jak w Firecrawl/regen).
+- **Storage**: nowy public bucket `photo-tool-images` (lub reużycie `regenerated-images` w podfolderze `photo-tool/`).
+- **Bez zmian** w istniejących projektach PIM — nowe narzędzie jest niezależne.
 
 ## Zmiany w bazie (migracja)
 
-Dodać do `public.enrichments` 3 nowe kolumny:
+```sql
+-- 1. Nowy typ projektu
+create table public.photo_projects (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
-- `golden_slug text` — SEO-friendly URL slug (kebab-case, bez polskich znaków, max 75 zn.)
-- `golden_meta_description text` — meta description 150-160 zn.
-- `golden_seo_keywords jsonb` — `string[]` z naturalnymi frazami (main + long-tail), max 8
+-- 2. Produkty w projekcie zdjęciowym
+create table public.photo_products (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.photo_projects(id) on delete cascade,
+  name text,
+  description text,
+  source_image_url text not null,
+  status text not null default 'PENDING',            -- PENDING | PROCESSING | READY | FAILED
+  thumbnail_url text,                                -- 2560×2560 packshot
+  lifestyle_urls jsonb not null default '[]'::jsonb, -- lista URL-i wizualizacji
+  variants_requested int not null default 2,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
-`golden_features` zostaje (jsonb), ale od teraz klucze będą standaryzowane pod schema.org Product (patrz niżej).
-
-## Zmiany w `src/lib/pim/_workers.server.ts`
-
-### 1. Rozszerzenie `GoldenSchema` (z.object)
-
-```ts
-{
-  name: string (min 1, max 150),
-  slug: string (regex kebab-case, max 75),
-  description: string (min 1, max 20000),
-  meta_description: string (max 200),
-  seo_keywords: string[] (max 8),
-  features: [{ key: string, value: string }] (max 60)
-}
+-- GRANT + RLS: owner_id = auth.uid() (identycznie jak projects)
+-- Rozszerzenie bulk_jobs.kind o 'PHOTO_TOOL_GENERATE'
 ```
 
-### 2. Nowy `systemPrompt` w `generateGolden` — best practices SEO
+## Backend (`src/lib/photo-tool/`)
 
-Sekcja **NAZWA (`name`)**:
-- 40-70 znaków (optymalne pod `<title>`)
-- Format: `[marka] [model/typ produktu] [kluczowa cecha różnicująca]`
-- Najważniejsze słowo kluczowe (typ produktu) w pierwszych 30 znakach
-- Bez ALL CAPS, bez znaków specjalnych poza myślnikiem
+- `photo-tool.functions.ts` — `createPhotoProject`, `listPhotoProjects`, `deletePhotoProject`, `importPhotoCsv`, `addPhotoProduct` (single upload z ręcznym opisem), `startPhotoGeneration` (tworzy `bulk_jobs` kind=`PHOTO_TOOL_GENERATE`), `getPhotoProduct`, `retryPhotoProduct`.
+- `photo-tool.server.ts` (uploady do storage, budowanie promptów).
+- `_workers.server.ts`: dodać `runPhotoToolGenerate(productId, ctx)` wywoływane z `processItem` w `src/routes/api/public/hooks/process-bulk-jobs.ts`. Worker:
+  1. Pobiera `photo_products` + `photo_projects`.
+  2. Buduje prompt z `name` + `description` (twarde reguły: „use only physical labels/logos present on the source", „no invented text", „preserve packaging").
+  3. Wywołuje `fal-ai/nano-banana/pro/edit` (miniatura, biały #FFFFFF, produkt ~70% kadru — reużyjemy strukturę promptu z `regenerateMainImage`).
+  4. Wywołuje `fal-ai/nano-banana/pro` (t2i) N razy dla lifestyle — prompt: „Photorealistic product photography of {name}. Scene fitting: {description-derived context}. Product must remain identical to the source reference: {source_image_url}." (przekazujemy też `image_urls` jako reference gdy model to wspiera).
+  5. Uploaduje wyniki do storage, zapisuje `thumbnail_url` + `lifestyle_urls`.
+  6. Emituje eventy `ctx.onEvent` (live log).
 
-Sekcja **SLUG (`slug`)**:
-- kebab-case (`buty-trekkingowe-meskie-salomon-x-ultra-4`)
-- Transliteracja polskich znaków (ą→a, ć→c, ę→e, ł→l, ń→n, ó→o, ś→s, ź/ż→z)
-- Max 75 znaków, tylko `[a-z0-9-]`
-- Bez stop-words (`i`, `oraz`, `dla`, `z`, `w`, `na`) gdy nie zmieniają sensu
-- Zawiera główne słowo kluczowe na początku
+## Frontend
 
-Sekcja **DESCRIPTION** (rozszerzenie istniejących reguł):
-- 350-900 znaków (bez zmian)
-- **Główne słowo kluczowe (typ produktu) MUSI pojawić się w pierwszych 100 znakach**
-- Pierwsze zdanie odpowiada na pytanie "co to jest i dla kogo"
-- W treści wpleść 2-3 naturalne warianty frazy (synonimy, long-tail) — bez upychania (keyword stuffing)
-- Akapity 2-4 zdania (czytelność = pośredni sygnał rankingowy)
-- Pozostałe dotychczasowe zakazy (marketingowe ogólniki, ceny, sklepy, "kup teraz") bez zmian
+### Strona główna (`src/routes/_auth/projects.index.tsx` → refactor na tabs)
+- Dwie zakładki: **Projekty PIM** (obecna zawartość) i **Zdjęcia** (nowa).
+- Zakładka „Zdjęcia": lista `photo_projects` + przycisk „Nowy projekt zdjęciowy".
 
-Sekcja **META_DESCRIPTION**:
-- 150-160 znaków (twardy limit; odcięcie w Google ~160)
-- Streszczenie + jedna konkretna korzyść/cecha + naturalna fraza kluczowa
-- Brak cudzysłowów (psuje renderowanie w SERP)
-- Brak duplikatu pierwszego zdania opisu — komplementarny, nie identyczny
+### Nowe route'y
+- `src/routes/_auth/photo/index.tsx` — lista projektów zdjęciowych (alternatywnie tylko tab).
+- `src/routes/_auth/photo/$id.tsx` — widok projektu:
+  - Nagłówek + przyciski: „Wgraj CSV", „Dodaj pojedynczy produkt", „Generuj zaznaczone", „Zatrzymaj".
+  - Tabela produktów: miniatura źródłowa, nazwa, opis (skrócony), status, przyciski „Podgląd/Regeneruj/Usuń".
+  - Panel aktywnego job'a z komponentem `BulkJobLog` (reużyty).
+- `src/routes/_auth/photo/$id.products.$pid.tsx` — drawer/strona produktu: źródło, miniatura, wszystkie wygenerowane wizualizacje, przycisk regeneracji per wariant, edytor opisu (wpływa na kolejną generację).
 
-Sekcja **SEO_KEYWORDS**:
-- 3-8 fraz, lower-case
-- 1 fraza główna (typ produktu) + 2-3 średnie (typ + cecha) + 2-4 long-tail (3-5 słów, intencja kupującego)
-- Tylko frazy realnie wynikające ze źródeł i właściwości produktu — bez halucynacji marek
-- Brak duplikatów i fraz < 2 słów (poza nazwą kategorii)
+### Komponenty
+- `src/components/photo/ImportPhotosDialog.tsx` — analog `ImportCsvDialog` z mapowaniem kolumn (name/description/image_url) + podgląd CSV.
+- `src/components/photo/PhotoUploadDialog.tsx` — pojedynczy upload (drag&drop + opis).
+- Reużycie `BulkJobLog`, `UploadZone`, `Progress`.
 
-Sekcja **FEATURES — standaryzacja pod schema.org/Product**:
-- Preferowane klucze (gdy aplikowalne, po polsku jako display, ale spójne nazwy):
-  `Marka`, `Model`, `Materiał`, `Kolor`, `Wymiary`, `Waga`, `Pojemność`, `Moc`, `Zasilanie`, `Wydajność`, `Gwarancja`, `Kraj produkcji`, `EAN`, `Rozmiar`, `Płeć`, `Wiek`, `Przeznaczenie`
-- Te kluczowe atrybuty trafiają potem do JSON-LD Product (`brand`, `material`, `color`, `weight`, `gtin13` itd.)
-- Pozostałe reguły bez zmian (max 60, konkrety, bez marketingu)
+## Konfiguracja
 
-### 3. Walidacja po stronie kodu (post-processing w handlerze)
+- Sekret `FAL_KEY` już istnieje.
+- Bucket storage — dodać w migracji (public, żeby URL-e działały w UI/eksport).
 
-Po `GoldenSchema.parse`:
-- Wymusić limit długości `meta_description` (truncate do 160 z kropką jeśli AI przesadzi)
-- Wymusić limit nazwy (truncate do 70 jeśli > 70, z zachowaniem słów)
-- Re-slugify `slug` po stronie kodu (helper `slugifyPl`) — niezależnie od tego co zwróciło AI, gwarantujemy poprawność
-- De-duplikacja `seo_keywords` (lowercase + trim)
-- Wszystko przepuszczane przez istniejący `sanitize(..., blacklist)`
+## Poza zakresem tego wdrożenia
 
-### 4. Zapis do bazy
+- Eksport CSV wyników (dorobimy w kolejnej iteracji jeśli potrzebne).
+- Integracja z produktami z istniejących projektów PIM (można potem dodać przycisk „Wyślij do narzędzia zdjęć").
+- Automatyczna weryfikacja jakości AI (odsiew nieudanych generacji).
 
-`updatePayload` w `generateGolden` rozszerzony o:
-```ts
-golden_slug, golden_meta_description, golden_seo_keywords
-```
+## Weryfikacja po wdrożeniu
 
-`previous` (jsonb) zachowuje też poprzednie wartości nowych pól — żeby regeneracja pozwalała wrócić.
-
-### 5. Helper `slugifyPl` (nowy, w tym samym pliku)
-
-Czysta funkcja: input string → kebab-case bez diakrytyków, max 75 zn., bez stop-words.
-
-## Co NIE jest w zakresie tego planu
-
-- UI: ten plan nie zmienia komponentów PIM. Nowe pola będą dostępne w bazie i można je w kolejnym kroku pokazać w `ProductDetailDrawer`/edytorze i eksporcie CSV. Powiedz, jeśli chcesz to zrobić od razu — wrzucę osobnym krokiem.
-- Eksport do Shopify / sitemap.xml / JSON-LD na publicznych stronach produktów — to byłby osobny moduł (i wymaga ustalenia gdzie strony produktów mają żyć).
-- Zmiana modelu AI ani limitów Firecrawl/tokenów (zostawiamy ostatnie optymalizacje).
-
-## Weryfikacja
-
-1. Migracja przechodzi, kolumny widoczne w `enrichments`.
-2. Uruchomić generowanie dla 1 produktu → w bazie `golden_slug`, `golden_meta_description`, `golden_seo_keywords` zapisane i niepuste.
-3. Sprawdzić: `meta_description ≤ 160`, `slug` matchuje `/^[a-z0-9-]+$/`, `seo_keywords` to tablica 3-8 fraz.
-4. Sprawdzić, że `golden_name`, `golden_description`, `golden_features` dalej działają (regresja).
+1. Nowa zakładka „Zdjęcia" widoczna na `/projects`.
+2. Utworzenie projektu → import CSV (5 wierszy) → job rusza, live log pokazuje kolejne produkty.
+3. Miniatura na białym tle 2560×2560, lifestyle 2560×2560 z zachowanym produktem.
+4. Zatrzymanie job'a działa jak w Firecrawl.
+5. Regeneracja pojedynczego produktu po edycji opisu produkuje spójny wynik.

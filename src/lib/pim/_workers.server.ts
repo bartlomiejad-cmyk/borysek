@@ -1306,3 +1306,174 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Run: Photo Tool — generate a packshot thumbnail + N lifestyle visualisations
+// for a single `photo_products` row using Google Nano Banana Pro on fal.ai.
+// ---------------------------------------------------------------------------
+
+export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerCtx): Promise<void> {
+  const FAL_KEY = process.env.FAL_KEY;
+  if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
+
+  const { data: prodRow } = await supabaseAdmin
+    .from("photo_products" as never)
+    .select("id, project_id, name, description, source_image_url")
+    .eq("id", photoProductId)
+    .maybeSingle();
+  if (!prodRow) throw new Error("Photo product not found");
+  const p = prodRow as unknown as {
+    id: string;
+    project_id: string;
+    name: string | null;
+    description: string | null;
+    source_image_url: string;
+  };
+
+  const { data: projRow } = await supabaseAdmin
+    .from("photo_projects" as never)
+    .select("variants_per_product, style_prompt")
+    .eq("id", p.project_id)
+    .maybeSingle();
+  const proj = (projRow as { variants_per_product?: number; style_prompt?: string | null } | null) ?? {};
+  const variants = Math.max(0, Math.min(4, proj.variants_per_product ?? 2));
+
+  await supabaseAdmin
+    .from("photo_products" as never)
+    .update({ status: "PROCESSING", last_error: null } as never)
+    .eq("id", p.id);
+
+  const label = (p.name ?? p.id.slice(0, 8)).trim();
+  await emit(ctx, {
+    level: "info",
+    message: `🖼  ${label} — miniaturka + ${variants} wizualizacje (nano-banana-pro, 2K)`,
+  });
+
+  const productDesc = (p.description ?? "").trim();
+  const productName = (p.name ?? "product").trim();
+
+  const prep = await prepareFalSource(p.id, p.source_image_url);
+  try {
+    // 1) Thumbnail — packshot on pure white, identical product preserved.
+    const thumbPrompt = [
+      `Product packshot for an e-commerce catalog thumbnail.`,
+      `SUBJECT: The exact product visible in the source image — "${productName}".`,
+      productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
+      `BACKGROUND: Pure white #FFFFFF seamless studio; corners exactly #FFFFFF; no gradient, vignette or paper texture.`,
+      `FRAMING: Square 1:1, product centered, scaled to fill roughly 85% of the frame in both dimensions.`,
+      `SHADOW: Soft realistic contact shadow directly under the product only.`,
+      `PRESERVE: Every label, logo, brand mark, color, material, texture and proportion — pixel-faithful to the source.`,
+      `REMOVE: Watermarks, store logos, price tags and overlay text that are NOT physically printed on the product itself.`,
+      `AVOID: Cream/beige/gray tint, changed shape, hallucinated markings, blurred labels, extra props.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    await emit(ctx, { level: "info", message: `   • miniaturka…` });
+    const thumbResp = await callFal(
+      "fal-ai/nano-banana-pro/edit",
+      {
+        prompt: thumbPrompt,
+        image_urls: [prep.url],
+        aspect_ratio: "1:1",
+        resolution: "2K",
+        output_format: "jpeg",
+        num_images: 1,
+      },
+      FAL_KEY,
+    );
+    const thumbUrl = thumbResp.images?.[0]?.url;
+    if (!thumbUrl) throw new Error("nano-banana-pro nie zwróciło miniaturki");
+    const thumbBytes = await fetchBytes(thumbUrl);
+    const thumbPath = `photo-tool/${p.project_id}/${p.id}/thumb.jpg`;
+    const { error: tErr } = await supabaseAdmin.storage
+      .from("regenerated-images")
+      .upload(thumbPath, thumbBytes, { contentType: "image/jpeg", upsert: true });
+    if (tErr) throw new Error(`Upload miniaturki: ${tErr.message}`);
+    const { data: tPub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(thumbPath);
+    const thumbnailPublic = `${tPub.publicUrl}?v=${Date.now()}`;
+    await emit(ctx, { level: "success", message: `   ✔ miniaturka gotowa` });
+
+    // 2) Lifestyle visualisations — realistic scenes with the same product.
+    const lifestyleUrls: string[] = [];
+    for (let i = 0; i < variants; i++) {
+      await emit(ctx, { level: "info", message: `   • wizualizacja ${i + 1}/${variants}…` });
+      const lifePrompt = [
+        `Realistic lifestyle product photograph for a catalog visualisation.`,
+        `SUBJECT: The EXACT product from the source image — "${productName}". Keep it visually identical: same shape, labels, colors, materials, proportions.`,
+        productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
+        proj.style_prompt && proj.style_prompt.trim()
+          ? `SCENE STYLE: ${proj.style_prompt.trim()}`
+          : `SCENE: A natural, realistic environment appropriate for how this product is actually used. Soft daylight, believable materials and props, tasteful composition.`,
+        `FRAMING: Square 1:1, the product is clearly the hero, in sharp focus, at realistic scale.`,
+        `PRESERVE: Every label, logo, brand mark, color and material — the product must be visually identical to the source.`,
+        `AVOID: Fantasy elements, unrealistic scale, floating objects, distorted labels, duplicate products, watermarks or text overlays.`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      try {
+        const resp = await callFal(
+          "fal-ai/nano-banana-pro/edit",
+          {
+            prompt: lifePrompt,
+            image_urls: [prep.url],
+            aspect_ratio: "1:1",
+            resolution: "2K",
+            output_format: "jpeg",
+            num_images: 1,
+          },
+          FAL_KEY,
+        );
+        const genUrl = resp.images?.[0]?.url;
+        if (!genUrl) throw new Error("brak url");
+        const bytes = await fetchBytes(genUrl);
+        const path = `photo-tool/${p.project_id}/${p.id}/lifestyle-${i + 1}.jpg`;
+        const { error: gErr } = await supabaseAdmin.storage
+          .from("regenerated-images")
+          .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
+        if (gErr) throw new Error(gErr.message);
+        const { data: gPub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(path);
+        lifestyleUrls.push(`${gPub.publicUrl}?v=${Date.now()}`);
+        await emit(ctx, { level: "success", message: `   ✔ wizualizacja ${i + 1}` });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg}` });
+      }
+    }
+
+    // Clean stale gallery slots above the requested count.
+    for (let i = variants + 1; i <= 8; i++) {
+      await supabaseAdmin.storage
+        .from("regenerated-images")
+        .remove([`photo-tool/${p.project_id}/${p.id}/lifestyle-${i}.jpg`])
+        .catch(() => undefined);
+    }
+
+    const { error: dbErr } = await supabaseAdmin
+      .from("photo_products" as never)
+      .update({
+        thumbnail_url: thumbnailPublic,
+        lifestyle_urls: lifestyleUrls as never,
+        status: "DONE",
+        last_error: null,
+      } as never)
+      .eq("id", p.id);
+    if (dbErr) throw new Error(dbErr.message);
+    await emit(ctx, {
+      level: "success",
+      message: `✅ ${label} — gotowe (${lifestyleUrls.length}/${variants} wizualizacji)`,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await supabaseAdmin
+      .from("photo_products" as never)
+      .update({ status: "FAILED", last_error: msg } as never)
+      .eq("id", p.id);
+    throw e;
+  } finally {
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([prep.path])
+      .catch(() => undefined);
+  }
+}
