@@ -161,10 +161,12 @@ function PhotoProjectPage() {
 
   const [variants, setVariants] = useState<number | null>(null);
   const [style, setStyle] = useState<string | null>(null);
+  const [reqPl, setReqPl] = useState<string | null>(null);
   useEffect(() => {
     if (data?.project) {
       if (variants === null) setVariants(data.project.variants_per_product);
       if (style === null) setStyle(data.project.style_prompt ?? "");
+      if (reqPl === null) setReqPl((data.project as any).requirements_pl ?? "");
     }
   }, [data?.project]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -175,6 +177,7 @@ function PhotoProjectPage() {
           id,
           variants_per_product: variants ?? 2,
           style_prompt: (style ?? "").trim() || null,
+          requirements_pl: (reqPl ?? "").trim() || null,
         },
       }),
     onSuccess: () => {
