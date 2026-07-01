@@ -272,7 +272,8 @@ function PhotoProjectPage() {
             onChange={(e) => setVariants(Math.max(0, Math.min(4, Number(e.target.value) || 0)))}
           />
           <p className="text-[11px] text-muted-foreground mt-1">
-            0–4. Miniaturka packshot jest generowana zawsze.
+            0–4. Używane tylko gdy produkt ma <b>jedno</b> zdjęcie źródłowe.
+            Gdy jest ich więcej, liczba wizualizacji = liczba zdjęć − 1.
           </p>
         </div>
         <div className="md:col-span-2">
