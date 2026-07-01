@@ -1608,3 +1608,167 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
       .catch(() => undefined);
   }
 }
+
+// -----------------------------------------------------------------------------
+// Photo tool — per-image edit ("popraw to zdjęcie" po polsku)
+// -----------------------------------------------------------------------------
+
+async function buildFalEditPromptFromPolish(args: {
+  productName: string;
+  productDesc: string;
+  originalPromptEn: string;
+  requirementsPl: string;
+}): Promise<string> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+  const system = [
+    `You write a single English EDIT prompt for the fal-ai/nano-banana-pro/edit model.`,
+    `The model receives ONE existing image (a previously generated photo) and must return an edited version of it.`,
+    `Return JSON: { "edit_prompt": string }.`,
+    ``,
+    `Rules:`,
+    `- Apply exactly the user's Polish correction. Translate it, don't invent new changes.`,
+    `- Preserve the product completely: shape, colour, labels, logos, materials, proportions — pixel-faithful to the input image.`,
+    `- Keep the same aspect ratio (1:1) and overall composition unless the correction explicitly asks to reframe.`,
+    `- Do not add watermarks, text overlays, price tags or store logos.`,
+    `- If the correction is vague, be specific and concrete in English.`,
+    `- Short, imperative sentences. No preamble, JSON only.`,
+  ].join("\n");
+
+  const user = [
+    `PRODUCT NAME: ${args.productName || "(unnamed)"}`,
+    `PRODUCT DESCRIPTION: ${args.productDesc || "(none)"}`,
+    `ORIGINAL PROMPT USED TO CREATE THIS IMAGE (EN): ${args.originalPromptEn || "(unknown)"}`,
+    `USER CORRECTION IN POLISH (translate & apply):`,
+    args.requirementsPl || "(none)",
+  ].join("\n");
+
+  const res = (await callGatewayJson(apiKey, "google/gemini-3.1-pro-preview", [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ])) as { edit_prompt?: string };
+
+  const p = (res.edit_prompt ?? "").trim();
+  if (!p) throw new Error("AI returned empty edit prompt");
+  return p;
+}
+
+export async function runPhotoToolEditImage(
+  photoProductId: string,
+  args: { slot: "thumbnail" | "lifestyle"; lifestyleIndex: number; requirementsPl: string },
+  ctx?: WorkerCtx,
+): Promise<void> {
+  const FAL_KEY = process.env.FAL_KEY;
+  if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
+
+  const { data: prodRow } = await supabaseAdmin
+    .from("photo_products" as never)
+    .select(
+      "id, project_id, name, description, thumbnail_url, lifestyle_urls, generated_thumb_prompt, generated_lifestyle_prompt",
+    )
+    .eq("id", photoProductId)
+    .maybeSingle();
+  if (!prodRow) throw new Error("Photo product not found");
+  const p = prodRow as unknown as {
+    id: string;
+    project_id: string;
+    name: string | null;
+    description: string | null;
+    thumbnail_url: string | null;
+    lifestyle_urls: string[] | null;
+    generated_thumb_prompt: string | null;
+    generated_lifestyle_prompt: string | null;
+  };
+
+  const life = Array.isArray(p.lifestyle_urls) ? p.lifestyle_urls : [];
+  const currentUrl =
+    args.slot === "thumbnail" ? p.thumbnail_url : life[args.lifestyleIndex] ?? null;
+  if (!currentUrl) throw new Error("Nie ma jeszcze zdjęcia do edycji w tym slocie");
+
+  const label = (p.name ?? p.id.slice(0, 8)).trim();
+  const slotLabel =
+    args.slot === "thumbnail" ? "miniaturkę" : `wizualizację ${args.lifestyleIndex + 1}`;
+  await emit(ctx, {
+    level: "info",
+    message: `✏️  ${label} — edytuję ${slotLabel} (nano-banana-pro, 2K)`,
+  });
+
+  const originalPromptEn =
+    (args.slot === "thumbnail" ? p.generated_thumb_prompt : p.generated_lifestyle_prompt) ?? "";
+
+  let editPrompt: string;
+  try {
+    await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
+    editPrompt = await buildFalEditPromptFromPolish({
+      productName: (p.name ?? "product").trim(),
+      productDesc: (p.description ?? "").trim(),
+      originalPromptEn,
+      requirementsPl: args.requirementsPl.trim(),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await emit(ctx, { level: "warn", message: `   ⚠ fallback promptu: ${msg}` });
+    editPrompt = [
+      `Edit the input image with this correction while keeping the exact same product (shape, labels, logos, colours, materials, proportions) and 1:1 framing:`,
+      args.requirementsPl.trim() || "(brak wskazówek)",
+      originalPromptEn ? `Original scene context (do not restate the whole scene, just preserve it): ${originalPromptEn}` : "",
+    ].filter(Boolean).join(" ");
+  }
+
+  // Use the current generated image as the ONLY reference — this is an
+  // in-place edit of the previous output.
+  const prep = await prepareFalSource(p.id, currentUrl);
+  try {
+    await emit(ctx, { level: "info", message: `   • FAL edytuje…` });
+    const resp = await callFal(
+      "fal-ai/nano-banana-pro/edit",
+      {
+        prompt: editPrompt,
+        image_urls: [prep.url],
+        aspect_ratio: "1:1",
+        resolution: "2K",
+        output_format: "jpeg",
+        num_images: 1,
+      },
+      FAL_KEY,
+    );
+    const outUrl = resp.images?.[0]?.url;
+    if (!outUrl) throw new Error("nano-banana-pro nie zwróciło zdjęcia");
+    const bytes = await fetchBytes(outUrl);
+
+    const storagePath =
+      args.slot === "thumbnail"
+        ? `photo-tool/${p.project_id}/${p.id}/thumb.jpg`
+        : `photo-tool/${p.project_id}/${p.id}/lifestyle-${args.lifestyleIndex + 1}.jpg`;
+    const { error: upErr } = await supabaseAdmin.storage
+      .from("regenerated-images")
+      .upload(storagePath, bytes, { contentType: "image/jpeg", upsert: true });
+    if (upErr) throw new Error(`Upload: ${upErr.message}`);
+    const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(storagePath);
+    const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    if (args.slot === "thumbnail") {
+      const { error: dbErr } = await supabaseAdmin
+        .from("photo_products" as never)
+        .update({ thumbnail_url: publicUrl } as never)
+        .eq("id", p.id);
+      if (dbErr) throw new Error(dbErr.message);
+    } else {
+      const nextLife = [...life];
+      nextLife[args.lifestyleIndex] = publicUrl;
+      const { error: dbErr } = await supabaseAdmin
+        .from("photo_products" as never)
+        .update({ lifestyle_urls: nextLife as never } as never)
+        .eq("id", p.id);
+      if (dbErr) throw new Error(dbErr.message);
+    }
+
+    await emit(ctx, { level: "success", message: `✅ ${label} — ${slotLabel} zaktualizowana` });
+  } finally {
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([prep.path])
+      .catch(() => undefined);
+  }
+}
