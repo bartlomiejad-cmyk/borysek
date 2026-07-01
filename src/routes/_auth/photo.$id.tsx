@@ -53,6 +53,13 @@ function PhotoProjectPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["photo-project", id],
     queryFn: () => getFn({ data: { id } }),
+    // Poll while a generation job is in flight — realtime for photo_products
+    // is not always available; this guarantees the grid refreshes.
+    refetchInterval: (q) => {
+      const j = qc.getQueryData<any>(["photo-project-job", id]);
+      const active = j && (j.status === "PENDING" || j.status === "PROCESSING");
+      return active ? 2000 : false;
+    },
   });
 
   const { data: job } = useQuery({
