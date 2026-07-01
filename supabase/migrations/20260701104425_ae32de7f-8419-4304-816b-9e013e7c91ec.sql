@@ -1,0 +1,2 @@
+ALTER TYPE public.bulk_job_kind ADD VALUE IF NOT EXISTS 'PHOTO_TOOL_EDIT_IMAGE';
+ALTER TABLE public.bulk_jobs ADD COLUMN IF NOT EXISTS payload jsonb;
