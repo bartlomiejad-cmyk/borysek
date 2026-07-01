@@ -1,0 +1,382 @@
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
+import {
+  getPhotoProject,
+  addPhotoProduct,
+  deletePhotoProduct,
+  updatePhotoProject,
+  type PhotoProduct,
+} from "@/lib/photo-tool/photo-tool.functions";
+import {
+  createBulkJob,
+  cancelBulkJob,
+  getActiveBulkJob,
+} from "@/lib/pim/bulk-jobs.functions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { ArrowLeft, Loader2, Plus, Sparkles, StopCircle, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { BulkJobLog } from "@/components/pim/BulkJobLog";
+
+export const Route = createFileRoute("/_auth/photo/$id")({ component: PhotoProjectPage });
+
+function StatusBadge({ status }: { status: PhotoProduct["status"] }) {
+  const map: Record<PhotoProduct["status"], { label: string; cls: string }> = {
+    PENDING: { label: "Oczekuje", cls: "bg-muted text-muted-foreground" },
+    PROCESSING: { label: "Generuję…", cls: "bg-primary/15 text-primary" },
+    DONE: { label: "Gotowe", cls: "bg-emerald-500/15 text-emerald-500" },
+    FAILED: { label: "Błąd", cls: "bg-destructive/15 text-destructive" },
+  };
+  const s = map[status];
+  return <span className={`text-[10px] uppercase tracking-widest rounded-full px-2 py-0.5 ${s.cls}`}>{s.label}</span>;
+}
+
+function PhotoProjectPage() {
+  const { id } = Route.useParams();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const getFn = useServerFn(getPhotoProject);
+  const addFn = useServerFn(addPhotoProduct);
+  const delFn = useServerFn(deletePhotoProduct);
+  const updFn = useServerFn(updatePhotoProject);
+  const createJob = useServerFn(createBulkJob);
+  const cancelJob = useServerFn(cancelBulkJob);
+  const activeJob = useServerFn(getActiveBulkJob);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["photo-project", id],
+    queryFn: () => getFn({ data: { id } }),
+  });
+
+  const { data: job } = useQuery({
+    queryKey: ["photo-project-job", id],
+    queryFn: () => activeJob({ data: { projectId: id, kind: "PHOTO_TOOL_GENERATE" } }),
+    refetchInterval: 2000,
+  });
+
+  // Realtime — refresh product statuses as the worker writes them.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`photo-products-${id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "photo_products", filter: `project_id=eq.${id}` },
+        () => qc.invalidateQueries({ queryKey: ["photo-project", id] }),
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [id, qc]);
+
+  // Add-product form state
+  const [imgUrl, setImgUrl] = useState("");
+  const [pName, setPName] = useState("");
+  const [pDesc, setPDesc] = useState("");
+
+  const add = useMutation({
+    mutationFn: async () => {
+      if (!imgUrl.trim()) throw new Error("Podaj URL zdjęcia źródłowego");
+      await addFn({
+        data: {
+          projectId: id,
+          source_image_url: imgUrl.trim(),
+          name: pName.trim() || null,
+          description: pDesc.trim() || null,
+        },
+      });
+    },
+    onSuccess: () => {
+      setImgUrl(""); setPName(""); setPDesc("");
+      qc.invalidateQueries({ queryKey: ["photo-project", id] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  const del = useMutation({
+    mutationFn: (pid: string) => delFn({ data: { id: pid } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project", id] }),
+  });
+
+  const [variants, setVariants] = useState<number | null>(null);
+  const [style, setStyle] = useState<string | null>(null);
+  useEffect(() => {
+    if (data?.project) {
+      if (variants === null) setVariants(data.project.variants_per_product);
+      if (style === null) setStyle(data.project.style_prompt ?? "");
+    }
+  }, [data?.project]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveSettings = useMutation({
+    mutationFn: () =>
+      updFn({
+        data: {
+          id,
+          variants_per_product: variants ?? 2,
+          style_prompt: (style ?? "").trim() || null,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Ustawienia zapisane");
+      qc.invalidateQueries({ queryKey: ["photo-project", id] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  const generateAll = useMutation({
+    mutationFn: async () => {
+      const items = (data?.products ?? [])
+        .filter((p) => p.status !== "PROCESSING")
+        .map((p) => p.id);
+      if (!items.length) throw new Error("Brak produktów do wygenerowania");
+      await createJob({ data: { projectId: id, kind: "PHOTO_TOOL_GENERATE", items } });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project-job", id] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  const stop = useMutation({
+    mutationFn: () => (job ? cancelJob({ data: { jobId: job.id } }) : Promise.resolve()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project-job", id] }),
+  });
+
+  if (isLoading || !data) {
+    return (
+      <div className="container mx-auto max-w-5xl px-6 py-16 text-muted-foreground">
+        Ładowanie…
+      </div>
+    );
+  }
+
+  const products = data.products;
+  const active = job && (job.status === "PENDING" || job.status === "PROCESSING");
+  const total = job?.total ?? 0;
+  const processed = (job?.processed_count ?? 0) + (job?.failed_count ?? 0);
+  const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+  return (
+    <div className="container mx-auto max-w-6xl px-6 pt-8 pb-16">
+      <Button variant="ghost" size="sm" className="mb-4" onClick={() => navigate({ to: "/photo" })}>
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        Wszystkie projekty
+      </Button>
+
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
+        <div>
+          <h1 className="font-serif text-4xl tracking-tight">{data.project.name}</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {products.length} produkt(ów) · nano-banana-pro · 2K packshot + wizualizacje
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {active ? (
+            <Button variant="outline" onClick={() => stop.mutate()} disabled={stop.isPending}>
+              <StopCircle className="h-4 w-4 mr-2" />
+              Zatrzymaj
+            </Button>
+          ) : (
+            <Button onClick={() => generateAll.mutate()} disabled={!products.length || generateAll.isPending}>
+              {generateAll.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-2" />
+              )}
+              Generuj wszystkie
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Job progress + live log */}
+      {job && (job.status === "PENDING" || job.status === "PROCESSING" || (job.finished_at && Date.now() - new Date(job.finished_at).getTime() < 30_000)) && (
+        <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-6">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span className="font-medium">
+              {active ? "Generowanie w toku…" : `Zakończono: ${job.status}`}
+            </span>
+            <span className="text-muted-foreground">
+              {processed}/{total} ({pct}%)
+            </span>
+          </div>
+          <Progress value={pct} />
+          <BulkJobLog jobId={job.id} />
+        </div>
+      )}
+
+      {/* Settings */}
+      <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-6 grid md:grid-cols-3 gap-4">
+        <div>
+          <Label className="text-xs">Wizualizacje na produkt</Label>
+          <Input
+            type="number"
+            min={0}
+            max={4}
+            value={variants ?? 2}
+            onChange={(e) => setVariants(Math.max(0, Math.min(4, Number(e.target.value) || 0)))}
+          />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            0–4. Miniaturka packshot jest generowana zawsze.
+          </p>
+        </div>
+        <div className="md:col-span-2">
+          <Label className="text-xs">Styl / scena dla wizualizacji (opcjonalnie)</Label>
+          <Textarea
+            rows={2}
+            placeholder="np. Nowoczesna kuchnia, blat drewniany, poranne światło z okna, minimalizm."
+            value={style ?? ""}
+            onChange={(e) => setStyle(e.target.value)}
+          />
+        </div>
+        <div className="md:col-span-3 flex justify-end">
+          <Button size="sm" variant="outline" onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
+            Zapisz ustawienia
+          </Button>
+        </div>
+      </div>
+
+      {/* Add product */}
+      <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-8">
+        <h2 className="font-serif text-xl mb-3">Dodaj produkt</h2>
+        <div className="grid md:grid-cols-3 gap-3">
+          <div>
+            <Label className="text-xs">URL zdjęcia źródłowego *</Label>
+            <Input
+              placeholder="https://…"
+              value={imgUrl}
+              onChange={(e) => setImgUrl(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Nazwa produktu</Label>
+            <Input
+              placeholder="np. Kubek ceramiczny 300 ml"
+              value={pName}
+              onChange={(e) => setPName(e.target.value)}
+            />
+          </div>
+          <div className="md:row-span-2">
+            <Label className="text-xs">Opis produktu (kluczowe cechy)</Label>
+            <Textarea
+              rows={4}
+              placeholder="Cechy, materiał, kolor, przeznaczenie… używane do wiernego odwzorowania."
+              value={pDesc}
+              onChange={(e) => setPDesc(e.target.value)}
+            />
+          </div>
+          <div className="md:col-span-2 flex items-end">
+            <Button onClick={() => add.mutate()} disabled={add.isPending || !imgUrl.trim()}>
+              {add.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+              Dodaj do projektu
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Products grid */}
+      {products.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-border/60 p-12 text-center text-muted-foreground">
+          Brak produktów. Dodaj pierwszy powyżej.
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-4">
+          {products.map((p) => (
+            <div key={p.id} className="rounded-2xl border border-border/50 bg-card/60 p-4">
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{p.name || "(bez nazwy)"}</div>
+                  {p.description && (
+                    <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{p.description}</div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <StatusBadge status={p.status} />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => { if (confirm("Usunąć produkt?")) del.mutate(p.id); }}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground mb-1">Źródło</div>
+                  <a href={p.source_image_url} target="_blank" rel="noreferrer" className="block">
+                    <img
+                      src={p.source_image_url}
+                      alt=""
+                      className="w-full aspect-square object-cover rounded-md border"
+                      loading="lazy"
+                    />
+                  </a>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground mb-1">Miniaturka</div>
+                  {p.thumbnail_url ? (
+                    <a href={p.thumbnail_url} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={p.thumbnail_url}
+                        alt=""
+                        className="w-full aspect-square object-cover rounded-md border bg-white"
+                        loading="lazy"
+                      />
+                    </a>
+                  ) : (
+                    <div className="w-full aspect-square rounded-md border border-dashed" />
+                  )}
+                </div>
+                {Array.from({ length: 2 }).map((_, i) => {
+                  const u = p.lifestyle_urls[i];
+                  return (
+                    <div key={i}>
+                      <div className="text-[10px] uppercase text-muted-foreground mb-1">Wiz. {i + 1}</div>
+                      {u ? (
+                        <a href={u} target="_blank" rel="noreferrer" className="block">
+                          <img src={u} alt="" className="w-full aspect-square object-cover rounded-md border" loading="lazy" />
+                        </a>
+                      ) : (
+                        <div className="w-full aspect-square rounded-md border border-dashed" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {p.lifestyle_urls.length > 2 && (
+                <div className="grid grid-cols-4 gap-2 mt-2">
+                  {p.lifestyle_urls.slice(2).map((u, i) => (
+                    <a key={i} href={u} target="_blank" rel="noreferrer" className="block">
+                      <img src={u} alt="" className="w-full aspect-square object-cover rounded-md border" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              {p.status === "FAILED" && p.last_error && (
+                <div className="mt-3 text-xs text-destructive">
+                  {p.last_error}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-8 text-xs text-muted-foreground">
+        <Link to="/photo" className="underline underline-offset-4">← Powrót do listy projektów zdjęciowych</Link>
+        <span className="mx-2">·</span>
+        Model: <Badge variant="outline" className="text-[10px]">fal-ai/nano-banana-pro/edit</Badge>
+        <span className="mx-1" />
+        rozdzielczość 2K (~2048×2048).
+      </div>
+    </div>
+  );
+}
