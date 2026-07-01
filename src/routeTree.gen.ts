@@ -13,6 +13,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
+import { Route as AuthPhotoIndexRouteImport } from './routes/_auth/photo.index'
+import { Route as AuthPhotoIdRouteImport } from './routes/_auth/photo.$id'
 import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects.$id.index'
 import { Route as ApiPublicHooksProcessBulkJobsRouteImport } from './routes/api/public/hooks/process-bulk-jobs'
 import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/projects.$id.verify'
@@ -35,6 +37,16 @@ const IndexRoute = IndexRouteImport.update({
 const AuthProjectsIndexRoute = AuthProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthPhotoIndexRoute = AuthPhotoIndexRouteImport.update({
+  id: '/photo/',
+  path: '/photo/',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthPhotoIdRoute = AuthPhotoIdRouteImport.update({
+  id: '/photo/$id',
+  path: '/photo/$id',
   getParentRoute: () => AuthRoute,
 } as any)
 const AuthProjectsIdIndexRoute = AuthProjectsIdIndexRouteImport.update({
@@ -63,6 +75,8 @@ const AuthProjectsIdProductsPidRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/photo/$id': typeof AuthPhotoIdRoute
+  '/photo/': typeof AuthPhotoIndexRoute
   '/projects/': typeof AuthProjectsIndexRoute
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
@@ -72,6 +86,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/photo/$id': typeof AuthPhotoIdRoute
+  '/photo': typeof AuthPhotoIndexRoute
   '/projects': typeof AuthProjectsIndexRoute
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
@@ -83,6 +99,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
+  '/_auth/photo/$id': typeof AuthPhotoIdRoute
+  '/_auth/photo/': typeof AuthPhotoIndexRoute
   '/_auth/projects/': typeof AuthProjectsIndexRoute
   '/_auth/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
@@ -94,6 +112,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/photo/$id'
+    | '/photo/'
     | '/projects/'
     | '/projects/$id/verify'
     | '/api/public/hooks/process-bulk-jobs'
@@ -103,6 +123,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/photo/$id'
+    | '/photo'
     | '/projects'
     | '/projects/$id/verify'
     | '/api/public/hooks/process-bulk-jobs'
@@ -113,6 +135,8 @@ export interface FileRouteTypes {
     | '/'
     | '/_auth'
     | '/login'
+    | '/_auth/photo/$id'
+    | '/_auth/photo/'
     | '/_auth/projects/'
     | '/_auth/projects/$id/verify'
     | '/api/public/hooks/process-bulk-jobs'
@@ -157,6 +181,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthProjectsIndexRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_auth/photo/': {
+      id: '/_auth/photo/'
+      path: '/photo'
+      fullPath: '/photo/'
+      preLoaderRoute: typeof AuthPhotoIndexRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/photo/$id': {
+      id: '/_auth/photo/$id'
+      path: '/photo/$id'
+      fullPath: '/photo/$id'
+      preLoaderRoute: typeof AuthPhotoIdRouteImport
+      parentRoute: typeof AuthRoute
+    }
     '/_auth/projects/$id/': {
       id: '/_auth/projects/$id/'
       path: '/projects/$id'
@@ -189,6 +227,8 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthRouteChildren {
+  AuthPhotoIdRoute: typeof AuthPhotoIdRoute
+  AuthPhotoIndexRoute: typeof AuthPhotoIndexRoute
   AuthProjectsIndexRoute: typeof AuthProjectsIndexRoute
   AuthProjectsIdVerifyRoute: typeof AuthProjectsIdVerifyRoute
   AuthProjectsIdIndexRoute: typeof AuthProjectsIdIndexRoute
@@ -196,6 +236,8 @@ interface AuthRouteChildren {
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
+  AuthPhotoIdRoute: AuthPhotoIdRoute,
+  AuthPhotoIndexRoute: AuthPhotoIndexRoute,
   AuthProjectsIndexRoute: AuthProjectsIndexRoute,
   AuthProjectsIdVerifyRoute: AuthProjectsIdVerifyRoute,
   AuthProjectsIdIndexRoute: AuthProjectsIdIndexRoute,

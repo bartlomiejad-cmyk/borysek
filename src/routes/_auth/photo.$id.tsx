@@ -141,7 +141,10 @@ function PhotoProjectPage() {
   });
 
   const stop = useMutation({
-    mutationFn: () => (job ? cancelJob({ data: { jobId: job.id } }) : Promise.resolve()),
+    mutationFn: async () => {
+      if (!job) return;
+      await cancelJob({ data: { jobId: job.id } });
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project-job", id] }),
   });
 
