@@ -676,6 +676,54 @@ function PhotoProjectPage() {
         <span className="mx-1" />
         rozdzielczość 2K (~2048×2048).
       </div>
+
+      <Dialog open={!!editDialog} onOpenChange={(o) => { if (!o) setEditDialog(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Popraw {editDialog?.slot === "thumbnail" ? "miniaturkę" : `wizualizację ${(editDialog?.lifestyleIndex ?? 0) + 1}`}
+            </DialogTitle>
+          </DialogHeader>
+          {editDialog && (
+            <div className="space-y-3">
+              <div className="flex gap-3">
+                <img
+                  src={editDialog.currentUrl}
+                  alt=""
+                  className="w-32 h-32 rounded-md border object-cover bg-white shrink-0"
+                />
+                <div className="text-xs text-muted-foreground">
+                  <div className="font-medium text-foreground mb-1">{editDialog.productName}</div>
+                  AI (Gemini) przetłumaczy Twoje wskazówki na precyzyjny prompt EN i wyśle je do FAL razem z tym zdjęciem jako referencją. Produkt zostanie zachowany bez zmian.
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Co poprawić? (po polsku)</Label>
+                <Textarea
+                  rows={5}
+                  placeholder={"np. Usuń liście z lewej strony i dodaj kubek kawy w tle. Zmień światło na cieplejsze, poranne. Tło jaśniejsze."}
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditDialog(null)} disabled={submitEdit.isPending}>
+              Anuluj
+            </Button>
+            <Button onClick={() => submitEdit.mutate()} disabled={submitEdit.isPending || editText.trim().length < 2}>
+              {submitEdit.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Pencil className="h-4 w-4 mr-2" />
+              )}
+              Wygeneruj poprawkę
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
