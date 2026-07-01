@@ -260,6 +260,7 @@ export type Database = {
           name: string | null
           project_id: string
           source_image_url: string
+          source_image_urls: string[]
           status: string
           thumbnail_url: string | null
           updated_at: string
@@ -274,6 +275,7 @@ export type Database = {
           name?: string | null
           project_id: string
           source_image_url: string
+          source_image_urls?: string[]
           status?: string
           thumbnail_url?: string | null
           updated_at?: string
@@ -288,6 +290,7 @@ export type Database = {
           name?: string | null
           project_id?: string
           source_image_url?: string
+          source_image_urls?: string[]
           status?: string
           thumbnail_url?: string | null
           updated_at?: string
