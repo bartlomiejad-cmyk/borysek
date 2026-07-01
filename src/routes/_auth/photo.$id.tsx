@@ -429,18 +429,25 @@ function PhotoProjectPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground mb-1">Źródło</div>
-                  <a href={p.source_image_url} target="_blank" rel="noreferrer" className="block">
-                    <img
-                      src={p.source_image_url}
-                      alt=""
-                      className="w-full aspect-square object-cover rounded-md border"
-                      loading="lazy"
-                    />
-                  </a>
+              <div className="mb-3">
+                <div className="text-[10px] uppercase text-muted-foreground mb-1">
+                  Źródła ({(p.source_image_urls?.length || 1)})
                 </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(p.source_image_urls?.length ? p.source_image_urls : [p.source_image_url]).map((u, i) => (
+                    <a key={i} href={u} target="_blank" rel="noreferrer" className="block w-14">
+                      <img
+                        src={u}
+                        alt=""
+                        className="w-14 h-14 object-cover rounded-md border"
+                        loading="lazy"
+                      />
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
                 <div>
                   <div className="text-[10px] uppercase text-muted-foreground mb-1">Miniaturka</div>
                   {p.thumbnail_url ? (
