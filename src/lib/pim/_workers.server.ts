@@ -1436,12 +1436,9 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
   const allSources = (p.source_image_urls && p.source_image_urls.length > 0)
     ? p.source_image_urls
     : [p.source_image_url];
-  // Rule: N source images = 1 thumbnail + (N-1) lifestyle visualisations.
-  // Only when the user gave a single source do we fall back to the project's
-  // configured variant count (0-4).
-  const variants = allSources.length > 1
-    ? allSources.length - 1
-    : Math.max(0, Math.min(4, proj.variants_per_product ?? 2));
+  // Fixed output: always 1 thumbnail + 5 lifestyle visualisations,
+  // regardless of how many source photos the user uploaded.
+  const variants = 5;
 
   await supabaseAdmin
     .from("photo_products" as never)
