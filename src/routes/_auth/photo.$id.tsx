@@ -7,6 +7,7 @@ import {
   addPhotoProduct,
   deletePhotoProduct,
   updatePhotoProject,
+  editPhotoImage,
   type PhotoProduct,
 } from "@/lib/photo-tool/photo-tool.functions";
 import {
@@ -20,7 +21,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, Loader2, Plus, Sparkles, StopCircle, Trash2, Upload, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Loader2, Pencil, Plus, Sparkles, StopCircle, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
@@ -46,6 +54,7 @@ function PhotoProjectPage() {
   const addFn = useServerFn(addPhotoProduct);
   const delFn = useServerFn(deletePhotoProduct);
   const updFn = useServerFn(updatePhotoProject);
+  const editFn = useServerFn(editPhotoImage);
   const createJob = useServerFn(createBulkJob);
   const cancelJob = useServerFn(cancelBulkJob);
   const activeJob = useServerFn(getActiveBulkJob);
@@ -159,12 +168,10 @@ function PhotoProjectPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project", id] }),
   });
 
-  const [variants, setVariants] = useState<number | null>(null);
   const [style, setStyle] = useState<string | null>(null);
   const [reqPl, setReqPl] = useState<string | null>(null);
   useEffect(() => {
     if (data?.project) {
-      if (variants === null) setVariants(data.project.variants_per_product);
       if (style === null) setStyle(data.project.style_prompt ?? "");
       if (reqPl === null) setReqPl((data.project as any).requirements_pl ?? "");
     }
@@ -175,7 +182,6 @@ function PhotoProjectPage() {
       updFn({
         data: {
           id,
-          variants_per_product: variants ?? 2,
           style_prompt: (style ?? "").trim() || null,
           requirements_pl: (reqPl ?? "").trim() || null,
         },
@@ -186,6 +192,99 @@ function PhotoProjectPage() {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
+
+  // --- Per-image edit state ---------------------------------------------------
+  // busyEdits tracks slot keys currently being processed by FAL. We remember
+  // the URL that was showing when the user submitted so we know when it has
+  // been replaced and can lift the "editing…" overlay.
+  type EditKey = string; // `${productId}:${slot}:${index}`
+  const editKey = (productId: string, slot: "thumbnail" | "lifestyle", i: number) =>
+    `${productId}:${slot}:${i}`;
+  const [busyEdits, setBusyEdits] = useState<Record<EditKey, string /* url snapshot */>>({});
+  const [editDialog, setEditDialog] = useState<null | {
+    productId: string;
+    slot: "thumbnail" | "lifestyle";
+    lifestyleIndex: number;
+    currentUrl: string;
+    productName: string;
+  }>(null);
+  const [editText, setEditText] = useState("");
+
+  // When product data refreshes, clear busy overlays whose target url changed.
+  useEffect(() => {
+    if (!data?.products) return;
+    setBusyEdits((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [k, snapshot] of Object.entries(prev)) {
+        const [productId, slot, idxStr] = k.split(":");
+        const prod = data.products.find((pp) => pp.id === productId);
+        if (!prod) continue;
+        const cur =
+          slot === "thumbnail"
+            ? prod.thumbnail_url
+            : prod.lifestyle_urls[Number(idxStr)];
+        if (cur && cur !== snapshot) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [data?.products]);
+
+  // Poll while any edit is in flight so realtime hiccups don't strand the UI.
+  useEffect(() => {
+    if (Object.keys(busyEdits).length === 0) return;
+    const t = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ["photo-project", id] });
+    }, 2500);
+    return () => clearInterval(t);
+  }, [busyEdits, id, qc]);
+
+  const submitEdit = useMutation({
+    mutationFn: async () => {
+      if (!editDialog) throw new Error("brak kontekstu");
+      const txt = editText.trim();
+      if (txt.length < 2) throw new Error("Opisz co poprawić (min. 2 znaki)");
+      const key = editKey(editDialog.productId, editDialog.slot, editDialog.lifestyleIndex);
+      setBusyEdits((prev) => ({ ...prev, [key]: editDialog.currentUrl }));
+      try {
+        await editFn({
+          data: {
+            photoProductId: editDialog.productId,
+            slot: editDialog.slot,
+            lifestyleIndex: editDialog.lifestyleIndex,
+            requirementsPl: txt,
+          },
+        });
+      } catch (e) {
+        setBusyEdits((prev) => {
+          const n = { ...prev };
+          delete n[key];
+          return n;
+        });
+        throw e;
+      }
+    },
+    onSuccess: () => {
+      toast.success("Poprawka wysłana. Wygenerowana wersja pojawi się za chwilę.");
+      setEditDialog(null);
+      setEditText("");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  function openEdit(
+    productId: string,
+    productName: string,
+    slot: "thumbnail" | "lifestyle",
+    lifestyleIndex: number,
+    currentUrl: string,
+  ) {
+    setEditText("");
+    setEditDialog({ productId, productName, slot, lifestyleIndex, currentUrl });
+  }
 
   const generateAll = useMutation({
     mutationFn: async () => {
