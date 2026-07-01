@@ -88,6 +88,99 @@ async function callGatewayJson(apiKey: string, model: string, messages: unknown[
   }
 }
 
+// SHA-256 hex digest via Web Crypto (available in Cloudflare Workers runtime).
+async function sha256Hex(input: string): Promise<string> {
+  const buf = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// Deterministic fallback used when the AI gateway call fails — mirrors the
+// original hardcoded prompts so generation never blocks on the translator.
+function fallbackPrompts(args: {
+  productName: string;
+  productDesc: string;
+  requirementsPl: string;
+  projectStyle: string;
+}): { thumbnail_prompt: string; lifestyle_prompt: string } {
+  const { productName, productDesc, requirementsPl, projectStyle } = args;
+  const thumb = [
+    `Product packshot for an e-commerce catalog thumbnail.`,
+    `SUBJECT: The exact product visible in the source image — "${productName}".`,
+    productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
+    `BACKGROUND: Pure white #FFFFFF seamless studio.`,
+    `CONTEXTUAL PROPS: Add 1–3 small, tasteful props that are clearly related to what this product is used for (e.g. a few fresh green leaves for a garden shear, coffee beans for a grinder, wood shavings for a chisel). Arrange them asymmetrically around the product without covering it. Do not add unrelated objects.`,
+    `FRAMING: Square 1:1, product centered, ~75-85% of frame.`,
+    `SHADOW: Soft realistic contact shadows.`,
+    `PRESERVE: Every label, logo, colour, material and proportion — pixel-faithful to the source.`,
+    `REMOVE: Watermarks, store logos, price tags, overlay text not physically printed on the product.`,
+    requirementsPl ? `EXTRA USER REQUIREMENTS (translated from Polish): ${requirementsPl}` : ``,
+  ].filter(Boolean).join(" ");
+  const life = [
+    `Realistic lifestyle product photograph for a catalog visualisation.`,
+    `SUBJECT: The EXACT product from the source image — "${productName}". Keep it visually identical.`,
+    productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
+    projectStyle ? `SCENE STYLE: ${projectStyle}` : `SCENE: A natural, realistic environment appropriate for how this product is actually used. Soft daylight, believable props.`,
+    `FRAMING: Square 1:1, product is the hero in sharp focus, realistic scale.`,
+    `PRESERVE: Every label, logo, colour and material — identical to source.`,
+    `AVOID: Fantasy elements, unrealistic scale, floating objects, distorted labels, duplicate products, watermarks, text overlays.`,
+    requirementsPl ? `EXTRA USER REQUIREMENTS (translated from Polish): ${requirementsPl}` : ``,
+  ].filter(Boolean).join(" ");
+  return { thumbnail_prompt: thumb, lifestyle_prompt: life };
+}
+
+// Translate Polish requirements + product context into two production-ready
+// EN prompts for fal-ai/nano-banana-pro/edit (thumbnail + lifestyle).
+async function buildFalPromptsFromPolish(args: {
+  productName: string;
+  productDesc: string;
+  requirementsPl: string;
+  projectStyle: string;
+}): Promise<{ thumbnail_prompt: string; lifestyle_prompt: string }> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+  const system = [
+    `You write English prompts for the fal-ai/nano-banana-pro image EDIT model.`,
+    `The model receives 1+ reference photos of a real product and must reproduce it faithfully.`,
+    `You return exactly two prompts as JSON: { "thumbnail_prompt": string, "lifestyle_prompt": string }.`,
+    ``,
+    `THUMBNAIL PROMPT rules:`,
+    `- Square 1:1 e-commerce catalog thumbnail on a pure white seamless studio background (#FFFFFF).`,
+    `- Enrich the frame with 1–3 small CONTEXTUAL PROPS that are clearly and logically related to the product (e.g. fresh leaves for garden shears, coffee beans for a grinder, wood shavings for chisels). Props sit asymmetrically around the product, do not cover it, and do not compete visually.`,
+    `- Soft realistic contact shadow. Product fills ~75–85% of the frame.`,
+    `- Preserve every label, logo, brand mark, colour, material and proportion pixel-faithfully. Remove watermarks and store overlays that are not physically printed on the product.`,
+    ``,
+    `LIFESTYLE PROMPT rules:`,
+    `- Square 1:1, realistic in-use scene. Product is the hero, sharp focus, realistic scale.`,
+    `- Believable environment, natural light, tasteful props.`,
+    `- Preserve every label, logo, colour and material. Avoid fantasy elements, distortion, duplicates, watermarks or text overlays.`,
+    ``,
+    `If the user supplied Polish requirements, they OVERRIDE defaults for scene, props, lighting, mood — but never the "preserve the product faithfully" rules.`,
+    `Write both prompts in fluent, concrete English with short imperative sentences. No preamble, no markdown, JSON only.`,
+  ].join("\n");
+
+  const user = [
+    `PRODUCT NAME: ${args.productName || "(unnamed)"}`,
+    `PRODUCT DESCRIPTION: ${args.productDesc || "(none)"}`,
+    `PROJECT SCENE STYLE (EN, optional): ${args.projectStyle || "(none)"}`,
+    `USER REQUIREMENTS IN POLISH (translate & apply):`,
+    args.requirementsPl || "(none — use defaults from the rules above)",
+  ].join("\n");
+
+  const res = await callGatewayJson(apiKey, "google/gemini-3.1-pro-preview", [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ]) as { thumbnail_prompt?: string; lifestyle_prompt?: string };
+
+  const t = (res.thumbnail_prompt ?? "").trim();
+  const l = (res.lifestyle_prompt ?? "").trim();
+  if (!t || !l) throw new Error("AI returned empty prompts");
+  return { thumbnail_prompt: t, lifestyle_prompt: l };
+}
+
 function sanitize(text: string | null, blacklist: string[]): string | null {
   if (!text) return text;
   let out = text;
