@@ -254,11 +254,14 @@ export type Database = {
         Row: {
           created_at: string
           description: string | null
+          generated_lifestyle_prompt: string | null
+          generated_thumb_prompt: string | null
           id: string
           last_error: string | null
           lifestyle_urls: Json
           name: string | null
           project_id: string
+          prompt_source_hash: string | null
           source_image_url: string
           source_image_urls: string[]
           status: string
@@ -269,11 +272,14 @@ export type Database = {
         Insert: {
           created_at?: string
           description?: string | null
+          generated_lifestyle_prompt?: string | null
+          generated_thumb_prompt?: string | null
           id?: string
           last_error?: string | null
           lifestyle_urls?: Json
           name?: string | null
           project_id: string
+          prompt_source_hash?: string | null
           source_image_url: string
           source_image_urls?: string[]
           status?: string
@@ -284,11 +290,14 @@ export type Database = {
         Update: {
           created_at?: string
           description?: string | null
+          generated_lifestyle_prompt?: string | null
+          generated_thumb_prompt?: string | null
           id?: string
           last_error?: string | null
           lifestyle_urls?: Json
           name?: string | null
           project_id?: string
+          prompt_source_hash?: string | null
           source_image_url?: string
           source_image_urls?: string[]
           status?: string
@@ -311,6 +320,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          requirements_pl: string | null
           style_prompt: string | null
           updated_at: string
           user_id: string
@@ -320,6 +330,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          requirements_pl?: string | null
           style_prompt?: string | null
           updated_at?: string
           user_id: string
@@ -329,6 +340,7 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          requirements_pl?: string | null
           style_prompt?: string | null
           updated_at?: string
           user_id?: string
