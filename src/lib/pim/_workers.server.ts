@@ -1318,7 +1318,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
 
   const { data: prodRow } = await supabaseAdmin
     .from("photo_products" as never)
-    .select("id, project_id, name, description, source_image_url")
+    .select("id, project_id, name, description, source_image_url, source_image_urls")
     .eq("id", photoProductId)
     .maybeSingle();
   if (!prodRow) throw new Error("Photo product not found");
@@ -1328,6 +1328,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
     name: string | null;
     description: string | null;
     source_image_url: string;
+    source_image_urls: string[] | null;
   };
 
   const { data: projRow } = await supabaseAdmin
@@ -1336,7 +1337,15 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
     .eq("id", p.project_id)
     .maybeSingle();
   const proj = (projRow as { variants_per_product?: number; style_prompt?: string | null } | null) ?? {};
-  const variants = Math.max(0, Math.min(4, proj.variants_per_product ?? 2));
+  const allSources = (p.source_image_urls && p.source_image_urls.length > 0)
+    ? p.source_image_urls
+    : [p.source_image_url];
+  // Rule: N source images = 1 thumbnail + (N-1) lifestyle visualisations.
+  // Only when the user gave a single source do we fall back to the project's
+  // configured variant count (0-4).
+  const variants = allSources.length > 1
+    ? allSources.length - 1
+    : Math.max(0, Math.min(4, proj.variants_per_product ?? 2));
 
   await supabaseAdmin
     .from("photo_products" as never)
@@ -1346,13 +1355,17 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
   const label = (p.name ?? p.id.slice(0, 8)).trim();
   await emit(ctx, {
     level: "info",
-    message: `🖼  ${label} — miniaturka + ${variants} wizualizacje (nano-banana-pro, 2K)`,
+    message: `🖼  ${label} — ${allSources.length} źr. → 1 miniaturka + ${variants} wizualizacji (nano-banana-pro, 2K)`,
   });
 
   const productDesc = (p.description ?? "").trim();
   const productName = (p.name ?? "product").trim();
 
-  const prep = await prepareFalSource(p.id, p.source_image_url);
+  const prepared: { url: string; path: string }[] = [];
+  for (const u of allSources) {
+    prepared.push(await prepareFalSource(p.id, u));
+  }
+  const referenceUrls = prepared.map((x) => x.url);
   try {
     // 1) Thumbnail — packshot on pure white, identical product preserved.
     const thumbPrompt = [
@@ -1374,7 +1387,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
       "fal-ai/nano-banana-pro/edit",
       {
         prompt: thumbPrompt,
-        image_urls: [prep.url],
+        image_urls: referenceUrls,
         aspect_ratio: "1:1",
         resolution: "2K",
         output_format: "jpeg",
@@ -1416,7 +1429,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
           "fal-ai/nano-banana-pro/edit",
           {
             prompt: lifePrompt,
-            image_urls: [prep.url],
+            image_urls: referenceUrls,
             aspect_ratio: "1:1",
             resolution: "2K",
             output_format: "jpeg",
@@ -1473,7 +1486,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
   } finally {
     await supabaseAdmin.storage
       .from("regenerated-images")
-      .remove([prep.path])
+      .remove(prepared.map((x) => x.path))
       .catch(() => undefined);
   }
 }
