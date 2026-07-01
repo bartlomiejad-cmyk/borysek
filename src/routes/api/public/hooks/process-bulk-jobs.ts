@@ -114,6 +114,16 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
     }
 
     const pid = remaining.shift()!;
+    // Persist the shifted queue BEFORE processing. PHOTO_TOOL_GENERATE can
+    // take longer than the Worker's 30s hard limit; if we only persist after
+    // processItem returns, a hard timeout leaves pid in `items`, the next
+    // cron tick re-picks it and the whole product restarts from scratch
+    // (miniaturka → wizualizacja 1 → hard kill → miniaturka again…).
+    // Removing it up front means at-most-once processing per pickup.
+    await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .update({ items: remaining as never } as never)
+      .eq("id", job.id);
     const ctx: WorkerCtx = {
       onEvent: async (e) => {
         try {
