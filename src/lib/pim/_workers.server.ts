@@ -1721,18 +1721,44 @@ export async function runPhotoToolEditImage(
   const prep = await prepareFalSource(p.id, currentUrl);
   try {
     await emit(ctx, { level: "info", message: `   • FAL edytuje…` });
-    const resp = await callFal(
-      "fal-ai/nano-banana-pro/edit",
-      {
-        prompt: editPrompt,
-        image_urls: [prep.url],
-        aspect_ratio: "1:1",
-        resolution: "2K",
-        output_format: "jpeg",
-        num_images: 1,
-      },
-      FAL_KEY,
-    );
+    const callEdit = (prompt: string) =>
+      callFal(
+        "fal-ai/nano-banana-pro/edit",
+        {
+          prompt,
+          image_urls: [prep.url],
+          aspect_ratio: "1:1",
+          resolution: "2K",
+          output_format: "jpeg",
+          num_images: 1,
+        },
+        FAL_KEY,
+      );
+
+    let resp: FalResp;
+    try {
+      resp = await callEdit(editPrompt);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // FAL 422 "did not generate the expected output" — usually the safety /
+      // output filter tripped on the auto-built prompt. Retry once with a
+      // minimal, neutral edit instruction derived directly from the user's PL
+      // correction so we don't lose the whole job.
+      if (/\b422\b/.test(msg)) {
+        await emit(ctx, {
+          level: "warn",
+          message: `   ⚠ FAL 422 — ponawiam z uproszczonym promptem`,
+        });
+        const safe = [
+          `Edit this product photo. Keep the product identical (shape, colours, labels, materials, proportions) and keep 1:1 framing.`,
+          `Apply this correction: ${args.requirementsPl.trim() || "improve overall quality"}.`,
+          `No text, no watermarks, no logos other than those already on the product.`,
+        ].join(" ");
+        resp = await callEdit(safe);
+      } else {
+        throw e;
+      }
+    }
     const outUrl = resp.images?.[0]?.url;
     if (!outUrl) throw new Error("nano-banana-pro nie zwróciło zdjęcia");
     const bytes = await fetchBytes(outUrl);
