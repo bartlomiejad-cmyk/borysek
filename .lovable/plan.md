@@ -1,64 +1,48 @@
 ## Cel
 
-1. Ustalić stałą liczbę: **1 miniaturka + 5 wizualizacji** (niezależnie od liczby zdjęć źródłowych).
-2. Dodać **edycję pojedynczego zdjęcia promptem PL** — po najechaniu na miniaturkę lub wizualizację pojawia się przycisk „Edytuj", który otwiera pole tekstowe; wpisany po polsku opis poprawki jest tłumaczony przez Gemini na prompt EN i wysyłany do `fal-ai/nano-banana-pro/edit` z aktualnym zdjęciem jako referencją. Wynik podmienia to konkretne zdjęcie.
+Wpoić dobre praktyki generowania zdjęć produktowych w system prompty Gemini→FAL, aby model konsekwentnie chronił logo/tekst, używał języka fotograficznego i nie „zgadywał" etykiet. Bez zmian w UI.
 
-## Zmiany
+## Zakres — 1 plik
 
-### 1. Stała liczba wariantów (1 + 5)
+`src/lib/pim/_workers.server.ts`, dwa system prompty:
 
-- `src/lib/pim/_workers.server.ts` → `runPhotoToolGenerate`: usuwam logikę „gdy zdjęć > 1, wariantów = N−1". Zawsze `variants = 5`, jeden request na miniaturkę + 5 na wizualizacje. Wszystkie zdjęcia źródłowe pozostają jako referencje w `image_urls`.
-- `src/routes/_auth/photo.$id.tsx`: usuwam z panelu ustawień pole „Wizualizacje na produkt" oraz krótką notkę. Zostaje tylko styl sceny + „Wymagania (PL)".
-- `src/lib/photo-tool/photo-tool.functions.ts`: `updatePhotoProject` przestaje przyjmować `variants_per_product` (albo ignoruje). Kolumna w bazie zostaje (bez migracji), po prostu nieużywana.
+1. **`buildFalPromptsFromPolish`** (linie 145–163) — prompt do generacji 1 miniaturki + 5 wizualizacji.
+2. **`buildFalEditPromptFromPolish`** (linie 1625–1637) — prompt do edycji pojedynczego zdjęcia.
 
-### 2. Edycja pojedynczego zdjęcia promptem
+## Zmiany w system prompcie generatora
 
-**Backend**
+Do sekcji „PRESERVE" (obie: THUMBNAIL i LIFESTYLE) dodać:
 
-- Nowa server function `editPhotoImage` w `src/lib/photo-tool/photo-tool.functions.ts`:
-  - input: `{ photoProductId, slot: "thumbnail" | "lifestyle", lifestyleIndex?: number, requirementsPl: string }`
-  - waliduje własność (RLS przez `requireSupabaseAuth`)
-  - kolejkuje nowy `bulk_job` typu `PHOTO_TOOL_EDIT_IMAGE` z payloadem `{ photoProductId, slot, lifestyleIndex, requirementsPl }`
-- Nowy wariant enuma `bulk_job_kind`: `PHOTO_TOOL_EDIT_IMAGE` (migracja `ALTER TYPE ... ADD VALUE`).
-- Nowy worker `runPhotoToolEditImage` w `src/lib/pim/_workers.server.ts`:
-  1. Pobiera `photo_products` (nazwa, opis, aktualny `thumbnail_url` / `lifestyle_urls[i]`, `generated_thumb_prompt` / `generated_lifestyle_prompt` jako kontekst „poprzedniego promptu").
-  2. Woła nowy helper `buildFalEditPromptFromPolish` (Gemini 3.1 Pro) — wejście: nazwa produktu, opis, oryginalny prompt EN dla tego slotu, wytyczne PL od użytkownika; wyjście: pojedynczy prompt EN dla `fal-ai/nano-banana-pro/edit`, zachowujący wierność produktowi i uwzględniający poprawkę.
-  3. Woła `callFal("fal-ai/nano-banana-pro/edit", { prompt, image_urls: [<edytowane zdjęcie>], aspect_ratio: "1:1", resolution: "2K", output_format: "jpeg", num_images: 1 })`. Jako referencję używam **tylko edytowanego zdjęcia** (nie surowych źródeł) — to jest edycja istniejącego wyniku.
-  4. Zapisuje wynik pod `photo-tool/{projectId}/{productId}/thumb.jpg` (nadpisując miniaturkę) lub `lifestyle_{i}.jpg` (nadpisując konkretną wizualizację), aktualizuje URL w bazie.
-  5. Loguje postęp w `bulk_job_events`.
-- Rozszerzenie dispatchera `src/routes/api/public/hooks/process-bulk-jobs.ts` o `case "PHOTO_TOOL_EDIT_IMAGE"`.
-- Realtime na `photo_products` już włączone → UI odświeży się automatycznie; polling co 2s już działa.
+- **Cytat dosłowny etykiet**: instrukcja, żeby model wyciągnął widoczny tekst z referencji i wstawiał go dosłownie w cudzysłowie, np. `preserve label "NAZWA" letter-for-letter, do not paraphrase or invent characters`.
+- **Blokada etykiety**: `change only background/scene, keep product, logo, text, colors and proportions EXACTLY the same, preserve style/lighting/textures`.
+- **Jakość referencji**: jeśli logo/tekst na źródle jest małe/rozmyte, NIE dorysowuj go — pozostaw taką rozdzielczość i ostrość jak w oryginale, nie „upiększaj" liter.
+- **Zakaz rysowania logo od zera**: `never redraw or stylize the logo/brand mark; only reproduce what is visible in the reference`.
 
-**Frontend — `src/routes/_auth/photo.$id.tsx`**
+Do sekcji „LIFESTYLE PROMPT rules" dodać wymagania **języka fotograficznego** (obowiązkowo w każdej wizualizacji):
 
-- Wydzielenie komponentu `PhotoImageCard` renderującego pojedyncze zdjęcie (miniaturka lub wizualizacja):
-  - Overlay pojawiający się na `group-hover` z przyciskiem **„Edytuj promptem"**.
-  - Kliknięcie otwiera `Dialog` (shadcn) z:
-    - podglądem aktualnego zdjęcia
-    - `Textarea` „Co poprawić? (po polsku)" — np. „usuń liście z lewej strony, dodaj drewniany blat"
-    - przyciskiem „Wygeneruj poprawkę" → `editPhotoImage` mutation
-  - Po submicie: dialog zamyka się, na kaflu pokazuje się overlay „Edytuję…" (spinner) dopóki job aktywny; log pojawia się w istniejącym `BulkJobLog`.
-- Blok „Prompty EN" pod produktem dostaje trzeci wpis: ostatnio użyty prompt edycji (opcjonalnie, jeśli jest — wymaga dodania kolumny `last_edit_prompt` do `photo_products`, lub prościej: pokazujemy prompt tylko w logu joba).
+- kąt kamery (np. `eye-level 3/4 view`, `low angle`, `top-down flat lay`),
+- ogniskowa / głębia ostrości (`50mm, shallow depth of field, background softly blurred`),
+- kierunek i temperatura światła (`soft window light from the left, warm 4500K`),
+- rozdzielczość / jakość: `sharp product, no motion blur, photorealistic, 4K commercial photography`.
 
-### 3. Migracje bazy
+Do sekcji „THUMBNAIL PROMPT rules" dodać: `2K studio quality, sharp, no motion blur, no compression artifacts`.
 
-Jedna migracja:
+Reguła META (na końcu system promptu): każda wygenerowana wizualizacja MUSI zawierać co najmniej jedną frazę o kącie kamery, jedną o świetle i jedną o głębi ostrości — inaczej prompt jest niekompletny.
 
-```sql
-ALTER TYPE public.bulk_job_kind ADD VALUE IF NOT EXISTS 'PHOTO_TOOL_EDIT_IMAGE';
-```
+## Zmiany w system prompcie edytora
 
-Nic więcej — reużywamy `bulk_jobs`, `bulk_job_events`, `photo_products.thumbnail_url` i `lifestyle_urls`.
+W `buildFalEditPromptFromPolish` do reguł dodać:
 
-## Szczegóły techniczne dla programisty
+- **Blokada etykiety w edycji**: `Change ONLY what the user's correction requests. Everything else — product, logo, printed text, colors, materials, proportions, framing, lighting on the product — must stay pixel-identical to the input image.`
+- **Dosłowność tekstu**: jeśli poprawka nie dotyczy tekstu na produkcie, `never re-render, restyle or re-letter any printed text or logo; treat them as untouchable pixels`. Jeśli dotyczy — cytuj docelowy tekst w cudzysłowie dosłownie.
+- **Brak logo od zera**: `do not invent, redraw or embellish any brand mark`.
+- Jeśli korekta dotyczy sceny/tła, dodać do promptu frazę fotograficzną (kąt, światło, głębia) zgodną z oryginalnym promptem.
 
-- **Prompt Gemini dla edycji** (`buildFalEditPromptFromPolish`) trzyma te same zasady wierności produktowi co obecny generator, ale otrzymuje dodatkowo „ORIGINAL PROMPT" (żeby wiedział co było tłem) i „USER CORRECTION (PL)". Zwraca pojedynczy string `edit_prompt`. Fallback: łączy oryginalny prompt + `EXTRA CORRECTION (translated from Polish): <...>`.
-- **Storage upsert**: `upload(..., { upsert: true })` zastąpi plik; do URL doklejam `?v=${Date.now()}` żeby wymusić refresh w `<img>`.
-- **Cache promptów** dla generacji (`prompt_source_hash`) zostaje bez zmian; edycja nie modyfikuje `generated_thumb_prompt` / `generated_lifestyle_prompt`, bo to ma być jednorazowa poprawka na tym konkretnym zdjęciu, a nie zmiana promptu bazowego (jeśli userowi ma się zmienić baza — edytuje pole „Wymagania (PL)" na projekcie i klika „Generuj" jeszcze raz).
-- **Kolejność w UI**: kafle miniaturki i wizualizacji renderują ten sam komponent `PhotoImageCard` z propem `slot`.
+## Bez zmian
+
+- UI (`photo.$id.tsx`), model, koszt, kolejność jobów, retry na 422, cache promptów — bez zmian.
+- Fallback prompt na FAL 422 zostaje jak jest (już jest neutralny i bezpieczny).
 
 ## Efekt
 
-- Zawsze 6 zdjęć na produkt (1 + 5).
-- Każde zdjęcie ma na hoverze przycisk edycji → dialog → wpisujesz po polsku co poprawić → Gemini pisze prompt → FAL edytuje → wynik podmienia się w tym samym slocie.
-- Reszta workflow (generowanie od zera, log jobów, cache promptów bazowych) bez zmian.
+Model konsekwentnie zachowuje logo/tekst z referencji, nie generuje logo od zera, a wizualizacje mają wymuszony język fotograficzny (kąt + światło + głębia) — co redukuje „generyczne" tła i przekręcone nazwy marek.
