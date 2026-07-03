@@ -1641,9 +1641,13 @@ async function buildFalEditPromptFromPolish(args: {
     ``,
     `Rules:`,
     `- Apply exactly the user's Polish correction. Translate it, don't invent new changes.`,
+    `- Change ONLY what the user's correction requests. Everything else — product, logo, printed text, colours, materials, proportions, framing, lighting on the product — must stay pixel-identical to the input image.`,
     `- Preserve the product completely: shape, colour, labels, logos, materials, proportions — pixel-faithful to the input image.`,
+    `- If the correction does NOT concern text on the product: never re-render, restyle or re-letter any printed text or logo — treat them as untouchable pixels. Do not invent, redraw or embellish any brand mark.`,
+    `- If the correction DOES concern text on the product: quote the exact target text in double quotes, letter-for-letter (e.g. render label "NEW NAME" letter-for-letter). Never paraphrase.`,
     `- Keep the same aspect ratio (1:1) and overall composition unless the correction explicitly asks to reframe.`,
     `- Do not add watermarks, text overlays, price tags or store logos.`,
+    `- If the correction affects the scene/background, include concrete photographic language consistent with the ORIGINAL PROMPT: camera angle, focal length + depth of field, light direction + colour temperature, plus "sharp, photorealistic, 4K commercial photography".`,
     `- If the correction is vague, be specific and concrete in English.`,
     `- Short, imperative sentences. No preamble, JSON only.`,
   ].join("\n");
