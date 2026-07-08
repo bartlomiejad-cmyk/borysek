@@ -69,6 +69,7 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
       .object({
         projectId: z.string().uuid(),
         onlyMissing: z.boolean().default(true),
+        productIds: z.array(z.string().uuid()).max(20000).optional(),
       })
       .parse(i),
   )
@@ -94,8 +95,10 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
       .eq("project_id", data.projectId);
     if (error) throw new Error(error.message);
 
+    const restrict = data.productIds ? new Set(data.productIds) : null;
     let targetIds = (products ?? [])
       .filter((p) => (p.nazwa ?? "").trim().length > 0)
+      .filter((p) => (restrict ? restrict.has(p.id as string) : true))
       .map((p) => p.id as string);
 
     if (data.onlyMissing && targetIds.length) {

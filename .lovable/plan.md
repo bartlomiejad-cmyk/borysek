@@ -1,48 +1,52 @@
 ## Cel
+Na liście produktów w projekcie PIM dodać:
+1. Filtr **„Bez zdjęć"** — pokazuje produkty, dla których nie ma żadnej finalnej miniaturki (ani z picked_urls, ani wygenerowanej AI, ani wpiętej pinned).
+2. Masową akcję **„Uzupełnij zdjęcia"** działającą na zaznaczonych produktach: (a) doscrapuje brakujące źródła Firecrawlem, (b) regeneruje media wg parametrów wybranych w dialogu.
 
-Wpoić dobre praktyki generowania zdjęć produktowych w system prompty Gemini→FAL, aby model konsekwentnie chronił logo/tekst, używał języka fotograficznego i nie „zgadywał" etykiet. Bez zmian w UI.
+## UI — `src/routes/_auth/projects.$id.index.tsx`
 
-## Zakres — 1 plik
+- Rozszerzyć `searchSchema.filter` o `"NO_IMAGES"` + dodać `SelectItem value="NO_IMAGES"` „Bez zdjęć".
+- W `filtered` dodać warunek: `filter === "NO_IMAGES" && (p.thumbnail || p.regenerated_main_image || (p.ai_gallery_urls?.length ?? 0) > 0)` → odrzuć. Zostają produkty bez jakiegokolwiek zdjęcia finalnego.
+- W pasku akcji po zaznaczeniu (obok „Wygeneruj golden" / „Regeneruj media") dodać przycisk **„Uzupełnij zdjęcia (N)"** otwierający nowy `FillMissingImagesDialog`.
 
-`src/lib/pim/_workers.server.ts`, dwa system prompty:
+## Nowy komponent — `src/components/pim/FillMissingImagesDialog.tsx`
 
-1. **`buildFalPromptsFromPolish`** (linie 145–163) — prompt do generacji 1 miniaturki + 5 wizualizacji.
-2. **`buildFalEditPromptFromPolish`** (linie 1625–1637) — prompt do edycji pojedynczego zdjęcia.
+Pola:
+- Checkbox **Doscrapuj brakujące źródła** (domyślnie zaznaczone jeśli którykolwiek z zaznaczonych produktów ma pusty `picked_urls`).
+- Checkbox **Regeneruj media** (domyślnie zaznaczone).
+- Liczba **miniatur** (1–3, default 1).
+- Liczba **wizualizacji lifestyle** (0–8, default 5).
+- **Jakość**: `2K` / `4K` (radio, default 2K).
+- Podsumowanie: „X produktów bez źródeł, Y bez wygenerowanych mediów".
+- Przycisk „Uruchom".
 
-## Zmiany w system prompcie generatora
+Sekwencja po kliknięciu:
+1. Jeśli wybrano scrape i są produkty bez picked_urls → `startFirecrawlDiscovery({ projectId, productIds, onlyMissing: true })`.
+2. Jeśli wybrano regenerację → `createBulkJob({ projectId, kind: "REGENERATE_MEDIA", items: selectedIds, payload: { thumbs, visualizations, quality } })`.
+3. Invalidate query keys `["project", id, "bulk-job", ...]`, toast, zamknąć dialog.
 
-Do sekcji „PRESERVE" (obie: THUMBNAIL i LIFESTYLE) dodać:
+## Backend
 
-- **Cytat dosłowny etykiet**: instrukcja, żeby model wyciągnął widoczny tekst z referencji i wstawiał go dosłownie w cudzysłowie, np. `preserve label "NAZWA" letter-for-letter, do not paraphrase or invent characters`.
-- **Blokada etykiety**: `change only background/scene, keep product, logo, text, colors and proportions EXACTLY the same, preserve style/lighting/textures`.
-- **Jakość referencji**: jeśli logo/tekst na źródle jest małe/rozmyte, NIE dorysowuj go — pozostaw taką rozdzielczość i ostrość jak w oryginale, nie „upiększaj" liter.
-- **Zakaz rysowania logo od zera**: `never redraw or stylize the logo/brand mark; only reproduce what is visible in the reference`.
+### `src/lib/pim/firecrawl.functions.ts`
+- W `startFirecrawlDiscovery` dodać opcjonalne pole `productIds: z.array(z.string().uuid()).optional()`. Gdy podane — użyj ich jako `targetIds` zamiast pobierać wszystkie `source_products`; `onlyMissing` filtruje dalej po `search_results.term`.
 
-Do sekcji „LIFESTYLE PROMPT rules" dodać wymagania **języka fotograficznego** (obowiązkowo w każdej wizualizacji):
+### `src/lib/pim/bulk-jobs.functions.ts`
+Bez zmian schemy — `payload` już jest wspierany (`z.record(z.string(), z.unknown()).optional()`) i zapisywany w `bulk_jobs.payload`.
 
-- kąt kamery (np. `eye-level 3/4 view`, `low angle`, `top-down flat lay`),
-- ogniskowa / głębia ostrości (`50mm, shallow depth of field, background softly blurred`),
-- kierunek i temperatura światła (`soft window light from the left, warm 4500K`),
-- rozdzielczość / jakość: `sharp product, no motion blur, photorealistic, 4K commercial photography`.
-
-Do sekcji „THUMBNAIL PROMPT rules" dodać: `2K studio quality, sharp, no motion blur, no compression artifacts`.
-
-Reguła META (na końcu system promptu): każda wygenerowana wizualizacja MUSI zawierać co najmniej jedną frazę o kącie kamery, jedną o świetle i jedną o głębi ostrości — inaczej prompt jest niekompletny.
-
-## Zmiany w system prompcie edytora
-
-W `buildFalEditPromptFromPolish` do reguł dodać:
-
-- **Blokada etykiety w edycji**: `Change ONLY what the user's correction requests. Everything else — product, logo, printed text, colors, materials, proportions, framing, lighting on the product — must stay pixel-identical to the input image.`
-- **Dosłowność tekstu**: jeśli poprawka nie dotyczy tekstu na produkcie, `never re-render, restyle or re-letter any printed text or logo; treat them as untouchable pixels`. Jeśli dotyczy — cytuj docelowy tekst w cudzysłowie dosłownie.
-- **Brak logo od zera**: `do not invent, redraw or embellish any brand mark`.
-- Jeśli korekta dotyczy sceny/tła, dodać do promptu frazę fotograficzną (kąt, światło, głębia) zgodną z oryginalnym promptem.
+### `src/lib/pim/_workers.server.ts`
+Worker `REGENERATE_MEDIA`:
+- Przy pobieraniu joba czytać `payload` (jsonb) i mapować:
+  - `thumbs` (default 1), `visualizations` (default 5), `quality` (default `"2K"`).
+- Przekazywać te wartości do istniejącego kodu generującego (obecnie hard-coded 1 + 5 + 2K) — dodać parametry do wewnętrznej funkcji generującej.
+- Log każdego produktu zaktualizować, żeby pokazywał wybrane liczby.
 
 ## Bez zmian
+- Nie ruszamy schematu DB (kolumna `payload jsonb` w `bulk_jobs` już istnieje — potwierdzone przez istniejące `payload` w `createBulkJob`).
+- Nie zmieniamy definicji „braku źródeł" na poziomie `product_sources`; używamy pustego `picked_urls` w enrichment jako proxy (spójne z resztą pipeline'u).
+- Nie zmieniamy promptów FAL/Gemini.
 
-- UI (`photo.$id.tsx`), model, koszt, kolejność jobów, retry na 422, cache promptów — bez zmian.
-- Fallback prompt na FAL 422 zostaje jak jest (już jest neutralny i bezpieczny).
-
-## Efekt
-
-Model konsekwentnie zachowuje logo/tekst z referencji, nie generuje logo od zera, a wizualizacje mają wymuszony język fotograficzny (kąt + światło + głębia) — co redukuje „generyczne" tła i przekręcone nazwy marek.
+## Weryfikacja
+1. Filtr „Bez zdjęć" pokazuje tylko produkty bez thumbnail/pinned/regenerated/ai_gallery.
+2. Zaznaczenie kilku produktów + dialog → widać liczniki „X bez źródeł, Y bez mediów".
+3. Uruchomienie tworzy odpowiednio 1 lub 2 bulk joby, pasek progresu FIRECRAWL_DISCOVERY / REGENERATE_MEDIA rusza.
+4. Worker REGENERATE_MEDIA respektuje `payload.visualizations` i `payload.quality` (widać w logu „→ 1 miniaturka + N wizualizacji, nano-banana-pro, 2K/4K").

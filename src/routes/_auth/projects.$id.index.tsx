@@ -34,6 +34,7 @@ import {
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
+import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,12 +85,15 @@ import {
   Pin,
   PinOff,
   RefreshCw,
+  ImagePlus,
 } from "lucide-react";
 
 const searchSchema = z.object({
   page: z.number().min(1).catch(1),
   pageSize: z.number().min(1).catch(25),
-  filter: z.enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH"]).catch("ALL"),
+  filter: z
+    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES"])
+    .catch("ALL"),
   search: z.string().catch(""),
 });
 
@@ -144,6 +148,7 @@ function ProjectPage() {
   const pageSize = urlSearch.pageSize;
   const page = urlSearch.page;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [fillOpen, setFillOpen] = useState(false);
 
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
@@ -204,6 +209,13 @@ function ProjectPage() {
       if (filter === "PENDING" && p.status !== "PENDING") return false;
       if (filter === "GENERATED" && p.status !== "GENERATED") return false;
       if (filter === "NO_MATCH" && p.match_type !== "NO_MATCH") return false;
+      if (filter === "NO_IMAGES") {
+        const hasAny =
+          !!p.thumbnail ||
+          !!(p as { regenerated_main_image?: string | null }).regenerated_main_image ||
+          (((p as { ai_gallery_urls?: string[] }).ai_gallery_urls?.length) ?? 0) > 0;
+        if (hasAny) return false;
+      }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
@@ -608,6 +620,7 @@ function ProjectPage() {
                 <SelectItem value="NO_MATCH">Bez dopasowania</SelectItem>
                 <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
                 <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
+                <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -637,6 +650,14 @@ function ProjectPage() {
                 disabled={!!regenActive}
               >
                 <RefreshCw className="h-4 w-4 mr-1" /> Regeneruj tła
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setFillOpen(true)}
+                disabled={!!regenActive || !!discActive}
+              >
+                <ImagePlus className="h-4 w-4 mr-1" /> Uzupełnij zdjęcia
               </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV
@@ -807,6 +828,21 @@ function ProjectPage() {
           </div>
         </CardContent>
       </Card>
+      <FillMissingImagesDialog
+        open={fillOpen}
+        onOpenChange={setFillOpen}
+        projectId={id}
+        targets={products
+          .filter((p) => selectedIds.has(p.id))
+          .map<FillTarget>((p) => ({
+            id: p.id,
+            picked_urls: (p as { picked_urls?: string[] }).picked_urls ?? [],
+            thumbnail: p.thumbnail ?? null,
+            regenerated_main_image:
+              (p as { regenerated_main_image?: string | null }).regenerated_main_image ?? null,
+            ai_gallery_urls: (p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [],
+          }))}
+      />
     </main>
   );
 }
