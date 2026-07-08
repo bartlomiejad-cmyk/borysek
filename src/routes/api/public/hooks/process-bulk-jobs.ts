@@ -47,7 +47,14 @@ async function processItem(
       await runGenerateGoldenRecord(productId, "all", ctx);
       return;
     case "REGENERATE_MEDIA":
-      await runRegenerateMedia(productId, ctx);
+      await runRegenerateMedia(productId, ctx, {
+        maxGallery:
+          typeof payload?.maxGallery === "number" ? (payload.maxGallery as number) : undefined,
+        targetResolution:
+          typeof payload?.targetResolution === "number"
+            ? (payload.targetResolution as number)
+            : undefined,
+      });
       return;
     case "FIRECRAWL_DISCOVERY":
       await runFirecrawlDiscovery(productId, ctx);
