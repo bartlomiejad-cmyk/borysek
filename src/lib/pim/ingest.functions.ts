@@ -7,6 +7,7 @@ const sourceProductSchema = z.object({
   nazwa: z.string().nullable(),
   kod: z.string().nullable(),
   ean: z.string().nullable(),
+  has_images: z.boolean().optional(),
   raw: z.record(z.unknown()),
 });
 
@@ -40,13 +41,16 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const payload = data.rows.map((r) => ({ ...r, project_id: data.projectId }));
+    const payload = data.rows.map((r) => {
+      const { has_images: _hi, ...rest } = r;
+      return { ...rest, project_id: data.projectId };
+    });
     const { error } = await supabase.from("source_products").insert(payload as never);
     if (error) throw new Error(error.message);
     // Create pending enrichments
     const { data: inserted } = await supabase
       .from("source_products")
-      .select("id")
+      .select("id, ext_id, nazwa, kod, ean")
       .eq("project_id", data.projectId);
     if (inserted) {
       const enr = inserted.map((row) => ({
@@ -60,6 +64,42 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
         .from("enrichments")
         .upsert(enr as never, { onConflict: "source_product_id", ignoreDuplicates: true });
       if (enErr) throw new Error(enErr.message);
+
+      // Mark enrichments as "already has media" for CSV rows whose image
+      // columns were populated. Sentinel is non-http so it isn't rendered as
+      // an image; the filter/fill-dialog only checks truthiness.
+      const naturalKey = (r: {
+        ext_id: string | null;
+        nazwa: string | null;
+        kod: string | null;
+        ean: string | null;
+      }) => r.ext_id || r.ean || r.kod || (r.nazwa ? r.nazwa.toLowerCase() : null);
+      const withImages = new Set<string>();
+      for (const r of data.rows) {
+        if (!r.has_images) continue;
+        const k = naturalKey(r);
+        if (k) withImages.add(k);
+      }
+      if (withImages.size) {
+        const idsToMark: string[] = [];
+        for (const p of inserted as Array<{
+          id: string;
+          ext_id: string | null;
+          nazwa: string | null;
+          kod: string | null;
+          ean: string | null;
+        }>) {
+          const k = naturalKey(p);
+          if (k && withImages.has(k)) idsToMark.push(p.id);
+        }
+        if (idsToMark.length) {
+          const { error: mErr } = await supabase
+            .from("enrichments")
+            .update({ regenerated_main_image: "__imported__" } as never)
+            .in("source_product_id", idsToMark);
+          if (mErr) throw new Error(mErr.message);
+        }
+      }
     }
     return { inserted: payload.length };
   });
