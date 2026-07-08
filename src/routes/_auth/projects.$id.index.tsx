@@ -208,6 +208,13 @@ function ProjectPage() {
       if (filter === "PENDING" && p.status !== "PENDING") return false;
       if (filter === "GENERATED" && p.status !== "GENERATED") return false;
       if (filter === "NO_MATCH" && p.match_type !== "NO_MATCH") return false;
+      if (filter === "NO_IMAGES") {
+        const hasAny =
+          !!p.thumbnail ||
+          !!(p as { regenerated_main_image?: string | null }).regenerated_main_image ||
+          (((p as { ai_gallery_urls?: string[] }).ai_gallery_urls?.length) ?? 0) > 0;
+        if (hasAny) return false;
+      }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
