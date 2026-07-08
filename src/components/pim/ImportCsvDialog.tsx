@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Upload, Loader2, FileCheck } from "lucide-react";
 import {
   parseCsvRaw,
@@ -183,11 +183,12 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         </Button>
       </div>
 
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
+      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 gap-0">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-2">
           <DialogTitle>Wgraj produkty z CSV</DialogTitle>
         </DialogHeader>
 
+        <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-3">
         <p className="text-xs text-muted-foreground">
           Wybierz plik, a następnie zmapuj kolumny CSV do pól produktu. Domyślne mapowanie pochodzi z ustawień projektu.
         </p>
@@ -292,9 +293,15 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
                     </TableBody>
                   </Table>
                 </div>
+                <ScrollBar orientation="horizontal" />
               </ScrollArea>
             </div>
+          </div>
+        )}
+        </div>
 
+        {csv && (
+          <div className="shrink-0 border-t px-6 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Checkbox
                 id="clear-previous"
@@ -305,8 +312,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
                 Wyczyść poprzednie produkty przed importem (usuwa też wyniki AI)
               </Label>
             </div>
-
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>
                 Anuluj
               </Button>
