@@ -34,6 +34,7 @@ import {
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
+import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,12 +85,15 @@ import {
   Pin,
   PinOff,
   RefreshCw,
+  ImagePlus,
 } from "lucide-react";
 
 const searchSchema = z.object({
   page: z.number().min(1).catch(1),
   pageSize: z.number().min(1).catch(25),
-  filter: z.enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH"]).catch("ALL"),
+  filter: z
+    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES"])
+    .catch("ALL"),
   search: z.string().catch(""),
 });
 
