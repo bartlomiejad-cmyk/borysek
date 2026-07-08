@@ -795,7 +795,11 @@ function buildSeedreamPrompt(opts: {
   return lines.join(" ");
 }
 
-export async function runRegenerateMedia(productId: string, ctx?: WorkerCtx): Promise<void> {
+export async function runRegenerateMedia(
+  productId: string,
+  ctx?: WorkerCtx,
+  overrides?: { maxGallery?: number; targetResolution?: number },
+): Promise<void> {
   const FAL_KEY = process.env.FAL_KEY;
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
@@ -809,7 +813,18 @@ export async function runRegenerateMedia(productId: string, ctx?: WorkerCtx): Pr
     .single();
   if (!product) throw new Error("Product not found");
 
-  const settings = await loadMediaSettings(product.project_id);
+  const baseSettings = await loadMediaSettings(product.project_id);
+  const settings = {
+    ...baseSettings,
+    max_gallery_images:
+      typeof overrides?.maxGallery === "number"
+        ? Math.max(0, Math.min(12, overrides.maxGallery))
+        : baseSettings.max_gallery_images,
+    target_resolution:
+      typeof overrides?.targetResolution === "number"
+        ? Math.max(512, Math.min(4096, overrides.targetResolution))
+        : baseSettings.target_resolution,
+  };
   if (!settings.component_a.trim()) throw new Error("Skonfiguruj Komponent A w ustawieniach AI");
 
   const { data: project } = await supabaseAdmin
