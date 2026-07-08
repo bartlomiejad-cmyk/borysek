@@ -5,6 +5,7 @@ export type CsvRow = {
   nazwa: string | null;
   kod: string | null;
   ean: string | null;
+  has_images?: boolean;
   raw: Record<string, unknown>;
 };
 
@@ -70,6 +71,8 @@ export type ExplicitCsvMapping = {
   name_column?: string | null;
   code_column?: string | null;
   ean_column?: string | null;
+  main_image_column?: string | null;
+  gallery_column?: string | null;
 };
 
 /**
@@ -88,11 +91,24 @@ export const buildCsvRowsFromMapping = (
     const t = String(v).trim();
     return t === "" ? null : t;
   };
+  const detectImages = (r: Record<string, string>): boolean => {
+    const cols = [mapping.main_image_column, mapping.gallery_column].filter(
+      (c): c is string => !!c,
+    );
+    for (const c of cols) {
+      const v = get(r, c);
+      if (!v) continue;
+      const parts = v.split(/[,|\s]+/).map((s) => s.trim()).filter(Boolean);
+      if (parts.some((p) => /^https?:\/\//i.test(p))) return true;
+    }
+    return false;
+  };
   const rows: CsvRow[] = raw.rows.map((r) => ({
     ext_id: get(r, mapping.id_column),
     nazwa: get(r, mapping.name_column),
     kod: get(r, mapping.code_column),
     ean: get(r, mapping.ean_column),
+    has_images: detectImages(r),
     raw: r,
   }));
   return rows.filter((r) => r.nazwa || r.ean || r.kod || r.ext_id);

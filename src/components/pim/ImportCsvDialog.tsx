@@ -32,12 +32,20 @@ import {
 import { ingestSourceProducts, clearProjectData } from "@/lib/pim/ingest.functions";
 import { friendlyError } from "@/lib/utils";
 
-type Field = "id_column" | "name_column" | "code_column" | "ean_column";
+type Field =
+  | "id_column"
+  | "name_column"
+  | "code_column"
+  | "ean_column"
+  | "main_image_column"
+  | "gallery_column";
 const FIELDS: Array<{ value: Field; label: string }> = [
   { value: "id_column", label: "ID (ext_id)" },
   { value: "name_column", label: "Nazwa" },
   { value: "code_column", label: "Kod / symbol" },
   { value: "ean_column", label: "EAN" },
+  { value: "main_image_column", label: "Zdjęcie główne (URL)" },
+  { value: "gallery_column", label: "Wszystkie zdjęcia (URL-e)" },
 ];
 const SKIP = "__skip__";
 
@@ -57,6 +65,8 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
     name_column: SKIP,
     code_column: SKIP,
     ean_column: SKIP,
+    main_image_column: SKIP,
+    gallery_column: SKIP,
   });
   const [clearPrevious, setClearPrevious] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -80,7 +90,14 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
 
   const reset = () => {
     setCsv(null);
-    setMapping({ id_column: SKIP, name_column: SKIP, code_column: SKIP, ean_column: SKIP });
+    setMapping({
+      id_column: SKIP,
+      name_column: SKIP,
+      code_column: SKIP,
+      ean_column: SKIP,
+      main_image_column: SKIP,
+      gallery_column: SKIP,
+    });
     setClearPrevious(true);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -105,6 +122,8 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         name_column: find(defaults?.name_column),
         code_column: find(defaults?.code_column),
         ean_column: find(defaults?.ean_column),
+        main_image_column: find(defaults?.main_image_column),
+        gallery_column: find(defaults?.gallery_column),
       });
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się wczytać CSV"));
@@ -113,8 +132,9 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
 
   const canSubmit = useMemo(() => {
     if (!csv) return false;
-    // Need at least one identifying field
-    return FIELDS.some((f) => mapping[f.value] !== SKIP);
+    // Need at least one identifying field (image columns don't count).
+    const ids: Field[] = ["id_column", "name_column", "code_column", "ean_column"];
+    return ids.some((f) => mapping[f] !== SKIP);
   }, [csv, mapping]);
 
   const handleSubmit = async () => {
@@ -126,6 +146,10 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         name_column: mapping.name_column !== SKIP ? mapping.name_column : null,
         code_column: mapping.code_column !== SKIP ? mapping.code_column : null,
         ean_column: mapping.ean_column !== SKIP ? mapping.ean_column : null,
+        main_image_column:
+          mapping.main_image_column !== SKIP ? mapping.main_image_column : null,
+        gallery_column:
+          mapping.gallery_column !== SKIP ? mapping.gallery_column : null,
       };
       const rows = buildCsvRowsFromMapping(csv, explicit);
       if (!rows.length) {
