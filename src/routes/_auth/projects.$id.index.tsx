@@ -651,6 +651,14 @@ function ProjectPage() {
               >
                 <RefreshCw className="h-4 w-4 mr-1" /> Regeneruj tła
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setFillOpen(true)}
+                disabled={!!regenActive || !!discActive}
+              >
+                <ImagePlus className="h-4 w-4 mr-1" /> Uzupełnij zdjęcia
+              </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV
               </Button>
