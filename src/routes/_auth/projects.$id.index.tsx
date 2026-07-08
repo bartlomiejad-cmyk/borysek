@@ -148,6 +148,7 @@ function ProjectPage() {
   const pageSize = urlSearch.pageSize;
   const page = urlSearch.page;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [fillOpen, setFillOpen] = useState(false);
 
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
