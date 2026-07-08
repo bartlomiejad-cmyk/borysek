@@ -619,6 +619,7 @@ function ProjectPage() {
                 <SelectItem value="NO_MATCH">Bez dopasowania</SelectItem>
                 <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
                 <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
+                <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
               </SelectContent>
             </Select>
           </div>
