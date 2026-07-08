@@ -828,6 +828,21 @@ function ProjectPage() {
           </div>
         </CardContent>
       </Card>
+      <FillMissingImagesDialog
+        open={fillOpen}
+        onOpenChange={setFillOpen}
+        projectId={id}
+        targets={products
+          .filter((p) => selectedIds.has(p.id))
+          .map<FillTarget>((p) => ({
+            id: p.id,
+            picked_urls: (p as { picked_urls?: string[] }).picked_urls ?? [],
+            thumbnail: p.thumbnail ?? null,
+            regenerated_main_image:
+              (p as { regenerated_main_image?: string | null }).regenerated_main_image ?? null,
+            ai_gallery_urls: (p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [],
+          }))}
+      />
     </main>
   );
 }
