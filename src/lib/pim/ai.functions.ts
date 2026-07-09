@@ -170,17 +170,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       (raw.additional_properties as unknown) ||
       null;
 
-    const systemPrompt = [
-    "Jesteś redaktorem katalogu produktów. Tworzysz jeden zwięzły, naturalny opis produktu na podstawie 1-3 źródeł internetowych.",
-    "Odpowiedź MUSI być poprawnym JSON-em: {\"name\": string, \"description\": string, \"features\": [{\"key\": string, \"value\": string}]}.",
-    "Pisz po polsku, neutralnym językiem katalogowym. Konkret zamiast emocji.",
-    "OPIS: 350-900 znaków. Pierwsze zdanie mówi czym produkt jest i do czego służy. Kolejne zdania podają najważniejsze fakty (materiał, wymiary, sposób działania, najważniejsze funkcje) wyłącznie na podstawie źródeł.",
-    "ZAKAZANE: marketingowe ogólniki i frazy-klisze typu: 'idealny wybór', 'doskonały', 'wyjątkowy', 'zaprojektowany z myślą', 'sprawdzi się w każdej sytuacji', 'najwyższa jakość', 'rewolucyjny', 'niezastąpiony', 'spełni oczekiwania', 'cieszy oko', 'gwarantuje', wykrzykniki, drugiej osoby ('Twój', 'Ciebie').",
-    "ZAKAZANE: ceny, dostępność, dostawa, gwarancja, nazwy sklepów, URL-e, frazy typu 'kup teraz'.",
-    "Nie powtarzaj nazwy produktu więcej niż raz. Nie zaczynaj od 'Przedstawiamy', 'Poznaj', 'Odkryj'. Bez nagłówków, bez list w opisie.",
-    "Jeśli źródła się różnią — wybierz wspólny, wiarygodny zbiór faktów. Jeśli czegoś nie ma w źródłach, pomiń to.",
-    "FEATURES: lista konkretnych cech technicznych (max 60). Klucze po polsku, krótkie (np. \"Materiał\", \"Wymiary\", \"Pojemność\", \"Kolor\"). Wartości konkretne, bez przymiotników marketingowych. Pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych: \"features\": [].",
-    ].join("\n");
+    const systemPrompt = GOLDEN_SEO_SYSTEM_PROMPT;
 
     const userPrompt = [
       `PRODUKT (z bazy klienta):`,
@@ -197,14 +187,19 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       `ŹRÓDŁA:`,
       sourceBlocks || "(brak)",
       "",
-      `Wygeneruj JSON {\"name\", \"description\", \"features\"}.`,
+      'Wygeneruj JSON {"name", "slug", "description", "meta_description", "seo_keywords", "features"} zgodnie z regułami SEO opisanymi w system prompt.',
     ].join("\n");
 
     try {
       const out = await callGateway(apiKey, systemPrompt, userPrompt);
-      const name = sanitize(out.name, blacklist);
-      const description = sanitize(out.description, blacklist);
       const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
+      const rawName = sanitize(out.name, blacklist) ?? "";
+      const name = clampName(rawName, 70);
+      const description = sanitize(out.description, blacklist) ?? "";
+      const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
+      const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
+      const slug = slugifyPl(slugSource, 75);
+      const seoKeywords = dedupeKeywords((out.seo_keywords ?? []).map(sanitizeStr));
       const newFeatures = (out.features ?? [])
         .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
         .filter((f) => f.key && f.value);
@@ -212,10 +207,18 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const shouldWriteFeatures =
         newFeatures.length > 0 && (data.mode === "all" || !existingFeatures.length);
 
+      const prevRow = enrichment as typeof enrichment & {
+        golden_slug?: string | null;
+        golden_meta_description?: string | null;
+        golden_seo_keywords?: unknown;
+      };
       const previous = enrichment.golden_name
         ? {
             name: enrichment.golden_name,
             description: enrichment.golden_description,
+            slug: prevRow.golden_slug ?? null,
+            meta_description: prevRow.golden_meta_description ?? null,
+            seo_keywords: prevRow.golden_seo_keywords ?? null,
             at: enrichment.generated_at,
           }
         : null;
@@ -224,6 +227,9 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         status: "GENERATED",
         golden_name: name,
         golden_description: description,
+        golden_slug: slug || null,
+        golden_meta_description: metaDescription || null,
+        golden_seo_keywords: seoKeywords.length ? seoKeywords : null,
         model: MODEL,
         generated_at: new Date().toISOString(),
         error: null,
@@ -236,7 +242,15 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         .update(updatePayload as never)
         .eq("id", enrichment.id);
       if (error) throw new Error(error.message);
-      return { ok: true, name, description, features: shouldWriteFeatures ? newFeatures : existingFeatures };
+      return {
+        ok: true,
+        name,
+        description,
+        slug,
+        metaDescription,
+        seoKeywords,
+        features: shouldWriteFeatures ? newFeatures : existingFeatures,
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await supabase
