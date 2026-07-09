@@ -2,6 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { probeManySizes } from "./image-size.server";
+import {
+  slugifyPl,
+  clampName,
+  clampMetaDescription,
+  dedupeKeywords,
+  GOLDEN_SEO_SYSTEM_PROMPT,
+} from "./seo";
 
 const MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -59,7 +66,10 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
   }
   const schema = z.object({
     name: z.string().min(1).max(500),
+    slug: z.string().max(120).optional().default(""),
     description: z.string().min(1).max(20000),
+    meta_description: z.string().max(400).optional().default(""),
+    seo_keywords: z.array(z.string().min(1).max(120)).max(12).optional().default([]),
     features: z
       .array(z.object({ key: z.string().min(1).max(200), value: z.string().min(1).max(2000) }))
       .max(60)
