@@ -1043,6 +1043,113 @@ function looksLikeProductPath(url: string): boolean {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Wycinamy z HTML sekcje "related / see more / polecane / klienci kupili"
+// PRZED ekstrakcją zdjęć. Karuzele powiązanych produktów mają identyczny
+// kształt DOM co główna galeria (te same anchor→img, srcset, /product/ w
+// ścieżce), więc AI-filter potem myli inne warianty marki z produktem.
+// ---------------------------------------------------------------------------
+
+const RELATED_TOKENS = [
+  "related", "cross-sell", "crosssell", "cross_sell",
+  "upsell", "up-sell", "up_sell",
+  "you-may-also-like", "you_may_also_like", "youmayalsolike",
+  "also-bought", "also_bought", "alsobought",
+  "customers-also", "customers_also",
+  "recommend", "similar", "see-more", "seemore",
+  "more-products", "more_products", "more-from",
+  "product-suggestions", "product_suggestions", "suggested-products",
+  "polecane", "podobne", "klienci-kupili", "klienci_kupili",
+  "zobacz-tez", "zobacz_tez", "wiecej-produktow",
+];
+
+const RELATED_ATTR_RE = new RegExp(
+  `(?:class|id)\\s*=\\s*["'][^"']*(?:${RELATED_TOKENS.join("|")})[^"']*["']`,
+  "i",
+);
+
+const RELATED_HEADING_RE =
+  /see\s+more|related|you\s+may\s+also\s+like|customers?\s+also\s+bought|similar\s+products|more\s+from|polecane|podobne\s+produkty|klienci\s+kupili|zobacz\s+te[żz]|wi[ęe]cej\s+produkt[óo]w/i;
+
+function stripElementsByAttr(html: string, tag: string): string {
+  const openRe = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+  let result = html;
+  let guard = 0;
+  while (guard++ < 50) {
+    openRe.lastIndex = 0;
+    let match: RegExpExecArray | null = null;
+    let found: { start: number; openEnd: number } | null = null;
+    while ((match = openRe.exec(result))) {
+      if (RELATED_ATTR_RE.test(match[0])) {
+        found = { start: match.index, openEnd: match.index + match[0].length };
+        break;
+      }
+    }
+    if (!found) break;
+    // Znajdź zbalansowane zamknięcie tego samego taga.
+    const scanRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+    scanRe.lastIndex = found.openEnd;
+    let depth = 1;
+    let endIdx = -1;
+    let s: RegExpExecArray | null;
+    while ((s = scanRe.exec(result))) {
+      if (s[0][1] === "/") {
+        depth--;
+        if (depth === 0) {
+          endIdx = s.index + s[0].length;
+          break;
+        }
+      } else {
+        depth++;
+      }
+      if (scanRe.lastIndex - found.start > 400_000) break; // safety
+    }
+    if (endIdx < 0) {
+      // Brak zamknięcia — utnij od kontenera do końca stringa.
+      result = result.slice(0, found.start);
+      break;
+    }
+    result = result.slice(0, found.start) + result.slice(endIdx);
+  }
+  return result;
+}
+
+function stripRelatedHeadingSections(html: string): string {
+  // Wytnij od nagłówka pasującego do RELATED_HEADING_RE do kolejnego
+  // nagłówka tego samego/wyższego poziomu albo końca <main>/<body>.
+  const headingRe = /<h([1-6])\b[^>]*>([\s\S]{0,400}?)<\/h\1>/gi;
+  const cuts: Array<{ start: number; end: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = headingRe.exec(html))) {
+    const text = m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (!RELATED_HEADING_RE.test(text)) continue;
+    const level = parseInt(m[1], 10);
+    const start = m.index;
+    // Szukaj kolejnego nagłówka poziomu <= level.
+    const stopRe = new RegExp(`<h([1-${level}])\\b`, "gi");
+    stopRe.lastIndex = m.index + m[0].length;
+    const stopMatch = stopRe.exec(html);
+    const end = stopMatch ? stopMatch.index : html.length;
+    cuts.push({ start, end });
+  }
+  if (!cuts.length) return html;
+  // Wytnij od tyłu, żeby nie przesuwać indeksów.
+  let out = html;
+  for (let i = cuts.length - 1; i >= 0; i--) {
+    out = out.slice(0, cuts[i].start) + out.slice(cuts[i].end);
+  }
+  return out;
+}
+
+function stripRelatedProductBlocks(html: string): string {
+  let out = html;
+  for (const tag of ["section", "aside", "div", "ul"]) {
+    out = stripElementsByAttr(out, tag);
+  }
+  out = stripRelatedHeadingSections(out);
+  return out;
+}
+
 /**
  * Wyciąga URL-e zdjęć produktu wyłącznie z galerii (lightbox/zoom).
  * Pomijamy `metadata.ogImage` i markdown `![](...)` (to zwykle banery
