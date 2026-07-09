@@ -61,6 +61,44 @@ export function filterImageUrls(urls: ReadonlyArray<string>): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Sekcja "## Description" — jeżeli markdown ma taki nagłówek, wycinamy TYLKO
+// jego treść do najbliższego kolejnego nagłówka (dowolny ##/###...). Dzięki temu
+// AI-filter nie dostaje na wejściu polityki wysyłki, recenzji, "Related", itp.
+// ---------------------------------------------------------------------------
+
+const DESC_HEADING_RE =
+  /^\s{0,3}(?:#{1,6}\s+|\*\*\s*)?(?:product\s+)?(description|opis|product\s+details|details|specification|specyfikacja)\s*[:\s*]{0,4}\**\s*$/im;
+
+const NEXT_HEADING_RE = /^\s{0,3}(?:#{1,6}\s+\S|\*\*[^\n]+\*\*\s*$)/m;
+
+const SKIP_SECTION_HEADINGS =
+  /^\s{0,3}#{1,6}\s+(reviews?|shipping|delivery|returns?|payments?|warranty|about\s+us|contact|faq|related|you\s+may\s+also\s+like|recenzje|opinie|dostawa|zwroty|p[łl]atno[śs]ci|kontakt|polecane)\b/i;
+
+export function extractDescriptionSection(md: string | null | undefined): string | null {
+  if (!md) return null;
+  const text = md.replace(/\r\n/g, "\n");
+  const lines = text.split("\n");
+  let startIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (DESC_HEADING_RE.test(line) && !SKIP_SECTION_HEADINGS.test(line)) {
+      startIdx = i + 1;
+      break;
+    }
+  }
+  if (startIdx < 0) return null;
+  let endIdx = lines.length;
+  for (let i = startIdx; i < lines.length; i++) {
+    if (NEXT_HEADING_RE.test(lines[i])) {
+      endIdx = i;
+      break;
+    }
+  }
+  const body = lines.slice(startIdx, endIdx).join("\n").trim();
+  return body.length ? body : null;
+}
+
 const DESC_BLOCK_PHRASES: RegExp[] = [
   /zapytaj o produkt/i,
   /udost[ęe]pnij/i,
@@ -108,6 +146,49 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
   /\bsobota\b/i,
   // godziny w formacie "10:00 am - 6:00 pm" lub "10:00 - 18:00"
   /\d{1,2}:\d{2}\s*(am|pm)?\s*[-–—]\s*\d{1,2}:\d{2}\s*(am|pm)?/i,
+  // === Angielskie chrome sklepu / e‑commerce ===
+  /^\s*was\s*:?\s*$/i,
+  /^\s*now\s*:?\s*$/i,
+  /you save/i,
+  /nan% on this product/i,
+  /^\s*sku\s*:/i,
+  /^\s*upc\s*:/i,
+  /^\s*current stock\s*:/i,
+  /decrease quantity/i,
+  /increase quantity/i,
+  /adding to cart/i,
+  /the item has been added/i,
+  /stock coming soon/i,
+  /^\s*out of stock\s*$/i,
+  /email\s+when\s+available/i,
+  /uk shipping/i,
+  /standard delivery/i,
+  /click\s*&\s*collect/i,
+  /photo id/i,
+  /restricted products?/i,
+  /ship to local rfd/i,
+  /local rfd/i,
+  /international shipping/i,
+  /import duties?/i,
+  /customs (policies|clearance|authorities|office)/i,
+  /shipping quote/i,
+  /bank holidays?/i,
+  /postal strikes?/i,
+  /remote postcodes?/i,
+  /exchanges? & refunds?/i,
+  /refund policy/i,
+  /return form/i,
+  /original (product )?packaging/i,
+  /product labels attached/i,
+  /28 days of purchase/i,
+  /package up the items/i,
+  // Ceny walutowe stojące same w linii
+  /^\s*[£€$]\s*\d/,
+  /^\s*\d+([.,]\d+)?\s*(gbp|eur|usd|pln|z[łl])\s*$/i,
+  // Separatory
+  /^\s*(\*\s*){3,}\s*$/,
+  /^\s*(-\s*){3,}\s*$/,
+  /^\s*_{3,}\s*$/,
 ];
 
 const DESC_CUT_HEADINGS: RegExp[] = [
@@ -122,7 +203,12 @@ const SKU_LINE_RE = /^\s*\d{2,4}[-\s]\d{2,4}\s*$/;
 
 export function sanitizeProductDescription(input: string | null | undefined): string {
   if (!input) return "";
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // 1) Jeżeli markdown ma nagłówek "## Description" / "## Opis" itp. — pracujemy
+  // tylko na jego zawartości. Reszta strony (Reviews / Shipping / Related /
+  // Return policy) nie trafia nawet do sit regexowych.
+  const section = extractDescriptionSection(input);
+  const source = section ?? input;
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
   const kept: string[] = [];
   for (const line of lines) {
     if (DESC_CUT_HEADINGS.some((re) => re.test(line.trim()))) break;

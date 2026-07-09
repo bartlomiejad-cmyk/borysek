@@ -12,7 +12,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { probeManySizes } from "./image-size.server";
 import { isMarketplaceUrl } from "./firecrawl.functions";
-import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
+import { extractDescriptionSection, filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
 import Firecrawl from "@mendable/firecrawl-js";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
@@ -1176,12 +1176,25 @@ async function filterScrapedForProduct(
     "- polecane / „zobacz też\" / „klienci kupili\", recenzje innych produktów, listingi kategorii, regulaminy, stopki, opisy ogólne sklepu",
     "- galerie/miniatury obrazków, logo brandu/producenta, ceny i kwoty (np. „2,69 zł\"), „Write a review\", Follow/Compare/Obserwuj/Porównuj",
     "- adresy sklepów stacjonarnych, kody pocztowe, godziny otwarcia, dni tygodnia (Mon-Fri / Pon-Pt), linki do Google Maps",
+    "- ANGIELSKIE chrome sklepu: SKU, UPC, Current Stock, Adding to cart, Out of stock, Email when available, Was, Now, You save, NaN%",
+    "- UK Shipping, Standard Delivery, Click & Collect, Photo ID, Restricted products, Ship to Local RFD, International Shipping, import duties, customs, Bank holidays, postal strikes, remote postcodes",
+    "- Exchanges & Refunds, Return Form, 28 days of purchase, original packaging, product labels attached",
+    "- CAŁE sekcje markdown: '## Reviews', '## Shipping', '## Delivery', '## Returns', '## Payment', '## Warranty', '## Related', '## You may also like', '## About', '## Contact', '## FAQ'",
+    "- ceny w GBP/EUR/USD/PLN (£30.00, $, €), separatory '* * *' / '---' / '___'",
     "Jeśli strona NIE dotyczy tego produktu (np. listing kategorii, inny wariant, inny produkt) — ustaw is_product_page=false i podaj krótki powód w rejected_reason.",
     "product_description: spójny fragment opisu dotyczący tego produktu (MAX 3000 znaków). Bez nazw sklepów, bez cen, bez „kup teraz\", bez numerów telefonu i adresów e‑mail.",
+    "JĘZYK: product_description MUSI być po polsku. Jeżeli źródło jest po angielsku (lub w innym języku), PRZETŁUMACZ na naturalny język polski, zachowując DOSŁOWNIE: nazwę produktu, markę, model, wariant, gramaturę, kaliber, jednostki, oznaczenia techniczne. Nie dopisuj informacji handlowych, które nie występują w źródle.",
+    "Jeżeli sekcja opisu na stronie jest bardzo krótka (jedno zdanie, sama nazwa) — zwróć krótki opis albo pusty string, NIE dopisuj chrome sklepu ani informacji o wysyłce.",
     "product_features: konkretne cechy techniczne pary klucz/wartość (np. Materiał, Wymiary, Pojemność, Kolor). Tylko to, co dotyczy tego produktu.",
+    "product_features: klucze po polsku (Kaliber, Masa pocisku, Typ pocisku, Materiał, Wymiary). Wartości mogą pozostać w oryginale gdy to nazwy własne (V-Max, FMJ).",
     "product_image_indexes: indeksy (1-based) WYŁĄCZNIE zdjęć przedstawiających ten produkt. Pomiń logo, ikony UI, banery, miniatury innych produktów, zdjęcia kategorii.",
     'Zwróć JSON: {"is_product_page": boolean, "product_description": string, "product_features": [{"key": string, "value": string}], "product_image_indexes": number[], "rejected_reason": string}.',
   ].join("\n");
+
+  // Jeżeli markdown ma sekcję "## Description" / "## Opis" — do AI wysyłamy
+  // tylko jej zawartość. Wtedy 3500-znakowe okno nie zostaje zjedzone przez
+  // politykę wysyłki, recenzje ani "Related products".
+  const focusedMarkdown = extractDescriptionSection(pageMarkdown) ?? pageMarkdown;
 
   const user = [
     "PRODUKT (z bazy klienta):",
@@ -1193,7 +1206,7 @@ async function filterScrapedForProduct(
     `TYTUŁ: ${pageTitle ?? ""}`,
     "",
     "MARKDOWN STRONY (skrócony):",
-    pageMarkdown.slice(0, 3500),
+    focusedMarkdown.slice(0, 3500),
     "",
     "KANDYDACI ZDJĘĆ (1-based):",
     imgList || "(brak)",
