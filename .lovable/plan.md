@@ -1,43 +1,44 @@
 ## Problem
 
-Do listy kandydatów zdjęć wpadają obrazki z sekcji „See more NORMA products / Related / Polecane / Klienci kupili" (zdjęcie #38). `pickImagesFromScrape` w `src/lib/pim/_workers.server.ts` przeszukuje **cały `rawHtml`** (lightbox anchors, `data-zoom-*`, `srcset`, `<img>` z `/product/` w ścieżce) — a karuzele „related" spełniają wszystkie te warunki (te same URL-e katalogowe, ten sam kształt HTML co główna galeria). AI-filter (`filterScrapedForProduct`) dostaje je jako kandydatów i część przepuszcza, bo wizualnie to prawdziwe produkty tej samej marki.
+Pola SEO (Slug, Meta description, Keywords) pozostają puste po kliknięciu **„Generuj z 3 źródeł"** w edytorze produktu, mimo że sam opis się zapisuje.
 
-Rozwiązanie: **wyciąć sekcje „related" z HTML zanim uruchomimy ekstrakcję zdjęć**. To robota deterministyczna, tania i nie wymaga zmian w AI.
+**Przyczyna** (zdiagnozowana z kodu i bazy):
+- Przycisk w UI wywołuje `generateGoldenRecord` z `src/lib/pim/ai.functions.ts` (user-facing server fn).
+- Ten handler pyta AI tylko o `{name, description, features}` i zapisuje do bazy tylko te trzy pola.
+- Osobna funkcja `runGenerateGoldenRecord` w `src/lib/pim/_workers.server.ts` (używana przez bulk-joby) już umie generować i zapisywać `golden_slug`, `golden_meta_description`, `golden_seo_keywords` — ale nie jest wywoływana z UI produktu.
+- Weryfikacja w DB: dla świeżo wygenerowanego produktu „Norma .223 Rem V-MAX" (generated_at = dziś) `golden_description` ma 615 znaków, ale wszystkie trzy pola SEO są `NULL`.
 
-## Zmiany
+## Fix
 
-### 1) `src/lib/pim/_workers.server.ts` — nowa funkcja `stripRelatedProductBlocks(html)`
+Wyrównać user-facing `generateGoldenRecord` do wariantu SEO-aware używanego przez workerów, bez duplikowania logiki.
 
-Wywoływana wewnątrz `pickImagesFromScrape` na `html` przed czterema regexami ekstrakcji. Wycina:
+### Kroki
 
-- **Kontenery z klasą/id `related`, `cross-sell`, `upsell`, `you-may-also-like`, `also-bought`, `recommend*`, `similar*`, `see-more`, `more-products`, `carousel-related`, `product-suggestions`, `polecane`, `podobne`, `klienci-kupili`, `zobacz-tez`** — dopasowanie po `class="..."` i `id="..."` na `<section>`, `<div>`, `<aside>`, `<ul>`. Wycinamy cały element razem z zawartością (regex balansujący po tagu; jeśli zagnieżdżony — bierzemy najbliższe zamknięcie tego samego tagu na tym samym poziomie).
-- **Sekcje po nagłówku**: wszystko między nagłówkiem `<h1..h6>` zawierającym frazy `see more`, `related`, `you may also like`, `customers also bought`, `polecane`, `podobne produkty`, `klienci kupili`, `zobacz też`, `więcej produktów`, `more from`, `similar products` — a następnym nagłówkiem tego samego lub wyższego poziomu (albo końcem `<main>`).
-- **Slick/Swiper karuzele oznaczone jako related**: elementy z klasami `swiper-*` / `slick-*` łączonymi z tokenami powyżej (np. `related-swiper`, `swiper-related`).
+1. **Nowy plik `src/lib/pim/seo.ts`** — czyste helpery bez zależności serwerowych: `slugifyPl`, `clampName`, `clampMetaDescription`, `dedupeKeywords` + eksportowany `GOLDEN_SEO_SYSTEM_PROMPT` (obecny prompt SEO z `_workers.server.ts`). Plik client-safe, importowalny z każdego miejsca.
 
-Zwraca „okrojony" HTML. Nie dotykamy głównej galerii produktu (te elementy nie zawierają tokenów `related/polecane/…`).
+2. **`src/lib/pim/_workers.server.ts`** — usunąć lokalne definicje tych helperów i `PL_DIACRITICS`/`SLUG_STOPWORDS`, `import` ich z nowego `./seo`. `GoldenSchema` zostaje. Prompt w `runGenerateGoldenRecord` zastąpić importem `GOLDEN_SEO_SYSTEM_PROMPT` (identyczna treść). Zachowanie workera niezmienione.
 
-### 2) `pickImagesFromScrape` — użyj oczyszczonego HTML
+3. **`src/lib/pim/ai.functions.ts` → `generateGoldenRecord`**:
+   - Rozszerzyć wewnętrzny zod-schema w `callGateway` o `slug`, `meta_description`, `seo_keywords` (wszystkie `.optional().default(...)`).
+   - Podmienić `systemPrompt` na `GOLDEN_SEO_SYSTEM_PROMPT` z `./seo`.
+   - W `userPrompt` poprosić o pełny JSON z polami SEO.
+   - Po parsowaniu: policzyć `slug = slugifyPl(out.slug || name, 75)`, `metaDescription = clampMetaDescription(...)`, `seoKeywords = dedupeKeywords(...)`, `name = clampName(...)` — dokładnie jak worker.
+   - Dorzucić do `updatePayload`: `golden_slug`, `golden_meta_description`, `golden_seo_keywords` (`|| null` gdy puste). W `previous` snapshot dołożyć te trzy pola (jak worker).
+   - Zwrot z handlera rozszerzyć o `{ slug, metaDescription, seoKeywords }`, żeby ewentualny konsument miał komplet — istniejący caller w `projects.$id.products.$pid.tsx` nie używa returna (odświeża przez `invalidate()`), więc bezpieczne.
 
-```ts
-const html = ...;
-const cleanHtml = html ? stripRelatedProductBlocks(html) : "";
-if (cleanHtml) { /* obecna pętla 1)–4) na cleanHtml */ }
-```
+Nie ruszamy: UI edytora produktu (formularz już czyta `golden_slug` / `golden_meta_description` / `golden_seo_keywords`), `updateGoldenRecord` (zapis ręczny), workerów, migracji.
 
-### 3) Markdown fallback: analogicznie w `extractDescriptionSection` już wycinamy sekcje `## Related` / `## You may also like` / `## Polecane` — bez zmian, ale dorzucamy do listy `SKIP_SECTION_HEADINGS` warianty: `see more`, `more from`, `similar products`, `podobne produkty`, `klienci kupili`, `zobacz też` (w `src/lib/pim/source-cleanup.ts`). To zabezpiecza ścieżkę AI-filtra i sanityzację opisów.
+### Weryfikacja
 
-### 4) Wzmocnienie AI-filtra (bezpiecznik, nie główny fix)
+Po zbuildowaniu: w projekcie **ammobrak** kliknąć na dowolnym produkcie **„Generuj z 3 źródeł"**, wrócić do zakładki SEO — pola Slug / Meta description / Słowa kluczowe powinny być wypełnione. Sprawdzić też, że stare bulk-joby (`GENERATE_GOLDEN`) nadal działają (worker używa tego samego prompta z `./seo`).
 
-W `filterScrapedForProduct` (system prompt) dodać jedno zdanie: „Jeżeli kandydatem zdjęcia jest inny wariant tego samego producenta (inny kaliber / gramatura / model), odrzuć — nawet gdy marka się zgadza. Dopasuj po kodzie / EAN / dokładnym wariancie z produktu klienta."
+## Detale techniczne
 
-## Weryfikacja
+- `seo.ts` bez `"use server"` / dynamicznych importów — czyste TS, bezpieczne w SSR i w bundle klienta.
+- `_workers.server.ts` traci ~50 linii (helpery), zyskuje 1 import.
+- `ai.functions.ts` traci ~30 linii duplikatu prompta (przechodzi w import), zyskuje ~15 linii SEO-processingu.
+- Zmiana kompatybilna wstecz: brakujące pola SEO w odpowiedzi AI schodzą do `""` / `[]` przez `.default(...)`, potem stają się `null` w bazie — tak samo jak w workerze.
 
-1. Uruchom „Wyszukaj źródła (Firecrawl)" dla produktu Norma .223 Rem V-MAX 3,2g z projektu ammobrak (albo dowolnego z widocznymi „related" blokami).
-2. W `product_sources.images` nie powinno być zdjęć innych wariantów (.30-06, .308, R&T FMJ 6,5 Creedmoor).
-3. W logu bulk-joba `filter_stats.rejected_images` powinno spaść (bo obcinamy zanim AI je zobaczy), a `kept_images` — być bliżej rzeczywistej galerii produktu.
+## Poza scope
 
-## Uwagi techniczne
-
-- Wszystkie zmiany są backend-only, żadnego dotykania UI.
-- Regexy działają na `rawHtml`; nie parsujemy DOM (workerd nie ma DOMParsera). Do wycinania kontenerów użyjemy prostego dopasowania zachłannego per-tag z ograniczeniem długości (max 200 kB na blok), żeby uniknąć katastroficznego backtrackingu.
-- Nic nie zmieniamy w już zapisanych rekordach; efekt dotyczy nowych scrape'ów. Dla istniejących produktów wystarczy ponownie kliknąć „Wyszukaj źródła".
+- Backfill istniejących ~64 produktów, które mają `golden_description` ale brak SEO — trzeba by uruchomić dla nich `GENERATE_GOLDEN` powtórnie. Mogę zrobić w osobnej turze (bulk-akcja „Uzupełnij SEO" lub jednorazowe re-generowanie tylko pól SEO bez ruszania opisu).
