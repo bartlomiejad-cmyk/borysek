@@ -1065,7 +1065,8 @@ function pickImagesFromScrape(res: unknown): string[] {
   const r = res as Record<string, unknown> | null;
   if (!r) return out;
 
-  const html = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
+  const rawHtml = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
+  const html = rawHtml ? stripRelatedProductBlocks(rawHtml) : "";
 
   if (html) {
     // 1) Lightbox/zoom: <a href="...jpg|png|webp">...<img...></a>
