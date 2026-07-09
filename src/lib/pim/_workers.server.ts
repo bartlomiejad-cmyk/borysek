@@ -1296,6 +1296,7 @@ async function filterScrapedForProduct(
     "product_features: konkretne cechy techniczne pary klucz/wartość (np. Materiał, Wymiary, Pojemność, Kolor). Tylko to, co dotyczy tego produktu.",
     "product_features: klucze po polsku (Kaliber, Masa pocisku, Typ pocisku, Materiał, Wymiary). Wartości mogą pozostać w oryginale gdy to nazwy własne (V-Max, FMJ).",
     "product_image_indexes: indeksy (1-based) WYŁĄCZNIE zdjęć przedstawiających ten produkt. Pomiń logo, ikony UI, banery, miniatury innych produktów, zdjęcia kategorii.",
+    "WAŻNE: jeżeli kandydatem zdjęcia jest INNY WARIANT tego samego producenta (inny kaliber, gramatura, model, rozmiar, kolor) — ODRZUĆ, nawet jeżeli marka i kształt się zgadzają. Dopasuj po kodzie / EAN / dokładnym wariancie z produktu klienta powyżej.",
     'Zwróć JSON: {"is_product_page": boolean, "product_description": string, "product_features": [{"key": string, "value": string}], "product_image_indexes": number[], "rejected_reason": string}.',
   ].join("\n");
 
