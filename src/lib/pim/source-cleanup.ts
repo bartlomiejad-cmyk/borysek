@@ -203,7 +203,12 @@ const SKU_LINE_RE = /^\s*\d{2,4}[-\s]\d{2,4}\s*$/;
 
 export function sanitizeProductDescription(input: string | null | undefined): string {
   if (!input) return "";
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // 1) Jeżeli markdown ma nagłówek "## Description" / "## Opis" itp. — pracujemy
+  // tylko na jego zawartości. Reszta strony (Reviews / Shipping / Related /
+  // Return policy) nie trafia nawet do sit regexowych.
+  const section = extractDescriptionSection(input);
+  const source = section ?? input;
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
   const kept: string[] = [];
   for (const line of lines) {
     if (DESC_CUT_HEADINGS.some((re) => re.test(line.trim()))) break;
