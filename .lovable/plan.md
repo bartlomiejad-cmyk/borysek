@@ -1,49 +1,43 @@
-## Cel
+## Problem
 
-Naprawić zaśmiecony opis produktu (przykład: strona `stephenandson-gunmakers.co.uk` — do bazy trafiła sekcja "Shipping / Reviews / SKU / £ / RFD / Adding to cart" zamiast właściwego opisu). Trzy warstwy poprawek: (1) sanityzacja markdownu wyciąga tylko sekcję `## Description`, (2) rozszerzone regexy tną chrome sklepów po angielsku, (3) prompt AI-filtra jawnie odrzuca chrome i tłumaczy opis EN→PL.
+Do listy kandydatów zdjęć wpadają obrazki z sekcji „See more NORMA products / Related / Polecane / Klienci kupili" (zdjęcie #38). `pickImagesFromScrape` w `src/lib/pim/_workers.server.ts` przeszukuje **cały `rawHtml`** (lightbox anchors, `data-zoom-*`, `srcset`, `<img>` z `/product/` w ścieżce) — a karuzele „related" spełniają wszystkie te warunki (te same URL-e katalogowe, ten sam kształt HTML co główna galeria). AI-filter (`filterScrapedForProduct`) dostaje je jako kandydatów i część przepuszcza, bo wizualnie to prawdziwe produkty tej samej marki.
+
+Rozwiązanie: **wyciąć sekcje „related" z HTML zanim uruchomimy ekstrakcję zdjęć**. To robota deterministyczna, tania i nie wymaga zmian w AI.
 
 ## Zmiany
 
-### 1. `src/lib/pim/source-cleanup.ts`
+### 1) `src/lib/pim/_workers.server.ts` — nowa funkcja `stripRelatedProductBlocks(html)`
 
-- **Dodać `extractDescriptionSection(md: string): string | null`**: jeżeli w markdown jest nagłówek `## Description`, `# Description`, `## Opis`, `## Product description`, `## Product Details`, `## Details`, `## Specification` (case-insensitive, dopuszcza `**`, dwukropki) — zwraca treść tej sekcji do najbliższego kolejnego nagłówka `#`/`##` lub do końca dokumentu; w przeciwnym razie `null`. Pomijamy sekcje-śmieci: `Reviews`, `Shipping`, `Delivery`, `Returns`, `Payment`, `Warranty`, `About us`, `Contact`, `FAQ`, `Related`, `You may also like`.
-- **Rozszerzyć `DESC_BLOCK_PHRASES`** o angielskie chrome:
-  - `was:\s*$`, `now:\s*$`, `you save`, `nan% on this product`, `sku:`, `upc:`, `current stock:`, `decrease quantity`, `increase quantity`, `adding to cart`, `the item has been added`, `stock coming soon`, `out of stock`, `email\s+when\s+available`,
-  - `uk shipping`, `standard delivery`, `click\s*&\s*collect`, `photo id`, `restricted products?`, `ship to local rfd`, `local rfd`, `international shipping`, `import duties?`, `customs (policies|clearance|authorities|office)`, `shipping quote`, `bank holidays?`, `postal strikes?`, `remote postcodes?`,
-  - `exchanges? & refunds?`, `refund policy`, `return form`, `original (product )?packaging`, `product labels attached`, `28 days of purchase`, `package up the items`,
-  - ceny walutowe stojące same w linii: `^\s*[£€$]\s*\d`, `^\s*\d+([.,]\d+)?\s*(gbp|eur|usd|pln|zł)\s*$`,
-  - separatory `* * *` / `---` / `___` w osobnej linii (usuwać).
-- **Zmienić `sanitizeProductDescription`**: na wejściu najpierw spróbuj `extractDescriptionSection`; jeżeli znalazło — pracuj TYLKO na tym fragmencie (zamiast całego markdown). Jeżeli po całym pipelinie zostaje < 40 znaków tekstu (po odjęciu białych znaków) — nie zmieniam, zostawiam (nie wpisuję fallbacku).
-- **Dodać `looksLikeEnglish(text: string): boolean`** (proste heurystyki: częstość słów `the/of/and/is/for/with` vs. brak polskich diakrytyków) — potrzebne dla promptu w kroku 3.
+Wywoływana wewnątrz `pickImagesFromScrape` na `html` przed czterema regexami ekstrakcji. Wycina:
 
-### 2. `src/lib/pim/_workers.server.ts` — funkcja `filterScrapedForProduct`
+- **Kontenery z klasą/id `related`, `cross-sell`, `upsell`, `you-may-also-like`, `also-bought`, `recommend*`, `similar*`, `see-more`, `more-products`, `carousel-related`, `product-suggestions`, `polecane`, `podobne`, `klienci-kupili`, `zobacz-tez`** — dopasowanie po `class="..."` i `id="..."` na `<section>`, `<div>`, `<aside>`, `<ul>`. Wycinamy cały element razem z zawartością (regex balansujący po tagu; jeśli zagnieżdżony — bierzemy najbliższe zamknięcie tego samego tagu na tym samym poziomie).
+- **Sekcje po nagłówku**: wszystko między nagłówkiem `<h1..h6>` zawierającym frazy `see more`, `related`, `you may also like`, `customers also bought`, `polecane`, `podobne produkty`, `klienci kupili`, `zobacz też`, `więcej produktów`, `more from`, `similar products` — a następnym nagłówkiem tego samego lub wyższego poziomu (albo końcem `<main>`).
+- **Slick/Swiper karuzele oznaczone jako related**: elementy z klasami `swiper-*` / `slick-*` łączonymi z tokenami powyżej (np. `related-swiper`, `swiper-related`).
 
-- **Prompt (system)**: rozszerzyć listę „POMIŃ BEZWZGLĘDNIE" o angielskie odpowiedniki:
-  - "SKU / UPC / Current Stock / Adding to cart / Out of stock / Email when available / Was / Now / You save / NaN%"
-  - "UK Shipping / Standard Delivery / Click & Collect / Photo ID / Restricted products / Ship to Local RFD / International Shipping / import duties / customs / Bank holidays / postal strikes / remote postcodes"
-  - "Exchanges & Refunds / Return Form / 28 days of purchase / original packaging"
-  - "sekcje '## Reviews', '## Shipping', '## Delivery', '## Returns', '## Payment', '## Warranty', '## Related', '## You may also like'"
-  - "ceny w GBP/EUR/USD/PLN, separatory `* * *` / `---`"
-- **Prompt (tłumaczenie)**: dodać regułę: „Jeżeli źródłowy opis jest po angielsku (lub w innym języku niż polski), PRZETŁUMACZ `product_description` na naturalny język polski, zachowując dosłownie: nazwę produktu, marki, model, wariant, gramaturę, kaliber, jednostki i inne dane techniczne. Cechy w `product_features` — klucze po polsku (np. Kaliber, Masa pocisku, Typ pocisku), wartości mogą pozostać w oryginale gdy to nazwy własne."
-- **Preprocessing markdown przed wysłaniem do AI**: przed `pageMarkdown.slice(0, 3500)` przepuścić przez nowy `extractDescriptionSection(pageMarkdown) ?? pageMarkdown` — AI dostaje już przyciętą sekcję zamiast całej strony. To główny lifting; sam prompt nie wystarczy, gdy w 3500 znaków wchodzi głównie polityka wysyłki.
+Zwraca „okrojony" HTML. Nie dotykamy głównej galerii produktu (te elementy nie zawierają tokenów `related/polecane/…`).
 
-### 3. Weryfikacja
+### 2) `pickImagesFromScrape` — użyj oczyszczonego HTML
 
-- Ręcznie przeklejam markdown z podanego URL (`stephenandson-gunmakers.co.uk/norma-223-rem-v-max-3-2g-50gr/`) do skryptu jednorazowego (dev-console) i sprawdzam:
-  - `extractDescriptionSection` zwraca jedną linię `Norma .223 Rem V Max 3,2g/50gr` (bo taka jest sekcja Description),
-  - `sanitizeProductDescription` na całym markdown daje pusty/bardzo krótki wynik (bo cała reszta to chrome),
-  - po ponownym Firecrawlu (`Uzupełnij zdjęcia` → tylko scrape) na produkcie Norma opis zapisany w `product_sources.description` jest krótki i po polsku (lub pusty, jeśli źródło nie ma opisu). Generator `golden_description` uzupełni resztę na podstawie nazwy + cech.
+```ts
+const html = ...;
+const cleanHtml = html ? stripRelatedProductBlocks(html) : "";
+if (cleanHtml) { /* obecna pętla 1)–4) na cleanHtml */ }
+```
 
-### Poza zakresem
+### 3) Markdown fallback: analogicznie w `extractDescriptionSection` już wycinamy sekcje `## Related` / `## You may also like` / `## Polecane` — bez zmian, ale dorzucamy do listy `SKIP_SECTION_HEADINGS` warianty: `see more`, `more from`, `similar products`, `podobne produkty`, `klienci kupili`, `zobacz też` (w `src/lib/pim/source-cleanup.ts`). To zabezpiecza ścieżkę AI-filtra i sanityzację opisów.
 
-- Layout dialogu importu / mapowania (bez zmian).
-- Regeneracja mediów, prompty FAL — bez zmian.
-- Języki inne niż PL/EN — regex EN wystarczy dla obecnych źródeł.
-- Brak zmian w schemacie DB.
+### 4) Wzmocnienie AI-filtra (bezpiecznik, nie główny fix)
 
-## Techniczne detale (dla dewelopera)
+W `filterScrapedForProduct` (system prompt) dodać jedno zdanie: „Jeżeli kandydatem zdjęcia jest inny wariant tego samego producenta (inny kaliber / gramatura / model), odrzuć — nawet gdy marka się zgadza. Dopasuj po kodzie / EAN / dokładnym wariancie z produktu klienta."
 
-- `extractDescriptionSection` musi być tolerancyjny na: `## Description`, `**Description**`, `Description\n===`, wielkość liter i trailing `:` — użyć regex `/^\s{0,3}(#{1,6}\s+|\*\*\s*)?(product\s+)?(description|opis|product details|specification|specyfikacja)\s*[:\s\*]{0,4}$/im` do znalezienia startu, i podobnego dla końca sekcji.
-- `looksLikeEnglish` używane tylko jako sanity-log; samo tłumaczenie realizuje LLM w prompt-cie.
-- Filter `AI_FILTER_MODEL` (`google/gemini-2.5-flash`) obsługuje tłumaczenie w tym samym wywołaniu — nie dodajemy drugiego przelotu.
-- Wszystkie zmiany są odwracalne per-produkt: użytkownik uruchamia `Wyszukaj źródła (Firecrawl)` ponownie na wybranych produktach, `product_sources` nadpisuje się.
+## Weryfikacja
+
+1. Uruchom „Wyszukaj źródła (Firecrawl)" dla produktu Norma .223 Rem V-MAX 3,2g z projektu ammobrak (albo dowolnego z widocznymi „related" blokami).
+2. W `product_sources.images` nie powinno być zdjęć innych wariantów (.30-06, .308, R&T FMJ 6,5 Creedmoor).
+3. W logu bulk-joba `filter_stats.rejected_images` powinno spaść (bo obcinamy zanim AI je zobaczy), a `kept_images` — być bliżej rzeczywistej galerii produktu.
+
+## Uwagi techniczne
+
+- Wszystkie zmiany są backend-only, żadnego dotykania UI.
+- Regexy działają na `rawHtml`; nie parsujemy DOM (workerd nie ma DOMParsera). Do wycinania kontenerów użyjemy prostego dopasowania zachłannego per-tag z ograniczeniem długości (max 200 kB na blok), żeby uniknąć katastroficznego backtrackingu.
+- Nic nie zmieniamy w już zapisanych rekordach; efekt dotyczy nowych scrape'ów. Dla istniejących produktów wystarczy ponownie kliknąć „Wyszukaj źródła".

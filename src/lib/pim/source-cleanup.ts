@@ -73,7 +73,7 @@ const DESC_HEADING_RE =
 const NEXT_HEADING_RE = /^\s{0,3}(?:#{1,6}\s+\S|\*\*[^\n]+\*\*\s*$)/m;
 
 const SKIP_SECTION_HEADINGS =
-  /^\s{0,3}#{1,6}\s+(reviews?|shipping|delivery|returns?|payments?|warranty|about\s+us|contact|faq|related|you\s+may\s+also\s+like|recenzje|opinie|dostawa|zwroty|p[łl]atno[śs]ci|kontakt|polecane)\b/i;
+  /^\s{0,3}#{1,6}\s+(reviews?|shipping|delivery|returns?|payments?|warranty|about\s+us|contact|faq|related|you\s+may\s+also\s+like|see\s+more|more\s+from|similar\s+products|customers?\s+also\s+bought|recenzje|opinie|dostawa|zwroty|p[łl]atno[śs]ci|kontakt|polecane|podobne\s+produkty|klienci\s+kupili|zobacz\s+te[żz]|wi[ęe]cej\s+produkt[óo]w)\b/i;
 
 export function extractDescriptionSection(md: string | null | undefined): string | null {
   if (!md) return null;
