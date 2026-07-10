@@ -24,6 +24,8 @@ function AuthLayout() {
   const navigate = useNavigate();
   const [email, setEmail] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isFullscreen = /\/preview\/?$/.test(pathname);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? null));
@@ -49,44 +51,48 @@ function AuthLayout() {
       />
 
       {/* Desktop sidebar (fixed, zawsze widoczny) */}
-      <aside className="hidden md:flex fixed left-0 top-0 z-30 h-screen w-[260px] flex-col gap-2 border-r border-border/40 bg-card/60 backdrop-blur-xl px-4 py-5">
-        <SidebarBrand />
-        <SidebarNav onNavigate={() => setMobileOpen(false)} />
-        <div className="mt-auto">
-          <SidebarFooter email={email} onSignOut={async () => {
-            await supabase.auth.signOut();
-            navigate({ to: "/login" });
-          }} />
-        </div>
-      </aside>
+      {!isFullscreen && (
+        <aside className="hidden md:flex fixed left-0 top-0 z-30 h-screen w-[260px] flex-col gap-2 border-r border-border/40 bg-card/60 backdrop-blur-xl px-4 py-5">
+          <SidebarBrand />
+          <SidebarNav onNavigate={() => setMobileOpen(false)} />
+          <div className="mt-auto">
+            <SidebarFooter email={email} onSignOut={async () => {
+              await supabase.auth.signOut();
+              navigate({ to: "/login" });
+            }} />
+          </div>
+        </aside>
+      )}
 
       {/* Main column */}
-      <div className="relative flex-1 min-w-0 flex flex-col md:ml-[260px]">
+      <div className={cn("relative flex-1 min-w-0 flex flex-col", !isFullscreen && "md:ml-[260px]")}>
         {/* Mobile topbar */}
-        <header className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-border/40 bg-background/70 backdrop-blur-xl px-4 h-14">
-          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full">
-                <Menu className="h-5 w-5" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[280px] bg-card/95 backdrop-blur-xl p-4 flex flex-col gap-2">
-              <SidebarBrand />
-              <SidebarNav onNavigate={() => setMobileOpen(false)} />
-              <div className="mt-auto">
-                <SidebarFooter email={email} onSignOut={async () => {
-                  await supabase.auth.signOut();
-                  navigate({ to: "/login" });
-                }} />
-              </div>
-            </SheetContent>
-          </Sheet>
-          <Link to="/projects" className="flex items-center gap-2">
-            <BrandMark />
-            <span className="font-serif text-lg">AI Enricher</span>
-          </Link>
-          <span className="w-9" />
-        </header>
+        {!isFullscreen && (
+          <header className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-border/40 bg-background/70 backdrop-blur-xl px-4 h-14">
+            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[280px] bg-card/95 backdrop-blur-xl p-4 flex flex-col gap-2">
+                <SidebarBrand />
+                <SidebarNav onNavigate={() => setMobileOpen(false)} />
+                <div className="mt-auto">
+                  <SidebarFooter email={email} onSignOut={async () => {
+                    await supabase.auth.signOut();
+                    navigate({ to: "/login" });
+                  }} />
+                </div>
+              </SheetContent>
+            </Sheet>
+            <Link to="/projects" className="flex items-center gap-2">
+              <BrandMark />
+              <span className="font-serif text-lg">AI Enricher</span>
+            </Link>
+            <span className="w-9" />
+          </header>
+        )}
 
         <main className="relative flex-1 animate-fade-in">
           <Outlet />
