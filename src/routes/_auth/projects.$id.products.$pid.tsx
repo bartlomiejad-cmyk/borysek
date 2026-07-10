@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye } from "lucide-react";
 import { ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -355,6 +355,12 @@ function ProductDetail() {
           )}
         </div>
         <div className="flex gap-2">
+        <Button asChild variant="outline" title="Otwórz podgląd karty produktu na podstawie złotego rekordu — dobre do demo dla klienta">
+          <Link to="/projects/$id/products/$pid/preview" params={{ id, pid }} target="_blank" rel="noopener noreferrer">
+            <Eye className="h-4 w-4 mr-2" />
+            Podgląd karty
+          </Link>
+        </Button>
         <Button
           variant="outline"
           title="Usuwa logo metod płatności, ikony kontaktu, stopki i bloki adresu sklepu z zapisanych źródeł. Bezpieczne, bez kosztu Firecrawl."
