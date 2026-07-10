@@ -69,6 +69,7 @@ import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
+import { ImportUrlsDialog } from "@/components/pim/ImportUrlsDialog";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
