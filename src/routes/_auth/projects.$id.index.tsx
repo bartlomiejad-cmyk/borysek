@@ -69,6 +69,7 @@ import { Progress } from "@/components/ui/progress";
 import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
+import { ImportUrlsDialog } from "@/components/pim/ImportUrlsDialog";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
@@ -540,7 +541,7 @@ function ProjectPage() {
         </TabsList>
 
         <TabsContent value="data" className="space-y-3 pt-3">
-          <div className="grid md:grid-cols-3 gap-3">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
             <ImportCsvDialog
               projectId={id}
               count={meta?.counts.source_products}
@@ -550,6 +551,10 @@ function ProjectPage() {
                 code_column: meta?.project.code_column,
                 ean_column: meta?.project.ean_column,
               }}
+              onDone={() => refetchProducts()}
+            />
+            <ImportUrlsDialog
+              projectId={id}
               onDone={() => refetchProducts()}
             />
             <UploadZone

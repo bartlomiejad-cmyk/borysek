@@ -1064,7 +1064,7 @@ function stripRelatedProductBlocks(html: string): string {
  * Pomijamy `metadata.ogImage` i markdown `![](...)` (to zwykle banery
  * udostępnień, polecane produkty albo logo brandu).
  */
-function pickImagesFromScrape(res: unknown): string[] {
+export function pickImagesFromScrape(res: unknown): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const push = (raw: unknown) => {

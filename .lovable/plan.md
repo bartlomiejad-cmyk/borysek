@@ -1,44 +1,55 @@
-## Problem
 
-Pola SEO (Slug, Meta description, Keywords) pozostają puste po kliknięciu **„Generuj z 3 źródeł"** w edytorze produktu, mimo że sam opis się zapisuje.
+# Import produktów z wklejonych linków
 
-**Przyczyna** (zdiagnozowana z kodu i bazy):
-- Przycisk w UI wywołuje `generateGoldenRecord` z `src/lib/pim/ai.functions.ts` (user-facing server fn).
-- Ten handler pyta AI tylko o `{name, description, features}` i zapisuje do bazy tylko te trzy pola.
-- Osobna funkcja `runGenerateGoldenRecord` w `src/lib/pim/_workers.server.ts` (używana przez bulk-joby) już umie generować i zapisywać `golden_slug`, `golden_meta_description`, `golden_seo_keywords` — ale nie jest wywoływana z UI produktu.
-- Weryfikacja w DB: dla świeżo wygenerowanego produktu „Norma .223 Rem V-MAX" (generated_at = dziś) `golden_description` ma 615 znaków, ale wszystkie trzy pola SEO są `NULL`.
+Dodaje drugi tryb dodawania produktów do projektu PIM: użytkownik wkleja listę URL-i (jeden na linię), Firecrawl scrapuje każdą stronę, AI wyciąga pola produktowe (nazwa, kod, EAN, opis, obrazy), tworzone są rekordy w `source_products`, `product_sources` i `search_results` — reszta pipeline'u (Match, Generuj złote) uruchamiana ręcznie tak jak dziś.
 
-## Fix
+## UI
 
-Wyrównać user-facing `generateGoldenRecord` do wariantu SEO-aware używanego przez workerów, bez duplikowania logiki.
+- Obok obecnego przycisku „Wgraj CSV" w `src/routes/_auth/projects.$id.index.tsx` dodać przycisk **„Dodaj z linków"**.
+- Nowy komponent `src/components/pim/ImportUrlsDialog.tsx`:
+  - `Textarea` (do ~200 URL-i, jeden na linię), licznik wklejonych/prawidłowych linków, walidacja `new URL()`, deduplikacja.
+  - Podgląd listy z per-URL statusem (`pending / scraping / extracting / ok / error`) i komunikatem błędu.
+  - Przyciski **Anuluj** / **Importuj**. Sticky footer, layout jak w naprawionym `ImportCsvDialog`.
+  - Pasek postępu (X z N).
 
-### Kroki
+## Backend (server function)
 
-1. **Nowy plik `src/lib/pim/seo.ts`** — czyste helpery bez zależności serwerowych: `slugifyPl`, `clampName`, `clampMetaDescription`, `dedupeKeywords` + eksportowany `GOLDEN_SEO_SYSTEM_PROMPT` (obecny prompt SEO z `_workers.server.ts`). Plik client-safe, importowalny z każdego miejsca.
+Nowy plik `src/lib/pim/import-urls.functions.ts` — jedna funkcja `importProductsFromUrls` (`createServerFn` + `requireSupabaseAuth`), wejście: `{ projectId, urls: string[] }`. Dla każdego URL synchronicznie (max ~10 równolegle, batchowane po 5 przez `Promise.all`, całość opakowana w limity by nie przekroczyć budżetu czasu Workera — jeśli lista > ~40 URL, rozbić na kolejne wywołania z frontu z paginacją):
 
-2. **`src/lib/pim/_workers.server.ts`** — usunąć lokalne definicje tych helperów i `PL_DIACRITICS`/`SLUG_STOPWORDS`, `import` ich z nowego `./seo`. `GoldenSchema` zostaje. Prompt w `runGenerateGoldenRecord` zastąpić importem `GOLDEN_SEO_SYSTEM_PROMPT` (identyczna treść). Zachowanie workera niezmienione.
+1. **Firecrawl scrape** — użyć istniejącego SDK/klienta (jak w `_workers.server.ts` przy discovery). Formaty: `markdown`, `rawHtml`, `links`. Przefiltrować `rawHtml` przez istniejące `stripRelatedProductBlocks` / `stripRelatedHeadingSections` (już są w `_workers.server.ts` — wyeksportować lub przenieść do współdzielonego helpera).
+2. **Ekstrakcja pól produktowych** — wywołanie Lovable AI Gateway (`openai/gpt-5.5`) z Zod schema:
+   ```
+   { nazwa, kod, ean, description, product_features (Record<string,string>), main_image_url, gallery_urls }
+   ```
+   Input: focused markdown (`extractDescriptionSection` z `source-cleanup.ts`) + JSON-LD z rawHtml (parse `<script type="application/ld+json">` → `Product` schema jako hint dla AI).
+   System prompt: identyczne reguły jak w istniejącym `filterScrapedForProduct` (odrzucaj chrome sklepu, tłumacz EN→PL, zachowaj dane techniczne).
+3. **Obrazki** — użyć `pickImagesFromScrape` / `filterImageUrls` na wyfiltrowanym HTML, jak w istniejącym pipeline.
+4. **Zapis w bazie** (w jednej transakcji per URL):
+   - `source_products` — `insert` z `nazwa/kod/ean/ext_id=null/has_images` z `raw = { imported_from_url: url }`.
+   - `product_sources` — `upsert` (`onConflict: project_id,url`) z pełnym scrape'em (title, description, images, extra_images, raw).
+   - `search_results` — `insert` wiersz z `term = nazwa` i `organic_urls = [url]` (dzięki temu późniejsze `runMatching` od razu połączy nowe źródło z produktem).
+   - `enrichments` — `upsert` (`onConflict: source_product_id`) z `status='PENDING', match_type='NO_MATCH'`, identycznie jak w `ingestSourceProducts`.
+5. Zwraca `{ ok: [{url, sourceProductId, name}], failed: [{url, error}] }`.
 
-3. **`src/lib/pim/ai.functions.ts` → `generateGoldenRecord`**:
-   - Rozszerzyć wewnętrzny zod-schema w `callGateway` o `slug`, `meta_description`, `seo_keywords` (wszystkie `.optional().default(...)`).
-   - Podmienić `systemPrompt` na `GOLDEN_SEO_SYSTEM_PROMPT` z `./seo`.
-   - W `userPrompt` poprosić o pełny JSON z polami SEO.
-   - Po parsowaniu: policzyć `slug = slugifyPl(out.slug || name, 75)`, `metaDescription = clampMetaDescription(...)`, `seoKeywords = dedupeKeywords(...)`, `name = clampName(...)` — dokładnie jak worker.
-   - Dorzucić do `updatePayload`: `golden_slug`, `golden_meta_description`, `golden_seo_keywords` (`|| null` gdy puste). W `previous` snapshot dołożyć te trzy pola (jak worker).
-   - Zwrot z handlera rozszerzyć o `{ slug, metaDescription, seoKeywords }`, żeby ewentualny konsument miał komplet — istniejący caller w `projects.$id.products.$pid.tsx` nie używa returna (odświeża przez `invalidate()`), więc bezpieczne.
+## Reużycie istniejącego kodu
 
-Nie ruszamy: UI edytora produktu (formularz już czyta `golden_slug` / `golden_meta_description` / `golden_seo_keywords`), `updateGoldenRecord` (zapis ręczny), workerów, migracji.
+- Wyciągnąć wspólne helpery do `src/lib/pim/scrape-shared.server.ts`: `stripRelatedProductBlocks`, `stripRelatedHeadingSections`, `pickImagesFromScrape`, `parseJsonLdProduct` (nowy) — zaimportować z `_workers.server.ts` (bez duplikacji, refaktor tylko re-export).
+- Prompt ekstrakcji: nowy stały prompt osadzony w `import-urls.functions.ts` (mocno wzorowany na `filterScrapedForProduct`, ale z wymogiem zwrócenia `nazwa/kod/ean` z heurystykami: EAN = ciąg 8/12/13 cyfr, kod = SKU/MPN z JSON-LD lub sekcji „Product code/SKU").
 
-### Weryfikacja
+## Flow
 
-Po zbuildowaniu: w projekcie **ammobrak** kliknąć na dowolnym produkcie **„Generuj z 3 źródeł"**, wrócić do zakładki SEO — pola Slug / Meta description / Słowa kluczowe powinny być wypełnione. Sprawdzić też, że stare bulk-joby (`GENERATE_GOLDEN`) nadal działają (worker używa tego samego prompta z `./seo`).
+- Zgodnie z odpowiedzią użytkownika: **żadnego auto-pipeline'u**. Po zakończeniu importu dialog pokazuje „Zaimportowano X produktów, Y błędów" i toast z podpowiedzią: „Kliknij **Dopasuj** aby powiązać źródła i **Generuj złote** aby uzupełnić dane".
 
-## Detale techniczne
+## Uwagi techniczne
 
-- `seo.ts` bez `"use server"` / dynamicznych importów — czyste TS, bezpieczne w SSR i w bundle klienta.
-- `_workers.server.ts` traci ~50 linii (helpery), zyskuje 1 import.
-- `ai.functions.ts` traci ~30 linii duplikatu prompta (przechodzi w import), zyskuje ~15 linii SEO-processingu.
-- Zmiana kompatybilna wstecz: brakujące pola SEO w odpowiedzi AI schodzą do `""` / `[]` przez `.default(...)`, potem stają się `null` w bazie — tak samo jak w workerze.
+- Cloudflare Worker timeout 30s: 200 URL-i × Firecrawl+AI to zbyt dużo synchronicznie. Front będzie wysyłał w paczkach po 10 URL-i sekwencyjnie i aktualizował UI. Alternatywnie (jeśli okaże się wolne) w kolejnej turze przeniesiemy to na `bulk_jobs` (kind: `URL_IMPORT`) — na razie zaczynamy od trybu synchronicznego z paczkowaniem, bo user chce widzieć wyniki od razu.
+- Walidacja URL po stronie serwera (Zod `.url()`), blacklist marketplace'ów **wyłączona** (user świadomie wkleja linki, może to być np. producent).
+- Bez zmian w schemacie DB.
 
-## Poza scope
+## Pliki
 
-- Backfill istniejących ~64 produktów, które mają `golden_description` ale brak SEO — trzeba by uruchomić dla nich `GENERATE_GOLDEN` powtórnie. Mogę zrobić w osobnej turze (bulk-akcja „Uzupełnij SEO" lub jednorazowe re-generowanie tylko pól SEO bez ruszania opisu).
+- `src/lib/pim/import-urls.functions.ts` — nowa server function.
+- `src/lib/pim/scrape-shared.server.ts` — nowe (wyekstrahowane helpery z `_workers.server.ts`).
+- `src/lib/pim/_workers.server.ts` — usunąć zduplikowane helpery, importować z shared.
+- `src/components/pim/ImportUrlsDialog.tsx` — nowy dialog.
+- `src/routes/_auth/projects.$id.index.tsx` — nowy przycisk „Dodaj z linków" obok „Wgraj CSV".
