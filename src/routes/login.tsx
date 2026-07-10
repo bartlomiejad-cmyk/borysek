@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,15 @@ export const Route = createFileRoute("/login")({
 
 function safeRedirectPath(redirect?: string) {
   if (!redirect) return "/projects";
+  const value = redirect.trim();
+  if (!value) return "/projects";
+  if (value.startsWith("/")) {
+    if (value.startsWith("//") || value === "/login") return "/projects";
+    return value;
+  }
   try {
-    const url = redirect.startsWith("http") ? new URL(redirect) : new URL(redirect, window.location.origin);
-    if (url.origin !== window.location.origin) return "/projects";
+    const url = new URL(value);
+    if (typeof window !== "undefined" && url.origin !== window.location.origin) return "/projects";
     const path = `${url.pathname}${url.search}${url.hash}`;
     if (!path.startsWith("/") || path.startsWith("//") || path === "/login") return "/projects";
     return path;
@@ -37,7 +43,9 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const redirectTo = safeRedirectPath(redirect);
 
-  const navigateAfterLogin = () => navigate({ to: redirectTo });
+  const navigateAfterLogin = useCallback(() => {
+    navigate({ href: redirectTo, replace: true });
+  }, [navigate, redirectTo]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -47,7 +55,7 @@ function LoginPage() {
       if (session) navigateAfterLogin();
     });
     return () => sub.subscription.unsubscribe();
-  }, [navigate, redirectTo]);
+  }, [navigateAfterLogin]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
