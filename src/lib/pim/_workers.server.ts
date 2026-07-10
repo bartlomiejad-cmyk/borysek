@@ -687,20 +687,21 @@ function buildSeedreamPrompt(opts: {
 }): string {
   const fill = Math.max(30, Math.min(95, opts.paddingPercent));
   const lines: string[] = [];
-  lines.push(`CRITICAL BACKGROUND: The background MUST be PURE WHITE #FFFFFF — no cream, beige, ivory, gray, gradient, vignette, paper texture. All four corners must be exactly #FFFFFF. If in doubt, make the background BRIGHTER and WHITER.`);
+  lines.push(`CRITICAL BACKGROUND: ONLY the seamless studio background behind the product must be PURE WHITE #FFFFFF — no cream, beige, ivory, gray, gradient, vignette, paper texture. All four corners of the frame must be exactly #FFFFFF. "Whiter/brighter" applies to the BACKGROUND ONLY — never to the product itself.`);
+  lines.push(`CRITICAL COLOUR (product): Preserve the product's own colour(s) pixel-faithfully — hue, saturation and tone identical to the source reference. DO NOT desaturate, whiten, lighten, brighten, bleach or shift the hue of the product body, cover, packaging, printed graphics or labels. If the source product is green, the output stays that exact green; the same applies to every other colour. The product must not be tinted to match the white background.`);
   if (opts.isComposite && opts.componentB) {
-    lines.push(`COMPOSITION: Place "${opts.componentB}" naturally beside "${opts.componentA}" in one frame. Both elements in sharp focus, realistic relative scale.`);
+    lines.push(`COMPOSITION: Place "${opts.componentB}" naturally beside "${opts.componentA}" in one frame. Both elements in sharp focus, realistic relative scale. The products retain their original colours — only the surroundings become pure white.`);
   } else {
-    lines.push(`SUBJECT: Move the exact same product ("${opts.componentA}") onto a clean pure white #FFFFFF seamless studio background.`);
+    lines.push(`SUBJECT: Move the exact same product ("${opts.componentA}") onto a clean pure white #FFFFFF seamless studio background. The product retains its original colour(s) — only the surroundings become pure white.`);
   }
   lines.push(`FRAMING: Scale the product UP so it fills ${fill}% of the frame in BOTH width and height. Center it.`);
   lines.push(opts.applyShadow
     ? `SHADOW: Add a soft realistic contact shadow directly under the product only.`
     : `SHADOW: No shadow. Product floats cleanly on pure white.`);
-  lines.push(`PRESERVE: Keep every printed label, logo, brand name, illustration, color, material and proportions exactly as in the source.`);
+  lines.push(`PRESERVE: Keep the product's colour EXACTLY as in the source, including saturation and tone. Keep every printed label, logo, brand name, illustration, material and proportions exactly as in the source.`);
   lines.push(`WATERMARK REMOVAL: Remove watermarks, store logos, website URLs, photo credits, shop names and semi-transparent overlay text that are NOT physically printed on the product packaging itself.`);
   if (opts.customStyle && opts.customStyle.trim()) lines.push(`STYLE: ${opts.customStyle.trim()}`);
-  lines.push(`AVOID: cream/beige/ivory/warm/gray background, tint, vignette, paper texture, tiny product, off-center, blurred text, regenerated artwork, missing labels, visible watermarks.`);
+  lines.push(`AVOID: cream/beige/ivory/warm/gray background, tint, vignette, paper texture, tiny product, off-center, blurred text, regenerated artwork, missing labels, visible watermarks, whitened/desaturated/bleached product body, colour drift, product tinted to match the background.`);
   return lines.join(" ");
 }
 
