@@ -196,7 +196,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
       const rawName = sanitize(out.name, blacklist) ?? "";
       const name = clampName(rawName, 70);
-      const description = sanitize(out.description, blacklist) ?? "";
+      const rawDescription = sanitize(out.description, blacklist) ?? "";
       const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
       const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
       const slug = slugifyPl(slugSource, 75);
@@ -207,6 +207,10 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const existingFeatures = ((enrichment as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
       const shouldWriteFeatures =
         newFeatures.length > 0 && (data.mode === "all" || !existingFeatures.length);
+      const description = sanitizeGoldenDescriptionHtml(rawDescription, {
+        name,
+        features: shouldWriteFeatures ? newFeatures : existingFeatures,
+      });
 
       const prevRow = enrichment as typeof enrichment & {
         golden_slug?: string | null;
