@@ -14,7 +14,10 @@ const EXTRACT_MODEL = "google/gemini-2.5-flash";
 
 const ExtractSchema = z.object({
   nazwa: z.string().max(300).default(""),
+  producent: z.string().max(160).default(""),
+  marka: z.string().max(160).default(""),
   kod: z.string().max(120).default(""),
+  kod_producenta: z.string().max(120).default(""),
   ean: z.string().max(60).default(""),
   product_description: z.string().max(4000).default(""),
   product_features: z
