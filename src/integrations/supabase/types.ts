@@ -536,6 +536,7 @@ export type Database = {
         | "FIRECRAWL_DISCOVERY"
         | "PHOTO_TOOL_GENERATE"
         | "PHOTO_TOOL_EDIT_IMAGE"
+        | "PIM_VISUALIZATIONS"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -679,6 +680,7 @@ export const Constants = {
         "FIRECRAWL_DISCOVERY",
         "PHOTO_TOOL_GENERATE",
         "PHOTO_TOOL_EDIT_IMAGE",
+        "PIM_VISUALIZATIONS",
       ],
       bulk_job_status: [
         "PENDING",
