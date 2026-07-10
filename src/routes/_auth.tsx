@@ -8,9 +8,14 @@ import { LogOut, FlaskConical, FolderKanban, ShieldCheck, Menu, Sparkles } from 
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_auth")({
-  beforeLoad: async () => {
+  beforeLoad: async ({ location }) => {
     const { data } = await supabase.auth.getSession();
-    if (!data.session) throw redirect({ to: "/login" });
+    if (!data.session) {
+      throw redirect({
+        to: "/login",
+        search: { redirect: location.href },
+      });
+    }
   },
   component: AuthLayout,
 });
