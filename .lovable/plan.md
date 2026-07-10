@@ -1,32 +1,23 @@
+## Problem
 
-## Cel
-W widoku edycji produktu w projekcie PIM dodać przycisk **„Podgląd karty produktu"**, który otwiera pełnoekranową wizualizację karty produktowej zbudowaną z danych ze **złotego rekordu** (golden_name, golden_description, cechy, SEO, główne zdjęcie + galeria, w tym wizualizacje AI). Ma to służyć demo dla klienta: pokazujemy pusty produkt „przed", a po ~5 minutach otwieramy podgląd „po".
+Klikając „Podgląd karty" trafiasz z powrotem do listy/edycji produktu, bo trasa `projects.$id.products.$pid.preview.tsx` jest **dzieckiem** trasy `projects.$id.products.$pid.tsx`. Rodzic (strona edycji) nie renderuje `<Outlet />`, więc dziecko (`/preview`) nie ma gdzie się zamontować i zamiast podglądu ładuje się rodzic.
 
-## Zakres
+Rozwiązanie: odciąć zagnieżdżenie — podgląd ma być pełnoekranową, samodzielną trasą pod tym samym URL-em, nie wewnątrz layoutu edycji.
 
-1. **Nowa strona-podgląd (route)**
-   - `src/routes/_auth/projects.$id.products.$pid.preview.tsx`
-   - Loader: używa istniejącego `getProductDetail` (server fn) — bez nowych zapytań.
-   - Layout imitujący realną kartę sklepu:
-     - Lewa kolumna: główne zdjęcie (priorytet: `pinned_main_url` → `regenerated_main_image` → pierwsze z galerii), pod spodem miniatury (galeria źródłowa + `ai_gallery_urls`), klik = zmiana głównego.
-     - Prawa kolumna: `golden_name` jako H1, SKU/EAN/MPN jako meta, sekcja opisu (`golden_description` renderowany jako HTML/markdown), tabela cech (`golden_features` key/value), sekcja SEO na dole (slug, meta description, keywords) w zwijanym akordeonie „Podgląd SEO / Google snippet".
-     - Symulowany „Google snippet" (title + URL + meta description) — atrakcyjny efekt demo.
-   - Wersja przyjazna do prezentacji: szeroki kontener, brak sidebaru PIM, jasny/ciemny wariant zgodny z motywem projektu.
+## Zmiana
 
-2. **Przycisk w edytorze produktu**
-   - `src/routes/_auth/projects.$id.products.$pid.tsx`: dodać w toolbarze przycisk **„Podgląd karty"** (ikona `Eye`), otwierający nową trasę w nowej karcie (`target="_blank"`).
-   - Wariant zapasowy: przycisk „Kopiuj link do podglądu".
+1. Zmiana nazwy pliku trasy podglądu (TanStack „escape nesting" znakiem `_`):
+   - z `src/routes/_auth/projects.$id.products.$pid.preview.tsx`
+   - na `src/routes/_auth/projects.$id.products.$pid_.preview.tsx`
 
-3. **Fallback gdy brak złotego rekordu**
-   - Jeśli `golden_name`/`golden_description` są puste → pokazać stan „Brak złotego rekordu — wygeneruj najpierw «Złote rekordy»" z linkiem powrotnym. To pozwala pokazać „before/after" na demo.
+2. W tym samym pliku zaktualizować deklarację:
+   - `createFileRoute("/_auth/projects/$id/products/$pid_/preview")`
+   URL widoczny dla użytkownika pozostaje `/projects/:id/products/:pid/preview` (podkreślnik jest tylko sygnałem dla routera, że trasa nie jest zagnieżdżona w rodzicu).
 
-## Poza zakresem
-- Bez zmian w backendzie / server functions / bazie.
-- Bez publicznego, niezalogowanego linku do udostępniania na zewnątrz (można dodać później jako osobny etap).
-- Bez edycji danych — widok czysto read-only.
+3. W pliku edycji produktu poprawić `<Link to=...>` z `"/projects/$id/products/$pid/preview"` na `"/projects/$id/products/$pid_/preview"` (bez zmiany `params` i `target="_blank"`).
 
-## Pliki do zmiany/utworzenia
-- **Nowy:** `src/routes/_auth/projects.$id.products.$pid.preview.tsx`
-- **Edycja:** `src/routes/_auth/projects.$id.products.$pid.tsx` (dodanie przycisku „Podgląd karty")
+4. `src/routeTree.gen.ts` regeneruje się automatycznie — nie ruszamy.
 
-Czy zgadzasz się, żeby podgląd był pod trasą `_auth` (wymaga logowania), czy chcesz publiczny link do wysłania klientowi bez logowania (to wymagałoby osobnego etapu z tokenem)?
+## Efekt
+
+Podgląd karty otwiera się w nowej karcie jako pełny widok karty produktu (bez layoutu edycji), bez powrotu do listy.
