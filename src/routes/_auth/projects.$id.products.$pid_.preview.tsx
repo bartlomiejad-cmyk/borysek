@@ -6,7 +6,7 @@ import { getProductDetail } from "@/lib/pim/queries.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ArrowLeft, Search, Sparkles, ShoppingCart, Heart, Share2, Truck, ShieldCheck, RotateCcw,
+  Search, Sparkles, ShoppingCart, Heart, Share2, Truck, ShieldCheck, RotateCcw,
   Star, ChevronRight, User, Menu, Minus, Plus, Check, Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -87,19 +87,6 @@ function ProductPreview() {
 
   return (
     <main className="min-h-screen bg-background">
-      {/* Lovable demo bar (not part of the shop) */}
-      <div className="border-b bg-muted/40 px-4 py-2 flex items-center justify-between gap-2 text-xs">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/projects/$id/products/$pid" params={{ id, pid }}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Wróć do edycji
-          </Link>
-        </Button>
-        <span className="text-muted-foreground flex items-center gap-2">
-          <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-          Podgląd demo · dane wygenerowane w Lovable PIM (złoty rekord)
-        </span>
-      </div>
-
       {/* Fake shop chrome — rendered even without a golden record to keep demo coherent */}
       <header className="border-b bg-background sticky top-0 z-10 backdrop-blur">
         <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-6">
