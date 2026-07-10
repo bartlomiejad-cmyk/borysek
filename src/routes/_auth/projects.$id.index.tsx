@@ -553,6 +553,10 @@ function ProjectPage() {
               }}
               onDone={() => refetchProducts()}
             />
+            <ImportUrlsDialog
+              projectId={id}
+              onDone={() => refetchProducts()}
+            />
             <UploadZone
               title="Search JSON"
               accept=".json,application/json"
