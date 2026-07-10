@@ -70,6 +70,8 @@ export const updateProject = createServerFn({ method: "POST" })
       ean_column: z.string().max(120).optional(),
       name_column: z.string().max(120).optional(),
       id_column: z.string().max(120).optional(),
+      visualization_style_prompt: z.string().max(2000).nullable().optional(),
+      visualization_requirements_pl: z.string().max(4000).nullable().optional(),
     }).parse(i),
   )
   .handler(async ({ data, context }) => {
