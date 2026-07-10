@@ -19,6 +19,7 @@ import {
   clampMetaDescription as clampMetaDescriptionShared,
   dedupeKeywords as dedupeKeywordsShared,
   GOLDEN_SEO_SYSTEM_PROMPT,
+  sanitizeGoldenDescriptionHtml,
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 
@@ -491,7 +492,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
     const rawName = sanitize(out.name, blacklist) ?? "";
     const name = clampName(rawName, 70);
-    const description = sanitizeProductDescription(sanitize(out.description, blacklist) ?? "");
+    const rawDescription = sanitize(out.description, blacklist) ?? "";
     const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
     // Re-slugify by ourselves — gwarantujemy poprawność niezależnie od tego co zwróciło AI.
     const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
@@ -502,6 +503,10 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .filter((f) => f.key && f.value);
     const existingFeatures = ((enrichment as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
     const shouldWriteFeatures = newFeatures.length > 0 && (mode === "all" || !existingFeatures.length);
+    const description = sanitizeGoldenDescriptionHtml(rawDescription, {
+      name,
+      features: shouldWriteFeatures ? newFeatures : existingFeatures,
+    });
 
     const prevRow = enrichment as typeof enrichment & {
       golden_slug?: string | null;

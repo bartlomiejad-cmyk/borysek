@@ -320,9 +320,10 @@ function ProductPreview() {
                 {tab === "desc" && (
                   <div className="max-w-3xl">
                     {goldenDesc ? (
-                      <div className="prose prose-sm md:prose-base max-w-none whitespace-pre-wrap text-foreground/90 leading-relaxed font-serif">
-                        {goldenDesc}
-                      </div>
+                      <div
+                        className="max-w-none text-foreground/90 leading-relaxed font-serif [&_h3]:font-serif [&_h3]:text-2xl [&_h3]:font-semibold [&_h3]:mt-0 [&_h3]:mb-4 [&_p]:my-3 [&_ul]:my-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-4 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold"
+                        dangerouslySetInnerHTML={{ __html: goldenDesc }}
+                      />
                     ) : (
                       <p className="text-muted-foreground">Brak opisu.</p>
                     )}

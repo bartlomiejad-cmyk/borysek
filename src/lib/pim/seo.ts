@@ -76,15 +76,21 @@ export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "- Przykład: 'buty-trekkingowe-meskie-salomon-x-ultra-4'.",
   "",
   "## OPIS (description)",
-  "- 350-900 znaków.",
-  "- Główne słowo kluczowe (typ produktu) MUSI pojawić się w pierwszych 100 znakach.",
-  "- Pierwsze zdanie: czym produkt jest i dla kogo. Kolejne zdania podają najważniejsze fakty (materiał, wymiary, działanie, funkcje) wyłącznie na podstawie źródeł.",
+  "- Wynik MUSI być fragmentem HTML (bez <html>, <head>, <body>, bez atrybutów, bez klas, bez inline styles, bez linków, bez obrazów).",
+  "- Dozwolone tagi (whitelist): <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <br>.",
+  "- STRUKTURA (w tej kolejności):",
+  "  1) Na samej górze dokładnie jeden <h3> zawierający wygenerowaną nazwę produktu (pole `name`).",
+  "  2) Następnie 1-3 akapity <p>…</p> z opisem właściwym.",
+  "  3) Jeżeli wygenerowałeś cechy (`features`), dopisz <ul> z max 10 najważniejszymi cechami w formacie <li><strong>Klucz:</strong> wartość</li>. Jeżeli cech nie ma — pomiń listę.",
+  "- Długość tekstu widocznego (bez tagów) 350-1200 znaków.",
+  "- Główne słowo kluczowe (typ produktu) MUSI pojawić się w pierwszym akapicie <p>.",
+  "- Pierwszy akapit: czym produkt jest i dla kogo. Kolejne akapity podają najważniejsze fakty (materiał, wymiary, działanie, funkcje) wyłącznie na podstawie źródeł.",
   "- Wpleć 2-3 naturalne warianty frazy kluczowej (synonimy, long-tail) — bez upychania (keyword stuffing).",
-  "- Akapity 2-4 zdania (czytelność).",
   "- ZAKAZANE marketingowe ogólniki: 'idealny wybór', 'doskonały', 'wyjątkowy', 'zaprojektowany z myślą', 'sprawdzi się w każdej sytuacji', 'najwyższa jakość', 'rewolucyjny', 'niezastąpiony', 'spełni oczekiwania', 'cieszy oko', 'gwarantuje', wykrzykniki, druga osoba ('Twój', 'Ciebie').",
   "- ZAKAZANE: ceny, dostępność, dostawa, gwarancja, nazwy sklepów, URL-e, frazy typu 'kup teraz'.",
-  "- Nie powtarzaj nazwy produktu więcej niż raz. Nie zaczynaj od 'Przedstawiamy', 'Poznaj', 'Odkryj'. Bez nagłówków, bez list w opisie.",
+  "- Nie powtarzaj nazwy produktu w treści akapitów — nazwa jest już w <h3>. Nie zaczynaj od 'Przedstawiamy', 'Poznaj', 'Odkryj'.",
   "- Jeśli źródła się różnią — wybierz wspólny, wiarygodny zbiór faktów. Jeśli czegoś nie ma w źródłach, pomiń to.",
+  "- Zwróć czysty HTML w polu JSON `description` (jako string), bez ``` i bez znaczników markdown.",
   "",
   "## META_DESCRIPTION (meta_description)",
   "- 150-160 znaków (twardy limit; odcięcie w Google ~160). Jedno-dwa zdania.",
@@ -104,3 +110,105 @@ export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "- Wartości konkretne, bez przymiotników marketingowych.",
   "- Pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych: [].",
 ].join("\n");
+
+// ---------------------------------------------------------------------------
+// Golden description HTML sanitizer
+// ---------------------------------------------------------------------------
+
+const ALLOWED_HTML_TAGS = new Set(["h3", "p", "ul", "ol", "li", "strong", "em", "br"]);
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function stripDisallowedHtml(html: string): string {
+  // remove <script>/<style> blocks with content
+  let out = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  // remove HTML comments
+  out = out.replace(/<!--[\s\S]*?-->/g, "");
+  // strip attributes and disallowed tags
+  out = out.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (_m, close: string, tag: string) => {
+    const t = tag.toLowerCase();
+    if (!ALLOWED_HTML_TAGS.has(t)) return "";
+    if (t === "br") return "<br/>";
+    return close ? `</${t}>` : `<${t}>`;
+  });
+  return out;
+}
+
+function plainTextToHtml(text: string): string {
+  const paragraphs = text
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!paragraphs.length) return "";
+  return paragraphs
+    .map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+}
+
+function featuresToUl(features: Array<{ key: string; value: string }>): string {
+  const items = features
+    .filter((f) => f?.key?.trim() && f?.value?.trim())
+    .slice(0, 10)
+    .map((f) => `<li><strong>${escapeHtml(f.key.trim())}:</strong> ${escapeHtml(f.value.trim())}</li>`)
+    .join("");
+  return items ? `<ul>${items}</ul>` : "";
+}
+
+/**
+ * Sanitize + normalize golden product description into safe HTML.
+ *
+ * Guarantees:
+ *  - Only whitelisted tags: h3, p, ul, ol, li, strong, em, br.
+ *  - Starts with a single <h3> containing the product name (if provided).
+ *  - If features are supplied and no list is present, appends <ul> with up to
+ *    10 feature rows.
+ *  - Plain-text input is wrapped in <p> paragraphs.
+ */
+export function sanitizeGoldenDescriptionHtml(
+  input: string | null | undefined,
+  opts: { name?: string | null; features?: Array<{ key: string; value: string }> | null } = {},
+): string {
+  const name = (opts.name ?? "").trim();
+  const features = (opts.features ?? []).filter((f) => f?.key?.trim() && f?.value?.trim());
+  let html = (input ?? "").trim();
+
+  // Strip code fences the model sometimes wraps HTML in.
+  html = html.replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
+
+  const hasTags = /<[a-zA-Z][^>]*>/.test(html);
+  if (!html || !hasTags) {
+    const body = html ? plainTextToHtml(html) : "";
+    const head = name ? `<h3>${escapeHtml(name)}</h3>` : "";
+    const tail = featuresToUl(features);
+    return `${head}${body}${tail}`;
+  }
+
+  html = stripDisallowedHtml(html);
+  // Collapse whitespace between tags.
+  html = html.replace(/>\s+</g, "><").trim();
+
+  // Ensure exactly one <h3> at the top with the current name.
+  if (name) {
+    if (/^<h3>/i.test(html)) {
+      html = html.replace(/^<h3>[\s\S]*?<\/h3>/i, `<h3>${escapeHtml(name)}</h3>`);
+    } else {
+      // Drop any stray <h3> further down to avoid duplicates.
+      html = html.replace(/<h3>[\s\S]*?<\/h3>/gi, "");
+      html = `<h3>${escapeHtml(name)}</h3>${html}`;
+    }
+  }
+
+  // Append feature list if none was rendered by the model.
+  if (features.length && !/<(ul|ol)>/i.test(html)) {
+    html += featuresToUl(features);
+  }
+
+  return html;
+}

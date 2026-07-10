@@ -532,9 +532,19 @@ function ProductDetail() {
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
                 rows={20}
-                placeholder="Wygeneruj opis lub wpisz ręcznie..."
+                placeholder="Wygeneruj opis lub wpisz ręcznie (HTML: <h3>, <p>, <ul>, <li>, <strong>)..."
+                className="font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground mt-1">{desc.length} znaków</p>
+              {desc.trim() && (
+                <details className="mt-2 rounded border bg-muted/20 p-2 text-sm">
+                  <summary className="cursor-pointer text-xs text-muted-foreground">Podgląd HTML</summary>
+                  <div
+                    className="mt-2 text-sm [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mt-0 [&_h3]:mb-2 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold"
+                    dangerouslySetInnerHTML={{ __html: desc }}
+                  />
+                </details>
+              )}
             </div>
             <div className="space-y-3 rounded border bg-muted/30 p-3">
               <p className="text-sm font-medium">SEO</p>
