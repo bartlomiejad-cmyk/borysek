@@ -6,7 +6,7 @@ import { getProductDetail } from "@/lib/pim/queries.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ArrowLeft, Search, Sparkles, ShoppingCart, Heart, Share2, Truck, ShieldCheck, RotateCcw,
+  Search, Sparkles, ShoppingCart, Heart, Share2, Truck, ShieldCheck, RotateCcw,
   Star, ChevronRight, User, Menu, Minus, Plus, Check, Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
