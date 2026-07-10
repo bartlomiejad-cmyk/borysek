@@ -19,7 +19,7 @@ import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects
 import { Route as ApiPublicHooksProcessBulkJobsRouteImport } from './routes/api/public/hooks/process-bulk-jobs'
 import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/projects.$id.verify'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
-import { Route as AuthProjectsIdProductsPidPreviewRouteImport } from './routes/_auth/projects.$id.products.$pid.preview'
+import { Route as AuthProjectsIdProductsPidPreviewRouteImport } from './routes/_auth/projects.$id.products.$pid_.preview'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -74,9 +74,9 @@ const AuthProjectsIdProductsPidRoute =
   } as any)
 const AuthProjectsIdProductsPidPreviewRoute =
   AuthProjectsIdProductsPidPreviewRouteImport.update({
-    id: '/preview',
-    path: '/preview',
-    getParentRoute: () => AuthProjectsIdProductsPidRoute,
+    id: '/projects/$id/products/$pid_/preview',
+    path: '/projects/$id/products/$pid/preview',
+    getParentRoute: () => AuthRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -88,7 +88,7 @@ export interface FileRoutesByFullPath {
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/projects/$id/': typeof AuthProjectsIdIndexRoute
-  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRouteWithChildren
+  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
   '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
 }
 export interface FileRoutesByTo {
@@ -100,7 +100,7 @@ export interface FileRoutesByTo {
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/projects/$id': typeof AuthProjectsIdIndexRoute
-  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRouteWithChildren
+  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
   '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
 }
 export interface FileRoutesById {
@@ -114,8 +114,8 @@ export interface FileRoutesById {
   '/_auth/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/_auth/projects/$id/': typeof AuthProjectsIdIndexRoute
-  '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRouteWithChildren
-  '/_auth/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
+  '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
+  '/_auth/projects/$id/products/$pid_/preview': typeof AuthProjectsIdProductsPidPreviewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -154,7 +154,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/process-bulk-jobs'
     | '/_auth/projects/$id/'
     | '/_auth/projects/$id/products/$pid'
-    | '/_auth/projects/$id/products/$pid/preview'
+    | '/_auth/projects/$id/products/$pid_/preview'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -236,30 +236,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthProjectsIdProductsPidRouteImport
       parentRoute: typeof AuthRoute
     }
-    '/_auth/projects/$id/products/$pid/preview': {
-      id: '/_auth/projects/$id/products/$pid/preview'
-      path: '/preview'
+    '/_auth/projects/$id/products/$pid_/preview': {
+      id: '/_auth/projects/$id/products/$pid_/preview'
+      path: '/projects/$id/products/$pid/preview'
       fullPath: '/projects/$id/products/$pid/preview'
       preLoaderRoute: typeof AuthProjectsIdProductsPidPreviewRouteImport
-      parentRoute: typeof AuthProjectsIdProductsPidRoute
+      parentRoute: typeof AuthRoute
     }
   }
 }
-
-interface AuthProjectsIdProductsPidRouteChildren {
-  AuthProjectsIdProductsPidPreviewRoute: typeof AuthProjectsIdProductsPidPreviewRoute
-}
-
-const AuthProjectsIdProductsPidRouteChildren: AuthProjectsIdProductsPidRouteChildren =
-  {
-    AuthProjectsIdProductsPidPreviewRoute:
-      AuthProjectsIdProductsPidPreviewRoute,
-  }
-
-const AuthProjectsIdProductsPidRouteWithChildren =
-  AuthProjectsIdProductsPidRoute._addFileChildren(
-    AuthProjectsIdProductsPidRouteChildren,
-  )
 
 interface AuthRouteChildren {
   AuthPhotoIdRoute: typeof AuthPhotoIdRoute
@@ -267,7 +252,8 @@ interface AuthRouteChildren {
   AuthProjectsIndexRoute: typeof AuthProjectsIndexRoute
   AuthProjectsIdVerifyRoute: typeof AuthProjectsIdVerifyRoute
   AuthProjectsIdIndexRoute: typeof AuthProjectsIdIndexRoute
-  AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRouteWithChildren
+  AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRoute
+  AuthProjectsIdProductsPidPreviewRoute: typeof AuthProjectsIdProductsPidPreviewRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
@@ -276,7 +262,8 @@ const AuthRouteChildren: AuthRouteChildren = {
   AuthProjectsIndexRoute: AuthProjectsIndexRoute,
   AuthProjectsIdVerifyRoute: AuthProjectsIdVerifyRoute,
   AuthProjectsIdIndexRoute: AuthProjectsIdIndexRoute,
-  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRouteWithChildren,
+  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRoute,
+  AuthProjectsIdProductsPidPreviewRoute: AuthProjectsIdProductsPidPreviewRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
@@ -290,13 +277,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
