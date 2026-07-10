@@ -140,7 +140,7 @@ function fallbackPrompts(args: {
 
 // Translate Polish requirements + product context into two production-ready
 // EN prompts for fal-ai/nano-banana-pro/edit (thumbnail + lifestyle).
-async function buildFalPromptsFromPolish(args: {
+export async function buildFalPromptsFromPolish(args: {
   productName: string;
   productDesc: string;
   requirementsPl: string;
