@@ -6,6 +6,7 @@ import {
   runFirecrawlDiscovery,
   runPhotoToolGenerate,
   runPhotoToolEditImage,
+  runPimVisualization,
   type WorkerCtx,
 } from "@/lib/pim/_workers.server";
 
@@ -18,7 +19,8 @@ type JobKind =
   | "REGENERATE_MEDIA"
   | "FIRECRAWL_DISCOVERY"
   | "PHOTO_TOOL_GENERATE"
-  | "PHOTO_TOOL_EDIT_IMAGE";
+  | "PHOTO_TOOL_EDIT_IMAGE"
+  | "PIM_VISUALIZATIONS";
 
 type BulkJobRow = {
   id: string;
@@ -67,6 +69,16 @@ async function processItem(
       const idx = typeof payload?.lifestyleIndex === "number" ? (payload!.lifestyleIndex as number) : 0;
       const requirementsPl = typeof payload?.requirementsPl === "string" ? (payload!.requirementsPl as string) : "";
       await runPhotoToolEditImage(productId, { slot, lifestyleIndex: idx, requirementsPl }, ctx);
+      return;
+    }
+    case "PIM_VISUALIZATIONS": {
+      await runPimVisualization(productId, ctx, {
+        count: typeof payload?.count === "number" ? (payload.count as number) : 0,
+        requirementsPl: typeof payload?.requirementsPl === "string" ? (payload.requirementsPl as string) : "",
+        stylePrompt: typeof payload?.stylePrompt === "string" ? (payload.stylePrompt as string) : "",
+        targetResolution:
+          typeof payload?.targetResolution === "number" ? (payload.targetResolution as number) : undefined,
+      });
       return;
     }
     default:
