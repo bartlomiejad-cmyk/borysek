@@ -185,10 +185,11 @@ function ProjectPage() {
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
+  const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -198,7 +199,9 @@ function ProjectPage() {
           ? "Generacja złotych rekordów"
           : job.kind === "REGENERATE_MEDIA"
             ? "Regeneracja zdjęć"
-            : "Wyszukiwanie źródeł (Firecrawl)";
+            : job.kind === "FIRECRAWL_DISCOVERY"
+              ? "Wyszukiwanie źródeł (Firecrawl)"
+              : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -208,7 +211,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, refetchProducts]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
