@@ -122,6 +122,7 @@ function fallbackPrompts(args: {
     `FRAMING: Square 1:1, product centered, ~75-85% of frame.`,
     `SHADOW: Soft realistic contact shadows.`,
     `PRESERVE: Every label, logo, colour, material and proportion — pixel-faithful to the source.`,
+    `CRITICAL COLOUR: Preserve the product's own colour(s) exactly — do NOT whiten, desaturate, bleach, lighten or shift hue. Only the background is white; the product keeps its original colour.`,
     `REMOVE: Watermarks, store logos, price tags, overlay text not physically printed on the product.`,
     requirementsPl ? `EXTRA USER REQUIREMENTS (translated from Polish): ${requirementsPl}` : ``,
   ].filter(Boolean).join(" ");
@@ -132,6 +133,7 @@ function fallbackPrompts(args: {
     projectStyle ? `SCENE STYLE: ${projectStyle}` : `SCENE: A natural, realistic environment appropriate for how this product is actually used. Soft daylight, believable props.`,
     `FRAMING: Square 1:1, product is the hero in sharp focus, realistic scale.`,
     `PRESERVE: Every label, logo, colour and material — identical to source.`,
+    `CRITICAL COLOUR: Preserve the product's own colour(s) exactly — do NOT whiten, desaturate, bleach, lighten or shift hue. Only the scene changes; the product keeps its original colour.`,
     `AVOID: Fantasy elements, unrealistic scale, floating objects, distorted labels, duplicate products, watermarks, text overlays.`,
     requirementsPl ? `EXTRA USER REQUIREMENTS (translated from Polish): ${requirementsPl}` : ``,
   ].filter(Boolean).join(" ");
@@ -159,6 +161,7 @@ export async function buildFalPromptsFromPolish(args: {
     `- Enrich the frame with 1–3 small CONTEXTUAL PROPS that are clearly and logically related to the product (e.g. fresh leaves for garden shears, coffee beans for a grinder, wood shavings for chisels). Props sit asymmetrically around the product, do not cover it, and do not compete visually.`,
     `- Soft realistic contact shadow. Product fills ~75–85% of the frame.`,
     `- Preserve every label, logo, brand mark, colour, material and proportion pixel-faithfully. Remove watermarks and store overlays that are not physically printed on the product.`,
+    `- Preserve the product's own colour(s) letter-for-letter — hue, saturation and tone identical to the reference. NEVER whiten, desaturate, bleach, lighten or shift the hue of the product body, cover, packaging or printed graphics. Only the background changes to pure white; product colours stay identical.`,
     `- Quote any visible printed text on the product LITERALLY, in double quotes, letter-for-letter, e.g. preserve label "PRODUCT NAME" letter-for-letter — do not paraphrase, translate or invent characters.`,
     `- Change ONLY the background/scene and props. Keep product, logo, printed text, colours, materials and proportions EXACTLY the same, preserve style, lighting on the product, and textures.`,
     `- Never redraw, restyle or invent the logo/brand mark. Reproduce ONLY what is visible in the reference. If the logo/text on the reference is small, blurry or partially cropped, keep it at that same resolution and sharpness — do NOT "enhance" or re-letter it.`,
@@ -168,6 +171,7 @@ export async function buildFalPromptsFromPolish(args: {
     `- Square 1:1, realistic in-use scene. Product is the hero, sharp focus, realistic scale.`,
     `- Believable environment, natural light, tasteful props.`,
     `- Preserve every label, logo, colour and material. Avoid fantasy elements, distortion, duplicates, watermarks or text overlays.`,
+    `- Preserve the product's own colour(s) letter-for-letter — hue, saturation and tone identical to the reference. NEVER whiten, desaturate, bleach, lighten or shift the hue of the product itself. Only the scene/background changes; product colours stay identical to the reference.`,
     `- Quote any visible printed text on the product LITERALLY, in double quotes, letter-for-letter (e.g. preserve label "PRODUCT NAME" letter-for-letter). Never redraw, restyle or invent the logo/brand mark — reproduce ONLY what is visible in the reference; if it is small or blurry, keep it that way.`,
     `- Change ONLY the scene, background and props. Keep product, logo, printed text, colours, materials and proportions EXACTLY the same.`,
     `- Use concrete photographic language in EVERY lifestyle prompt — always specify:`,
@@ -178,6 +182,7 @@ export async function buildFalPromptsFromPolish(args: {
     ``,
     `If the user supplied Polish requirements, they OVERRIDE defaults for scene, props, lighting, mood — but never the "preserve the product faithfully" rules.`,
     `META RULE: the lifestyle prompt is INVALID unless it contains at least one phrase about camera angle, one about lighting (direction + temperature), and one about depth of field. Include them explicitly every time.`,
+    `META RULE (colour): BOTH prompts MUST contain an explicit sentence forbidding any colour change on the product itself (no whitening, desaturation, bleaching or hue shift). Include it every time.`,
     `Write both prompts in fluent, concrete English with short imperative sentences. No preamble, no markdown, JSON only.`,
   ].join("\n");
 
@@ -687,20 +692,21 @@ function buildSeedreamPrompt(opts: {
 }): string {
   const fill = Math.max(30, Math.min(95, opts.paddingPercent));
   const lines: string[] = [];
-  lines.push(`CRITICAL BACKGROUND: The background MUST be PURE WHITE #FFFFFF — no cream, beige, ivory, gray, gradient, vignette, paper texture. All four corners must be exactly #FFFFFF. If in doubt, make the background BRIGHTER and WHITER.`);
+  lines.push(`CRITICAL BACKGROUND: ONLY the seamless studio background behind the product must be PURE WHITE #FFFFFF — no cream, beige, ivory, gray, gradient, vignette, paper texture. All four corners of the frame must be exactly #FFFFFF. "Whiter/brighter" applies to the BACKGROUND ONLY — never to the product itself.`);
+  lines.push(`CRITICAL COLOUR (product): Preserve the product's own colour(s) pixel-faithfully — hue, saturation and tone identical to the source reference. DO NOT desaturate, whiten, lighten, brighten, bleach or shift the hue of the product body, cover, packaging, printed graphics or labels. If the source product is green, the output stays that exact green; the same applies to every other colour. The product must not be tinted to match the white background.`);
   if (opts.isComposite && opts.componentB) {
-    lines.push(`COMPOSITION: Place "${opts.componentB}" naturally beside "${opts.componentA}" in one frame. Both elements in sharp focus, realistic relative scale.`);
+    lines.push(`COMPOSITION: Place "${opts.componentB}" naturally beside "${opts.componentA}" in one frame. Both elements in sharp focus, realistic relative scale. The products retain their original colours — only the surroundings become pure white.`);
   } else {
-    lines.push(`SUBJECT: Move the exact same product ("${opts.componentA}") onto a clean pure white #FFFFFF seamless studio background.`);
+    lines.push(`SUBJECT: Move the exact same product ("${opts.componentA}") onto a clean pure white #FFFFFF seamless studio background. The product retains its original colour(s) — only the surroundings become pure white.`);
   }
   lines.push(`FRAMING: Scale the product UP so it fills ${fill}% of the frame in BOTH width and height. Center it.`);
   lines.push(opts.applyShadow
     ? `SHADOW: Add a soft realistic contact shadow directly under the product only.`
     : `SHADOW: No shadow. Product floats cleanly on pure white.`);
-  lines.push(`PRESERVE: Keep every printed label, logo, brand name, illustration, color, material and proportions exactly as in the source.`);
+  lines.push(`PRESERVE: Keep the product's colour EXACTLY as in the source, including saturation and tone. Keep every printed label, logo, brand name, illustration, material and proportions exactly as in the source.`);
   lines.push(`WATERMARK REMOVAL: Remove watermarks, store logos, website URLs, photo credits, shop names and semi-transparent overlay text that are NOT physically printed on the product packaging itself.`);
   if (opts.customStyle && opts.customStyle.trim()) lines.push(`STYLE: ${opts.customStyle.trim()}`);
-  lines.push(`AVOID: cream/beige/ivory/warm/gray background, tint, vignette, paper texture, tiny product, off-center, blurred text, regenerated artwork, missing labels, visible watermarks.`);
+  lines.push(`AVOID: cream/beige/ivory/warm/gray background, tint, vignette, paper texture, tiny product, off-center, blurred text, regenerated artwork, missing labels, visible watermarks, whitened/desaturated/bleached product body, colour drift, product tinted to match the background.`);
   return lines.join(" ");
 }
 
