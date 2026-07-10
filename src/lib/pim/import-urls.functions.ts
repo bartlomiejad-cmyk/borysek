@@ -14,7 +14,10 @@ const EXTRACT_MODEL = "google/gemini-2.5-flash";
 
 const ExtractSchema = z.object({
   nazwa: z.string().max(300).default(""),
+  producent: z.string().max(160).default(""),
+  marka: z.string().max(160).default(""),
   kod: z.string().max(120).default(""),
+  kod_producenta: z.string().max(120).default(""),
   ean: z.string().max(60).default(""),
   product_description: z.string().max(4000).default(""),
   product_features: z
@@ -118,8 +121,10 @@ function jsonLdHints(products: Array<Record<string, unknown>>): {
   sku: string;
   gtin: string;
   description: string;
+  brand: string;
+  mpn: string;
 } {
-  if (!products.length) return { name: "", sku: "", gtin: "", description: "" };
+  if (!products.length) return { name: "", sku: "", gtin: "", description: "", brand: "", mpn: "" };
   const p = products[0];
   const gtin = firstString(
     p["gtin13"],
@@ -128,11 +133,20 @@ function jsonLdHints(products: Array<Record<string, unknown>>): {
     p["gtin8"],
     p["gtin14"],
   );
+  const brandRaw = p["brand"];
+  const brand =
+    typeof brandRaw === "string"
+      ? brandRaw
+      : brandRaw && typeof brandRaw === "object"
+        ? firstString((brandRaw as Record<string, unknown>)["name"])
+        : "";
   return {
     name: firstString(p["name"]),
     sku: firstString(p["sku"], p["mpn"], p["productID"]),
     gtin,
     description: firstString(p["description"]),
+    brand,
+    mpn: firstString(p["mpn"]),
   };
 }
 
@@ -195,7 +209,10 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
 
           let extracted: z.infer<typeof ExtractSchema> = {
             nazwa: hints.name,
+            producent: hints.brand,
+            marka: hints.brand,
             kod: hints.sku,
+            kod_producenta: hints.mpn || hints.sku,
             ean: hints.gtin,
             product_description: hints.description,
             product_features: [],
@@ -215,14 +232,17 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
               "- polecane / „zobacz też\" / „klienci kupili\", recenzje, kategorie, regulaminy, stopki",
               "- angielskie chrome sklepu: SKU, UPC, Current Stock, Adding to cart, Was, Now, You save, UK Shipping, RFD, Return Form, Restricted products",
               "- ceny w GBP/EUR/USD/PLN i separatory '* * *' / '---'",
-              "nazwa: pełna nazwa produktu (marka + model + wariant), po polsku jeżeli źródło jest po polsku, w oryginale jeżeli po angielsku — bez nazwy sklepu.",
-              "kod: SKU / kod producenta / MPN / symbol katalogowy (np. z JSON-LD, sekcji „Kod produktu\", „Product code\", „SKU\"). Sam ciąg, bez etykiet.",
+              "nazwa: pełna nazwa produktu (marka + model + wariant), po polsku jeżeli źródło jest po polsku, w oryginale jeżeli po angielsku — bez nazwy sklepu. MUSI zaczynać się od marki/producenta, jeżeli je znasz.",
+              "producent: pełna nazwa firmy-producenta (np. „Norma Precision AB\", „Federal Premium\"). Jeśli nie znasz pełnej — wpisz to samo co marka.",
+              "marka: krótka nazwa marki widoczna na produkcie (np. „Norma\", „Federal\", „Sako\"). Sam ciąg, bez etykiet.",
+              "kod: SKU sklepu (jeżeli widoczny). Sam ciąg, bez etykiet.",
+              "kod_producenta: MPN / kod katalogowy PRODUCENTA (nie SKU sklepu). Szukaj w sekcjach „Kod producenta\", „Manufacturer part number\", „MPN\", „Art. Nr\", „Ref.\". Sam ciąg.",
               "ean: 8/12/13/14-cyfrowy kod EAN/GTIN/UPC jeżeli obecny. Sam ciąg cyfr, bez spacji, bez „EAN:\".",
               "product_description: opis produktu MAX 3000 znaków. MUSI być po polsku — jeżeli źródło jest po angielsku, PRZETŁUMACZ zachowując dosłownie nazwę, markę, model, wariant, kaliber, gramaturę, jednostki i oznaczenia techniczne. Bez nazw sklepów, cen, „kup teraz\", numerów telefonu, adresów e-mail, informacji o wysyłce.",
               "product_features: konkretne cechy techniczne klucz/wartość (np. Kaliber, Masa pocisku, Materiał, Wymiary, Pojemność, Kolor). Klucze po polsku.",
               "product_image_indexes: indeksy (1-based) WYŁĄCZNIE zdjęć tego produktu. Pomiń logo, ikony UI, banery, inne warianty, miniatury innych produktów.",
               "Jeżeli strona nie jest stroną produktu (np. kategoria, listing) — ustaw is_product_page=false i podaj powód w rejected_reason.",
-              'Zwróć JSON: {"nazwa": string, "kod": string, "ean": string, "product_description": string, "product_features": [{"key": string, "value": string}], "product_image_indexes": number[], "is_product_page": boolean, "rejected_reason": string}.',
+              'Zwróć JSON: {"nazwa": string, "producent": string, "marka": string, "kod": string, "kod_producenta": string, "ean": string, "product_description": string, "product_features": [{"key": string, "value": string}], "product_image_indexes": number[], "is_product_page": boolean, "rejected_reason": string}.',
             ].join("\n");
 
             const user = [
@@ -231,6 +251,8 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
               "",
               "PODPOWIEDZI Z JSON-LD (mogą być pomocne, ale nie ufaj bezkrytycznie):",
               `  name: ${hints.name}`,
+              `  brand: ${hints.brand}`,
+              `  mpn: ${hints.mpn}`,
               `  sku: ${hints.sku}`,
               `  gtin: ${hints.gtin}`,
               "",
@@ -256,7 +278,17 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
             return { url, ok: false, error: `Strona nie jest produktem: ${extracted.rejected_reason}` };
           }
 
-          const nazwa = extracted.nazwa.trim() || hints.name.trim() || pageTitle || "";
+          // Enrich the product name with brand + manufacturer code so Google
+          // discovery has strong, unambiguous keywords to work with.
+          const rawNazwa = extracted.nazwa.trim() || hints.name.trim() || pageTitle || "";
+          const marka = (extracted.marka || extracted.producent || hints.brand || "").trim();
+          const mpn = (extracted.kod_producenta || hints.mpn || "").trim();
+          const lowerName = rawNazwa.toLowerCase();
+          const parts: string[] = [];
+          if (marka && !lowerName.includes(marka.toLowerCase())) parts.push(marka);
+          parts.push(rawNazwa);
+          if (mpn && !lowerName.includes(mpn.toLowerCase())) parts.push(mpn);
+          const nazwa = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
           if (!nazwa) {
             return { url, ok: false, error: "Nie udało się wykryć nazwy produktu" };
           }
@@ -277,7 +309,11 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
               project_id: data.projectId,
               ext_id: null,
               nazwa,
-              kod: extracted.kod.trim() || null,
+              kod:
+                (extracted.kod_producenta.trim() ||
+                  extracted.kod.trim() ||
+                  hints.mpn.trim() ||
+                  hints.sku.trim()) || null,
               ean: extracted.ean.trim() || null,
               raw: {
                 imported_from_url: url,
@@ -287,6 +323,11 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
                   description: description || null,
                   features: extracted.product_features,
                   images: imageUrls,
+                  producent: extracted.producent.trim() || null,
+                  marka: marka || null,
+                  kod_producenta: mpn || null,
+                  kod_sklepu: extracted.kod.trim() || null,
+                  original_name: rawNazwa,
                   at: new Date().toISOString(),
                 },
               } as never,
