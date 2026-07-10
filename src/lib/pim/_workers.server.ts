@@ -159,6 +159,7 @@ export async function buildFalPromptsFromPolish(args: {
     `- Enrich the frame with 1–3 small CONTEXTUAL PROPS that are clearly and logically related to the product (e.g. fresh leaves for garden shears, coffee beans for a grinder, wood shavings for chisels). Props sit asymmetrically around the product, do not cover it, and do not compete visually.`,
     `- Soft realistic contact shadow. Product fills ~75–85% of the frame.`,
     `- Preserve every label, logo, brand mark, colour, material and proportion pixel-faithfully. Remove watermarks and store overlays that are not physically printed on the product.`,
+    `- Preserve the product's own colour(s) letter-for-letter — hue, saturation and tone identical to the reference. NEVER whiten, desaturate, bleach, lighten or shift the hue of the product body, cover, packaging or printed graphics. Only the background changes to pure white; product colours stay identical.`,
     `- Quote any visible printed text on the product LITERALLY, in double quotes, letter-for-letter, e.g. preserve label "PRODUCT NAME" letter-for-letter — do not paraphrase, translate or invent characters.`,
     `- Change ONLY the background/scene and props. Keep product, logo, printed text, colours, materials and proportions EXACTLY the same, preserve style, lighting on the product, and textures.`,
     `- Never redraw, restyle or invent the logo/brand mark. Reproduce ONLY what is visible in the reference. If the logo/text on the reference is small, blurry or partially cropped, keep it at that same resolution and sharpness — do NOT "enhance" or re-letter it.`,
@@ -168,6 +169,7 @@ export async function buildFalPromptsFromPolish(args: {
     `- Square 1:1, realistic in-use scene. Product is the hero, sharp focus, realistic scale.`,
     `- Believable environment, natural light, tasteful props.`,
     `- Preserve every label, logo, colour and material. Avoid fantasy elements, distortion, duplicates, watermarks or text overlays.`,
+    `- Preserve the product's own colour(s) letter-for-letter — hue, saturation and tone identical to the reference. NEVER whiten, desaturate, bleach, lighten or shift the hue of the product itself. Only the scene/background changes; product colours stay identical to the reference.`,
     `- Quote any visible printed text on the product LITERALLY, in double quotes, letter-for-letter (e.g. preserve label "PRODUCT NAME" letter-for-letter). Never redraw, restyle or invent the logo/brand mark — reproduce ONLY what is visible in the reference; if it is small or blurry, keep it that way.`,
     `- Change ONLY the scene, background and props. Keep product, logo, printed text, colours, materials and proportions EXACTLY the same.`,
     `- Use concrete photographic language in EVERY lifestyle prompt — always specify:`,
@@ -178,6 +180,7 @@ export async function buildFalPromptsFromPolish(args: {
     ``,
     `If the user supplied Polish requirements, they OVERRIDE defaults for scene, props, lighting, mood — but never the "preserve the product faithfully" rules.`,
     `META RULE: the lifestyle prompt is INVALID unless it contains at least one phrase about camera angle, one about lighting (direction + temperature), and one about depth of field. Include them explicitly every time.`,
+    `META RULE (colour): BOTH prompts MUST contain an explicit sentence forbidding any colour change on the product itself (no whitening, desaturation, bleaching or hue shift). Include it every time.`,
     `Write both prompts in fluent, concrete English with short imperative sentences. No preamble, no markdown, JSON only.`,
   ].join("\n");
 
