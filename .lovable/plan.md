@@ -1,35 +1,35 @@
 ## Problem
 
-Regeneracja głównej miniaturki PIM (Seedream v4 edit) w projekcie **Hurtownia Format** wybieliła okładkę zeszytu „Geografia" — produkt zmienił kolor z zielonego na biały. Powód: prompt `buildSeedreamPrompt` w `src/lib/pim/_workers.server.ts` bardzo mocno wymusza białe tło (`PURE WHITE #FFFFFF`, „BRIGHTER and WHITER", „AVOID: cream/beige/…/gray background"), ale ochronę koloru produktu ma tylko w jednej krótkiej wzmiance („Keep every … color …"). Model interpretuje „whiter" jako polecenie dotyczące całego kadru i wybiela też sam produkt.
+Na screenie miniaturka tonera HP 207X ma wyraźnie **szare/przydymione tło**, mimo że prompt Seedream v4 edit w `src/lib/pim/_workers.server.ts` (funkcja `buildSeedreamPrompt` + inline prompt w `src/lib/pim/regen.functions.ts`) już zawiera „PURE WHITE #FFFFFF". Model najwyraźniej interpretuje to jako „jasne studio" i zostawia lekki gradient/vignette.
 
-Ten sam wzorzec występuje w promptcie edycji AI (`buildFalPromptsFromPolish`) — kolor jest wspomniany, ale nie chroniony jednoznacznie.
+## Zmiany (tylko backend, prompty + lekki post-processing tła)
 
-## Zmiany (tylko backend, prompty)
+### 1. `src/lib/pim/regen.functions.ts` — prompt Seedream (miniaturka „Regeneruj ponownie")
+- Przeformułować pierwsze zdanie: zamiast „CRITICAL BACKGROUND" dać twarde „BACKGROUND = flat solid #FFFFFF fill, RGB(255,255,255), luminance L=100, no lighting variation, no falloff, no vignette, no gradient, no shadow on background, no soft box reflection, no seamless paper curve — the background is a mathematically flat white plane, identical pixel value in all four corners and along all edges."
+- Dodać: „If the model produces anything darker than #FAFAFA anywhere on the background it is WRONG."
+- W `AVOID` dopisać: „gray background, light gray, silver, off-white, warm white, cool white, studio seamless curve, ambient shadow bleeding into background, gradient from light to slightly darker, any pixel below 250 in R/G/B on the background".
+- Zostawić bez zmian klauzulę chroniącą kolor produktu (dodana w poprzedniej iteracji).
 
-Plik: `src/lib/pim/_workers.server.ts`
+### 2. `src/lib/pim/_workers.server.ts` — `buildSeedreamPrompt` (PIM miniaturki masowo)
+- Analogiczne zaostrzenie: „flat solid #FFFFFF fill", „identical pixel value in all four corners", „no gradient / no vignette / no seamless curve", „reject any pixel below 250,250,250 on background".
 
-### 1. `buildSeedreamPrompt` (miniaturka + galeria PIM)
-- Rozdzielić „białe tło" od „produkt": pierwsza linia dotyczy tylko tła, dodać jawną klauzulę, że biel dotyczy **wyłącznie** tła seamless, a nie powierzchni produktu.
-- Dodać nową linię `CRITICAL COLOR`:
-  - „Preserve the product's own colour(s) pixel-faithfully. Do NOT desaturate, whiten, lighten, brighten or shift hue/tone of the product body, cover, packaging or any printed graphic. If the source product is green, the output stays that exact green; same for any other colour."
-- W linii `PRESERVE` przenieść `color` z ogólnej listy na początek i pogrubić językowo („colour EXACTLY as in the source, including saturation and tone").
-- W linii `AVOID` dopisać: „whitened / desaturated / bleached product body, colour drift, product tinted to match the background".
-- W obu zdaniach `SUBJECT` / `COMPOSITION` doprecyzować: „the product retains its original colour(s) — only the surroundings become pure white".
+### 3. Lekki post-processing tła po pobraniu z FAL (opcjonalnie, ale zalecane)
+W `regen.functions.ts` po `fetchImageBytes(generatedUrl)`, przed zapisem:
+- Wykryć piksele tła po krawędziach (np. średnia z 8-pikselowej ramki).
+- Jeśli średnia jest >235 ale <255 w każdym kanale, zrobić prosty **level snap**: piksele o luminancji ≥ ~240 i niskim nasyceniu (|max-min| < 8) podnieść do (255,255,255). Produkt (bardziej nasycone lub ciemniejsze piksele) zostaje nietknięty.
+- Implementacja bez `sharp`/`canvas` (Worker runtime nie wspiera) — dla JPG/WebP z FAL trzeba by dekodować. Jeśli nie chcemy dokładać zależności działających w workerd, ograniczamy się do samego promptu (punkty 1–2) i tę część pomijamy.
 
-### 2. `buildFalPromptsFromPolish` (thumbnail + lifestyle w module Zdjęcia / PIM wizualizacje)
-- Do reguł `THUMBNAIL PROMPT` i `LIFESTYLE PROMPT` dopisać osobny punkt:
-  - „Preserve the product's own colour(s) letter-for-letter — never whiten, desaturate, bleach or shift hue. Background changes to pure white/scene, product colours stay identical to the reference."
-- Doprecyzować istniejący punkt o zachowaniu labeli/logo: dodać „colours (hue, saturation, tone)" tuż obok „label, logo, material".
-- Dopisać META RULE: „Both prompts MUST contain an explicit sentence forbidding any colour change on the product itself."
+## Rekomendacja
 
-### 3. (Opcjonalnie) `fallbackPrompts`
-- Jeśli funkcja fallbacku ma statyczny szablon, zaktualizować analogicznie, żeby ścieżka awaryjna też chroniła kolor.
+Zacznijmy od samego wzmocnienia promptu (kroki 1 i 2) — to bezinwazyjne i najczęściej wystarcza. Post-processing (krok 3) dodamy, jeśli po testach dalej pojawi się szary odcień.
 
 ## Weryfikacja
 
-Po zmianach: w projekcie „Hurtownia Format" na produkcie „Zeszyt A5 60 M 70g UV Geografia" kliknąć **Regeneruj ponownie** przy miniaturce — zielona okładka powinna zostać zachowana, zmienia się tylko tło i ewentualnie propsy.
+Po zmianach: w projekcie z tonerem HP 207X kliknąć **Regeneruj ponownie** przy miniaturce — tło powinno być czyste #FFFFFF (rogi kadru = 255,255,255), a kolor produktu bez zmian.
 
 ## Poza zakresem
 
 - UI, tabele, jobs, DB, ustawienia projektu — bez zmian.
-- Ustawienia AI (Komponent A/B, padding, custom style) — bez zmian; działamy wyłącznie na treści promptów wysyłanych do FAL.
+- Prompt Nano Banana Pro / lifestyle — bez zmian (dotyczy tylko miniaturki na białym).
+
+Czy wystarczy sam wzmocniony prompt (1+2), czy od razu dołożyć post-processing (3)?
