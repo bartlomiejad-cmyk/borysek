@@ -283,6 +283,12 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
                 imported_from_url: url,
                 json_ld: jsonLd.length ? jsonLd[0] : null,
                 page_title: pageTitle,
+                imported_extract: {
+                  description: description || null,
+                  features: extracted.product_features,
+                  images: imageUrls,
+                  at: new Date().toISOString(),
+                },
               } as never,
             } as never)
             .select("id")
