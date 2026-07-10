@@ -692,7 +692,7 @@ function buildSeedreamPrompt(opts: {
 }): string {
   const fill = Math.max(30, Math.min(95, opts.paddingPercent));
   const lines: string[] = [];
-  lines.push(`CRITICAL BACKGROUND: ONLY the seamless studio background behind the product must be PURE WHITE #FFFFFF — no cream, beige, ivory, gray, gradient, vignette, paper texture. All four corners of the frame must be exactly #FFFFFF. "Whiter/brighter" applies to the BACKGROUND ONLY — never to the product itself.`);
+  lines.push(`BACKGROUND = flat solid #FFFFFF fill, RGB(255,255,255), luminance L=100, a mathematically flat white plane. NO lighting variation, NO falloff, NO vignette, NO gradient, NO ambient shadow bleeding into the background, NO soft-box reflection, NO seamless paper curve, NO paper texture. Identical pixel value #FFFFFF in ALL FOUR CORNERS and along ALL FOUR EDGES of the canvas. If anything on the background is darker than #FAFAFA anywhere in the frame, the output is WRONG. "Whiter/brighter" applies to the BACKGROUND ONLY — never to the product itself.`);
   lines.push(`CRITICAL COLOUR (product): Preserve the product's own colour(s) pixel-faithfully — hue, saturation and tone identical to the source reference. DO NOT desaturate, whiten, lighten, brighten, bleach or shift the hue of the product body, cover, packaging, printed graphics or labels. If the source product is green, the output stays that exact green; the same applies to every other colour. The product must not be tinted to match the white background.`);
   if (opts.isComposite && opts.componentB) {
     lines.push(`COMPOSITION: Place "${opts.componentB}" naturally beside "${opts.componentA}" in one frame. Both elements in sharp focus, realistic relative scale. The products retain their original colours — only the surroundings become pure white.`);
@@ -706,7 +706,7 @@ function buildSeedreamPrompt(opts: {
   lines.push(`PRESERVE: Keep the product's colour EXACTLY as in the source, including saturation and tone. Keep every printed label, logo, brand name, illustration, material and proportions exactly as in the source.`);
   lines.push(`WATERMARK REMOVAL: Remove watermarks, store logos, website URLs, photo credits, shop names and semi-transparent overlay text that are NOT physically printed on the product packaging itself.`);
   if (opts.customStyle && opts.customStyle.trim()) lines.push(`STYLE: ${opts.customStyle.trim()}`);
-  lines.push(`AVOID: cream/beige/ivory/warm/gray background, tint, vignette, paper texture, tiny product, off-center, blurred text, regenerated artwork, missing labels, visible watermarks, whitened/desaturated/bleached product body, colour drift, product tinted to match the background.`);
+  lines.push(`AVOID: gray background, light gray, silver, off-white, warm white, cool white, cream/beige/ivory background, studio seamless curve, ambient shadow bleeding into background, gradient from light to slightly darker, any pixel below 250,250,250 on the background, tint, vignette, paper texture, tiny product, off-center, blurred text, regenerated artwork, missing labels, visible watermarks, whitened/desaturated/bleached product body, colour drift, product tinted to match the background.`);
   return lines.join(" ");
 }
 
