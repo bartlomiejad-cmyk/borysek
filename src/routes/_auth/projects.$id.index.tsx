@@ -896,6 +896,28 @@ function ProjectPage() {
             ai_gallery_urls: (p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [],
           }))}
       />
+      <GenerateVisualizationsDialog
+        open={vizOpen}
+        onOpenChange={setVizOpen}
+        projectId={id}
+        selectedIds={selectedIds}
+        allProducts={products.map<VizTarget>((p) => ({
+          id: p.id,
+          picked_urls: (p as { picked_urls?: string[] }).picked_urls ?? [],
+          regenerated_main_image:
+            (p as { regenerated_main_image?: string | null }).regenerated_main_image ?? null,
+          pinned_main_url:
+            (p as { pinned_main_url?: string | null }).pinned_main_url ?? null,
+        }))}
+        defaultStylePrompt={
+          (meta?.project as { visualization_style_prompt?: string | null } | undefined)
+            ?.visualization_style_prompt ?? null
+        }
+        defaultRequirementsPl={
+          (meta?.project as { visualization_requirements_pl?: string | null } | undefined)
+            ?.visualization_requirements_pl ?? null
+        }
+      />
     </main>
   );
 }
