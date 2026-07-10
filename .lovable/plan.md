@@ -1,42 +1,23 @@
 ## Cel
+Kliknięcie **„Podgląd karty”** ma otwierać nową kartę z pełnym widokiem karty produktu dla konkretnego projektu i produktu, bez utraty docelowego URL-a po wejściu przez logowanie.
 
-Podgląd karty produktu (`/projects/$id/products/$pid/preview`) ma wyglądać jak realna karta produktu w sklepie e‑commerce, a nie jak surowy dashboard. Dodatkowo naprawiam bug z linkiem „Podgląd karty”, który obecnie prowadzi na listę projektów.
+## Plan zmian
+1. **Zachować docelowy adres przy blokadzie auth**
+   - W layoutcie chronionych tras `_auth` zmienić przekierowanie na `/login`, aby dopisywało parametr `redirect` z aktualnym URL-em.
+   - Dzięki temu wejście na `/projects/{id}/products/{pid}/preview` jako niezalogowany użytkownik nie będzie gubione.
 
-## Zakres zmian
+2. **Poprawić login, żeby wracał do docelowej strony**
+   - Login odczyta `redirect` z parametrów wyszukiwania.
+   - Jeśli sesja już istnieje albo logowanie zakończy się sukcesem, aplikacja przeniesie użytkownika do `redirect`, a nie zawsze do `/projects`.
+   - Dodać bezpieczny fallback: jeśli `redirect` nie istnieje lub jest niepoprawny, wracamy do `/projects`.
 
-1. **Naprawa linku „Podgląd karty”**
-   - W `src/routes/_auth/projects.$id.products.$pid.tsx` link używa ścieżki `/projects/$id/products/$pid_/preview` (route id), a publiczny path to `/projects/$id/products/$pid/preview` — stąd fallback na listę.
-   - Poprawię `to` na właściwy publiczny path.
+3. **Poprawić OAuth Google**
+   - Przekierowanie OAuth nadal powinno wracać na bezpieczny adres origin, ale intencję docelowej strony zachowamy przez parametr `redirect` w adresie logowania / callbacku, tak aby po hydracji sesji wrócić na podgląd karty.
 
-2. **Nowy szablon karty produktu (`ProductPreview`)**
-   Przepisuję `src/routes/_auth/projects.$id.products.$pid_.preview.tsx` tak, aby przypominał realny sklep. Sekcje:
+4. **Zweryfikować link „Podgląd karty”**
+   - Upewnić się, że przycisk nadal używa trasy `/projects/$id/products/$pid/preview`, `params={{ id, pid }}` i `target="_blank"`.
+   - Nie zmieniać samego szablonu karty produktu, bo widok już istnieje; problemem jest gubienie adresu przez auth redirect.
 
-   - **Fake shop header (sticky)**: logo „Sklep Demo”, pole wyszukiwania, ikony konta/koszyka, pasek kategorii.
-   - **Breadcrumbs**: Sklep › Kategoria › Nazwa produktu.
-   - **Główna sekcja 2 kolumny (desktop) / stack (mobile)**:
-     - Lewa: duża galeria (main image + miniatury), badge „Nowość” / „Bestseller” jeśli są keywords, lightbox‑style hover zoom (proste `scale`).
-     - Prawa: nazwa (H1), marka, ocena gwiazdkowa (statyczna 4.8/5, ~127 opinii — demo), krótki opis (meta description), cena (mock — losowa/placeholder z wyraźnym oznaczeniem „Cena demo”), stan magazynowy „Dostępny”, wybór ilości, duże CTA „Do koszyka” + „Kup teraz”, ikony ulubione/porównaj/udostępnij, boks z ikonami (dostawa 24h, gwarancja, zwrot 30 dni).
-   - **Zakładki pod główną sekcją**: Opis / Specyfikacja / SEO preview / Opinie (demo).
-     - Opis: `golden_description` w typograficznym `prose`.
-     - Specyfikacja: tabela z `golden_features`.
-     - SEO preview: obecny snippet Google + meta keywords jako chips.
-     - Opinie: 2–3 demo opinie, statyczne.
-   - **Sekcja „Podobne produkty”**: 4 puste karty‑szkielety z etykietą „Demo”.
-   - **Footer sklepu**: minimalny, żeby domknąć wygląd.
-
-3. **Styl wizualny**
-   - Wyłącznie tokeny z design systemu (żadnych `bg-white`, `text-black`, gradientów fioletowych).
-   - Typografia: serif dla H1 (już używane w projekcie), sans dla reszty.
-   - Karta ma być czysta, jasna, „Apple-like” prostota — bo cel to demo dla klienta.
-   - Pasek na górze: subtelny badge „Podgląd demo – dane z Lovable PIM” + przycisk „Wróć do edycji”, żeby nie mylić z prawdziwym sklepem.
-
-4. **Fallback braku Golden Recordu**
-   - Zostaje CTA do generacji, ale wyrenderowany w stylu karty (placeholder skeletony), żeby demo wyglądało spójnie.
-
-## Bez zmian
-- Backend, dane, zapytania (`getProductDetail`).
-- Reszta modułu PIM.
-
-## Weryfikacja
-- Otwarcie „Podgląd karty” z edycji produktu → nowa karta z pełnym widokiem sklepu (nie lista projektów).
-- Sprawdzenie widoku desktop i mobile (viewport).
+5. **Weryfikacja po zmianie**
+   - Sprawdzić ścieżkę: klik w „Podgląd karty” → nowa karta → jeśli trzeba logowanie → powrót dokładnie do `/projects/{id}/products/{pid}/preview`.
+   - Sprawdzić, że zwykłe wejście na `/login` nadal po zalogowaniu prowadzi do listy projektów.

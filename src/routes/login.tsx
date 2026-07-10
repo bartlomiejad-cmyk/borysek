@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
@@ -8,24 +8,54 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/login")({ component: LoginPage });
+export const Route = createFileRoute("/login")({
+  validateSearch: (search) => ({
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+  }),
+  component: LoginPage,
+});
+
+function safeRedirectPath(redirect?: string) {
+  if (!redirect) return "/projects";
+  const value = redirect.trim();
+  if (!value) return "/projects";
+  if (value.startsWith("/")) {
+    if (value.startsWith("//") || value === "/login") return "/projects";
+    return value;
+  }
+  try {
+    const url = new URL(value);
+    if (typeof window !== "undefined" && url.origin !== window.location.origin) return "/projects";
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    if (!path.startsWith("/") || path.startsWith("//") || path === "/login") return "/projects";
+    return path;
+  } catch {
+    return "/projects";
+  }
+}
 
 function LoginPage() {
   const navigate = useNavigate();
+  const { redirect } = Route.useSearch();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const redirectTo = safeRedirectPath(redirect);
+
+  const navigateAfterLogin = useCallback(() => {
+    navigate({ href: redirectTo, replace: true });
+  }, [navigate, redirectTo]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/projects" });
+      if (data.session) navigateAfterLogin();
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (session) navigate({ to: "/projects" });
+      if (session) navigateAfterLogin();
     });
     return () => sub.subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigateAfterLogin]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,14 +65,14 @@ function LoginPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/projects` },
+          options: { emailRedirectTo: `${window.location.origin}/login?redirect=${encodeURIComponent(redirectTo)}` },
         });
         if (error) throw error;
         toast.success("Konto utworzone. Sprawdź email aby potwierdzić.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate({ to: "/projects" });
+        navigateAfterLogin();
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Błąd logowania");
@@ -54,7 +84,7 @@ function LoginPage() {
   const google = async () => {
     setLoading(true);
     const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: `${window.location.origin}/projects`,
+      redirect_uri: `${window.location.origin}/login?redirect=${encodeURIComponent(redirectTo)}`,
     });
     if (result.error) {
       toast.error(result.error.message);
@@ -62,7 +92,7 @@ function LoginPage() {
       return;
     }
     if (result.redirected) return;
-    navigate({ to: "/projects" });
+    navigateAfterLogin();
   };
 
   return (

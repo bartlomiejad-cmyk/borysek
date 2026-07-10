@@ -41,6 +41,14 @@ function ProductPreview() {
   const [qty, setQty] = useState(1);
   const [tab, setTab] = useState<"desc" | "spec" | "seo" | "reviews">("desc");
 
+  // Deterministic demo price derived from product id — stable across renders.
+  const demoPrice = useMemo(() => {
+    let h = 0;
+    for (const c of pid) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const value = 49 + (h % 850) + ((h >> 8) % 100) / 100;
+    return Math.round(value * 100) / 100;
+  }, [pid]);
+
   const gallery = useMemo<string[]>(() => {
     if (!data) return [];
     const en = data.enrichment as unknown as Enrichment | null;
@@ -74,13 +82,6 @@ function ProductPreview() {
   const previewOrigin = "https://sklep.example.com";
   const previewUrl = slug ? `${previewOrigin}/${slug}` : `${previewOrigin}/produkt/${product.ext_id ?? pid.slice(0, 8)}`;
 
-  // Deterministic demo price derived from product id — stable across renders.
-  const demoPrice = useMemo(() => {
-    let h = 0;
-    for (const c of pid) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    const value = 49 + (h % 850) + ((h >> 8) % 100) / 100;
-    return Math.round(value * 100) / 100;
-  }, [pid]);
   const oldPrice = Math.round(demoPrice * 1.25 * 100) / 100;
   const fmt = (n: number) => n.toFixed(2).replace(".", ",") + " zł";
 
