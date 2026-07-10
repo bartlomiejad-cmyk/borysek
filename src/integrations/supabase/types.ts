@@ -410,6 +410,8 @@ export type Database = {
           strategy: Database["public"]["Enums"]["mapping_strategy"]
           updated_at: string
           user_id: string
+          visualization_requirements_pl: string | null
+          visualization_style_prompt: string | null
         }
         Insert: {
           blacklist?: string[]
@@ -425,6 +427,8 @@ export type Database = {
           strategy?: Database["public"]["Enums"]["mapping_strategy"]
           updated_at?: string
           user_id: string
+          visualization_requirements_pl?: string | null
+          visualization_style_prompt?: string | null
         }
         Update: {
           blacklist?: string[]
@@ -440,6 +444,8 @@ export type Database = {
           strategy?: Database["public"]["Enums"]["mapping_strategy"]
           updated_at?: string
           user_id?: string
+          visualization_requirements_pl?: string | null
+          visualization_style_prompt?: string | null
         }
         Relationships: []
       }

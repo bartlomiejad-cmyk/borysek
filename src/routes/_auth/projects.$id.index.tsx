@@ -35,6 +35,7 @@ import {
 import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
+import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -150,6 +151,7 @@ function ProjectPage() {
   const page = urlSearch.page;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
+  const [vizOpen, setVizOpen] = useState(false);
 
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
@@ -175,13 +177,19 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "FIRECRAWL_DISCOVERY" } }),
     refetchInterval: 3000,
   });
+  const { data: vizJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_VISUALIZATIONS"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_VISUALIZATIONS" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
+  const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -191,7 +199,9 @@ function ProjectPage() {
           ? "Generacja złotych rekordów"
           : job.kind === "REGENERATE_MEDIA"
             ? "Regeneracja zdjęć"
-            : "Wyszukiwanie źródeł (Firecrawl)";
+            : job.kind === "FIRECRAWL_DISCOVERY"
+              ? "Wyszukiwanie źródeł (Firecrawl)"
+              : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -201,7 +211,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, refetchProducts]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -534,6 +544,36 @@ function ProjectPage() {
         </Card>
       )}
 
+      {vizActive && vizJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {vizJob.cancel_requested ? "Zatrzymywanie… " : "Generuję wizualizacje produktowe "}
+                {vizJob.processed_count}/{vizJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">{Math.round((vizJob.processed_count / Math.max(1, vizJob.total)) * 100)}%</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: vizJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_VISUALIZATIONS"] });
+                  }}
+                  disabled={vizJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(vizJob.processed_count / Math.max(1, vizJob.total)) * 100} />
+            <BulkJobLog jobId={vizJob.id} />
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="data" className="mb-4">
         <TabsList>
           <TabsTrigger value="data">Dane</TabsTrigger>
@@ -663,6 +703,14 @@ function ProjectPage() {
                 disabled={!!regenActive || !!discActive}
               >
                 <ImagePlus className="h-4 w-4 mr-1" /> Uzupełnij zdjęcia
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setVizOpen(true)}
+                disabled={!!vizActive}
+              >
+                <Sparkles className="h-4 w-4 mr-1" /> Wizualizacje
               </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV
@@ -847,6 +895,28 @@ function ProjectPage() {
               (p as { regenerated_main_image?: string | null }).regenerated_main_image ?? null,
             ai_gallery_urls: (p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [],
           }))}
+      />
+      <GenerateVisualizationsDialog
+        open={vizOpen}
+        onOpenChange={setVizOpen}
+        projectId={id}
+        selectedIds={selectedIds}
+        allProducts={products.map<VizTarget>((p) => ({
+          id: p.id,
+          picked_urls: (p as { picked_urls?: string[] }).picked_urls ?? [],
+          regenerated_main_image:
+            (p as { regenerated_main_image?: string | null }).regenerated_main_image ?? null,
+          pinned_main_url:
+            (p as { pinned_main_url?: string | null }).pinned_main_url ?? null,
+        }))}
+        defaultStylePrompt={
+          (meta?.project as { visualization_style_prompt?: string | null } | undefined)
+            ?.visualization_style_prompt ?? null
+        }
+        defaultRequirementsPl={
+          (meta?.project as { visualization_requirements_pl?: string | null } | undefined)
+            ?.visualization_requirements_pl ?? null
+        }
       />
     </main>
   );

@@ -140,7 +140,7 @@ function fallbackPrompts(args: {
 
 // Translate Polish requirements + product context into two production-ready
 // EN prompts for fal-ai/nano-banana-pro/edit (thumbnail + lifestyle).
-async function buildFalPromptsFromPolish(args: {
+export async function buildFalPromptsFromPolish(args: {
   productName: string;
   productDesc: string;
   requirementsPl: string;
@@ -1859,4 +1859,153 @@ export async function runPhotoToolEditImage(
       .remove([prep.path])
       .catch(() => undefined);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Run: PIM Visualizations — generate N lifestyle visualisations for a
+// source_product using its final main image and append them to the
+// enrichments.ai_gallery_urls. Reuses the /photo prompt builder.
+// ---------------------------------------------------------------------------
+
+export async function runPimVisualization(
+  productId: string,
+  ctx?: WorkerCtx,
+  payload?: {
+    count?: number;
+    requirementsPl?: string;
+    stylePrompt?: string;
+    targetResolution?: number;
+  },
+): Promise<void> {
+  const FAL_KEY = process.env.FAL_KEY;
+  if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
+
+  const count = Math.max(0, Math.min(8, Math.floor(payload?.count ?? 0)));
+  if (count === 0) {
+    await emit(ctx, { level: "info", message: `⏭  ${productId.slice(0, 8)} — 0 wizualizacji, pomijam` });
+    return;
+  }
+  const targetResolution = payload?.targetResolution === 4096 ? "4K" : "2K";
+  const requirementsPl = (payload?.requirementsPl ?? "").trim();
+  const projectStyle = (payload?.stylePrompt ?? "").trim();
+
+  const { data: product } = await supabaseAdmin
+    .from("source_products")
+    .select("id, project_id, name, description")
+    .eq("id", productId)
+    .single();
+  if (!product) throw new Error("Product not found");
+  const productName = ((product as { name?: string | null }).name ?? "").trim();
+  const productDesc = ((product as { description?: string | null }).description ?? "").trim();
+
+  const { data: enrichment } = await supabaseAdmin
+    .from("enrichments")
+    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description")
+    .eq("source_product_id", productId)
+    .maybeSingle();
+  if (!enrichment) throw new Error("Brak enrichment");
+  const e = enrichment as unknown as {
+    id: string;
+    picked_urls: string[] | null;
+    regenerated_main_image: string | null;
+    pinned_main_url: string | null;
+    ai_gallery_urls: string[] | null;
+    golden_name: string | null;
+    golden_description: string | null;
+  };
+
+  // Pick main source image: pinned → regenerated (skip sentinel) → picked[0].
+  const regen = e.regenerated_main_image && e.regenerated_main_image !== "__imported__"
+    ? e.regenerated_main_image
+    : null;
+  const mainUrl = e.pinned_main_url || regen || (e.picked_urls?.[0] ?? null);
+  if (!mainUrl) throw new Error("Brak zdjęcia głównego — najpierw uruchom regenerację lub dopasuj źródła");
+
+  const label = (productName || productId.slice(0, 8)).trim();
+  await emit(ctx, {
+    level: "info",
+    message: `🎨 ${label} — ${count} wizualizacji (nano-banana-pro, ${targetResolution})`,
+  });
+
+  // Build EN prompt from Polish requirements. Prefer golden record if present.
+  const nameForPrompt = e.golden_name?.trim() || productName || "product";
+  const descForPrompt = e.golden_description?.trim() || productDesc;
+  let lifePrompt: string;
+  try {
+    await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
+    const built = await buildFalPromptsFromPolish({
+      productName: nameForPrompt,
+      productDesc: descForPrompt,
+      requirementsPl,
+      projectStyle,
+    });
+    lifePrompt = built.lifestyle_prompt;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
+    const fb = fallbackPrompts({
+      productName: nameForPrompt,
+      productDesc: descForPrompt,
+      requirementsPl,
+      projectStyle,
+    });
+    lifePrompt = fb.lifestyle_prompt;
+  }
+
+  const prep = await prepareFalSource(e.id, mainUrl);
+  const generated: string[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      await emit(ctx, { level: "info", message: `   • wizualizacja ${i + 1}/${count}…` });
+      try {
+        const resp = await callFal(
+          "fal-ai/nano-banana-pro/edit",
+          {
+            prompt: lifePrompt,
+            image_urls: [prep.url],
+            aspect_ratio: "1:1",
+            resolution: targetResolution,
+            output_format: "jpeg",
+            num_images: 1,
+          },
+          FAL_KEY,
+        );
+        const genUrl = resp.images?.[0]?.url;
+        if (!genUrl) throw new Error("brak url");
+        const bytes = await fetchBytes(genUrl);
+        const stamp = Date.now();
+        const path = `visualizations/${e.id}-${stamp}-${i + 1}.jpg`;
+        const { error: upErr } = await supabaseAdmin.storage
+          .from("regenerated-images")
+          .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
+        if (upErr) throw new Error(upErr.message);
+        const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(path);
+        generated.push(`${pub.publicUrl}?v=${stamp}`);
+        await emit(ctx, { level: "success", message: `   ✔ wizualizacja ${i + 1}` });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg}` });
+      }
+    }
+  } finally {
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([prep.path])
+      .catch(() => undefined);
+  }
+
+  if (generated.length) {
+    const existing = Array.isArray(e.ai_gallery_urls) ? e.ai_gallery_urls : [];
+    const merged = [...existing, ...generated];
+    const { error: dbErr } = await supabaseAdmin
+      .from("enrichments")
+      .update({ ai_gallery_urls: merged as never } as never)
+      .eq("id", e.id);
+    if (dbErr) throw new Error(dbErr.message);
+  }
+
+  await emit(ctx, {
+    level: "success",
+    message: `✅ ${label} — ${generated.length}/${count} wizualizacji dopisanych do galerii`,
+  });
 }
