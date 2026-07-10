@@ -540,7 +540,7 @@ function ProductDetail() {
                 <details className="mt-2 rounded border bg-muted/20 p-2 text-sm">
                   <summary className="cursor-pointer text-xs text-muted-foreground">Podgląd HTML</summary>
                   <div
-                    className="prose prose-sm max-w-none mt-2"
+                    className="mt-2 text-sm [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mt-0 [&_h3]:mb-2 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold"
                     dangerouslySetInnerHTML={{ __html: desc }}
                   />
                 </details>
