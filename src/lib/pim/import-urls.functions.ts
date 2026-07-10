@@ -283,6 +283,12 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
                 imported_from_url: url,
                 json_ld: jsonLd.length ? jsonLd[0] : null,
                 page_title: pageTitle,
+                imported_extract: {
+                  description: description || null,
+                  features: extracted.product_features,
+                  images: imageUrls,
+                  at: new Date().toISOString(),
+                },
               } as never,
             } as never)
             .select("id")
@@ -302,38 +308,15 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           );
           if (enErr) throw new Error(enErr.message);
 
-          // 3) product_sources — the scraped page becomes the first source.
-          const { error: psErr } = await supabase
-            .from("product_sources")
-            .upsert(
-              {
-                project_id: data.projectId,
-                url,
-                title: pageTitle,
-                description: description || null,
-                images: imageUrls as never,
-                extra_images: [] as never,
-                raw: {
-                  source: "url_import",
-                  metadata: meta,
-                  ai_extract: {
-                    features: extracted.product_features,
-                    at: new Date().toISOString(),
-                  },
-                } as never,
-              } as never,
-              { onConflict: "project_id,url" },
-            );
-          if (psErr) throw new Error(psErr.message);
-
-          // 4) search_results — so runMatching can link source_products→product_sources by term.
-          const { error: srErr } = await supabase.from("search_results").insert({
-            project_id: data.projectId,
-            term: nazwa,
-            organic_urls: [url] as never,
-          } as never);
-          if (srErr) throw new Error(srErr.message);
-
+          // Do NOT insert product_sources / search_results for the imported
+          // URL — the whole point of URL import is to seed a product that
+          // then goes through normal Firecrawl discovery + matching. If we
+          // pre-fill sources with the same URL, discovery's onlyMissing
+          // filter skips the product and the user sees the pasted link as
+          // the only source. Scraped snippet (description/features/images)
+          // is stashed in source_products.raw so it can be inspected later.
+          void description;
+          void imageUrls;
           return { url, ok: true, sourceProductId, name: nazwa };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
