@@ -356,7 +356,7 @@ function ProductDetail() {
         </div>
         <div className="flex gap-2">
         <Button asChild variant="outline" title="Otwórz podgląd karty produktu na podstawie złotego rekordu — dobre do demo dla klienta">
-          <Link to="/projects/$id/products/$pid/preview" params={{ id, pid }} target="_blank" rel="noopener noreferrer">
+          <Link to="/projects/$id/products/$pid_/preview" params={{ id, pid }} target="_blank" rel="noopener noreferrer">
             <Eye className="h-4 w-4 mr-2" />
             Podgląd karty
           </Link>

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Search, Sparkles, ShoppingCart, Heart, Share2, Truck, ShieldCheck, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/_auth/projects/$id/products/$pid/preview")({
+export const Route = createFileRoute("/_auth/projects/$id/products/$pid_/preview")({
   component: ProductPreview,
   head: () => ({ meta: [{ title: "Podgląd karty produktu" }, { name: "robots", content: "noindex" }] }),
 });
