@@ -19,6 +19,7 @@ import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects
 import { Route as ApiPublicHooksProcessBulkJobsRouteImport } from './routes/api/public/hooks/process-bulk-jobs'
 import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/projects.$id.verify'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
+import { Route as AuthProjectsIdProductsPidPreviewRouteImport } from './routes/_auth/projects.$id.products.$pid.preview'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -71,6 +72,12 @@ const AuthProjectsIdProductsPidRoute =
     path: '/projects/$id/products/$pid',
     getParentRoute: () => AuthRoute,
   } as any)
+const AuthProjectsIdProductsPidPreviewRoute =
+  AuthProjectsIdProductsPidPreviewRouteImport.update({
+    id: '/preview',
+    path: '/preview',
+    getParentRoute: () => AuthProjectsIdProductsPidRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -81,7 +88,8 @@ export interface FileRoutesByFullPath {
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/projects/$id/': typeof AuthProjectsIdIndexRoute
-  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
+  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRouteWithChildren
+  '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -92,7 +100,8 @@ export interface FileRoutesByTo {
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/projects/$id': typeof AuthProjectsIdIndexRoute
-  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
+  '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRouteWithChildren
+  '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -105,7 +114,8 @@ export interface FileRoutesById {
   '/_auth/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
   '/_auth/projects/$id/': typeof AuthProjectsIdIndexRoute
-  '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
+  '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRouteWithChildren
+  '/_auth/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/process-bulk-jobs'
     | '/projects/$id/'
     | '/projects/$id/products/$pid'
+    | '/projects/$id/products/$pid/preview'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/process-bulk-jobs'
     | '/projects/$id'
     | '/projects/$id/products/$pid'
+    | '/projects/$id/products/$pid/preview'
   id:
     | '__root__'
     | '/'
@@ -142,6 +154,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/process-bulk-jobs'
     | '/_auth/projects/$id/'
     | '/_auth/projects/$id/products/$pid'
+    | '/_auth/projects/$id/products/$pid/preview'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -223,8 +236,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthProjectsIdProductsPidRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_auth/projects/$id/products/$pid/preview': {
+      id: '/_auth/projects/$id/products/$pid/preview'
+      path: '/preview'
+      fullPath: '/projects/$id/products/$pid/preview'
+      preLoaderRoute: typeof AuthProjectsIdProductsPidPreviewRouteImport
+      parentRoute: typeof AuthProjectsIdProductsPidRoute
+    }
   }
 }
+
+interface AuthProjectsIdProductsPidRouteChildren {
+  AuthProjectsIdProductsPidPreviewRoute: typeof AuthProjectsIdProductsPidPreviewRoute
+}
+
+const AuthProjectsIdProductsPidRouteChildren: AuthProjectsIdProductsPidRouteChildren =
+  {
+    AuthProjectsIdProductsPidPreviewRoute:
+      AuthProjectsIdProductsPidPreviewRoute,
+  }
+
+const AuthProjectsIdProductsPidRouteWithChildren =
+  AuthProjectsIdProductsPidRoute._addFileChildren(
+    AuthProjectsIdProductsPidRouteChildren,
+  )
 
 interface AuthRouteChildren {
   AuthPhotoIdRoute: typeof AuthPhotoIdRoute
@@ -232,7 +267,7 @@ interface AuthRouteChildren {
   AuthProjectsIndexRoute: typeof AuthProjectsIndexRoute
   AuthProjectsIdVerifyRoute: typeof AuthProjectsIdVerifyRoute
   AuthProjectsIdIndexRoute: typeof AuthProjectsIdIndexRoute
-  AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRoute
+  AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRouteWithChildren
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
@@ -241,7 +276,7 @@ const AuthRouteChildren: AuthRouteChildren = {
   AuthProjectsIndexRoute: AuthProjectsIndexRoute,
   AuthProjectsIdVerifyRoute: AuthProjectsIdVerifyRoute,
   AuthProjectsIdIndexRoute: AuthProjectsIdIndexRoute,
-  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRoute,
+  AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRouteWithChildren,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
