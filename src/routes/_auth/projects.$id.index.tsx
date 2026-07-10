@@ -151,6 +151,7 @@ function ProjectPage() {
   const page = urlSearch.page;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
+  const [vizOpen, setVizOpen] = useState(false);
 
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
@@ -174,6 +175,11 @@ function ProjectPage() {
   const { data: discJob } = useQuery({
     queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"],
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "FIRECRAWL_DISCOVERY" } }),
+    refetchInterval: 3000,
+  });
+  const { data: vizJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_VISUALIZATIONS"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_VISUALIZATIONS" } }),
     refetchInterval: 3000,
   });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
