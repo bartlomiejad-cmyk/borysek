@@ -122,6 +122,7 @@ function fallbackPrompts(args: {
     `FRAMING: Square 1:1, product centered, ~75-85% of frame.`,
     `SHADOW: Soft realistic contact shadows.`,
     `PRESERVE: Every label, logo, colour, material and proportion — pixel-faithful to the source.`,
+    `CRITICAL COLOUR: Preserve the product's own colour(s) exactly — do NOT whiten, desaturate, bleach, lighten or shift hue. Only the background is white; the product keeps its original colour.`,
     `REMOVE: Watermarks, store logos, price tags, overlay text not physically printed on the product.`,
     requirementsPl ? `EXTRA USER REQUIREMENTS (translated from Polish): ${requirementsPl}` : ``,
   ].filter(Boolean).join(" ");
@@ -132,6 +133,7 @@ function fallbackPrompts(args: {
     projectStyle ? `SCENE STYLE: ${projectStyle}` : `SCENE: A natural, realistic environment appropriate for how this product is actually used. Soft daylight, believable props.`,
     `FRAMING: Square 1:1, product is the hero in sharp focus, realistic scale.`,
     `PRESERVE: Every label, logo, colour and material — identical to source.`,
+    `CRITICAL COLOUR: Preserve the product's own colour(s) exactly — do NOT whiten, desaturate, bleach, lighten or shift hue. Only the scene changes; the product keeps its original colour.`,
     `AVOID: Fantasy elements, unrealistic scale, floating objects, distorted labels, duplicate products, watermarks, text overlays.`,
     requirementsPl ? `EXTRA USER REQUIREMENTS (translated from Polish): ${requirementsPl}` : ``,
   ].filter(Boolean).join(" ");
