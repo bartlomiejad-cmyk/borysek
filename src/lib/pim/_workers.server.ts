@@ -1891,12 +1891,14 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, name, description")
+    .select("id, project_id, nazwa, raw")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
-  const productName = ((product as { name?: string | null }).name ?? "").trim();
-  const productDesc = ((product as { description?: string | null }).description ?? "").trim();
+  const productName = ((product as { nazwa?: string | null }).nazwa ?? "").trim();
+  const productDesc = (((product as { raw?: { opis?: string | null; description?: string | null } | null }).raw?.opis
+    ?? (product as { raw?: { description?: string | null } | null }).raw?.description
+    ?? "") as string).trim();
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
