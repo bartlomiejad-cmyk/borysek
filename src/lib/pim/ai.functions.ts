@@ -8,6 +8,7 @@ import {
   clampMetaDescription,
   dedupeKeywords,
   GOLDEN_SEO_SYSTEM_PROMPT,
+  sanitizeGoldenDescriptionHtml,
 } from "./seo";
 
 const MODEL = "google/gemini-3-flash-preview";
