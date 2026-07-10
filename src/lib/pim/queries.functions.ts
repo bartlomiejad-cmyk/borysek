@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { sanitizeGoldenDescriptionHtml } from "./seo";
 import { type ImageMeta, pickThumbsForList } from "./images";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
@@ -207,11 +208,14 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    const description = data.golden_description == null
+      ? null
+      : sanitizeGoldenDescriptionHtml(data.golden_description, { name: data.golden_name });
     const { error } = await supabase
       .from("enrichments")
       .update({
         golden_name: data.golden_name,
-        golden_description: data.golden_description,
+        golden_description: description,
         golden_slug: data.golden_slug ?? null,
         golden_meta_description: data.golden_meta_description ?? null,
         golden_seo_keywords: data.golden_seo_keywords ?? null,
