@@ -1967,11 +1967,13 @@ export async function runPimVisualization(
 
   const prep = await prepareFalSource(e.id, mainUrl);
   const generated: string[] = [];
+  let lastFalErr: string | null = null;
   try {
     for (let i = 0; i < count; i++) {
       await emit(ctx, { level: "info", message: `   • wizualizacja ${i + 1}/${count}…` });
+      let resp: FalResp | null = null;
       try {
-        const resp = await callFal(
+        resp = await callFal(
           "fal-ai/nano-banana-pro/edit",
           {
             prompt: lifePrompt,
@@ -1983,7 +1985,47 @@ export async function runPimVisualization(
           },
           FAL_KEY,
         );
-        const genUrl = resp.images?.[0]?.url;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastFalErr = msg;
+        // FAL 422 = model refused this specific prompt/image combo (safety
+        // filter or "could not generate"). Retry once with a minimal,
+        // safety-friendly prompt so users still get a result.
+        if (/\b422\b/.test(msg)) {
+          await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
+          const safePrompt = [
+            `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
+            `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field.`,
+            `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
+            projectStyle ? `Scene style: ${projectStyle}.` : "",
+            `Sharp, no motion blur, no text overlays, no watermarks.`,
+          ].filter(Boolean).join(" ");
+          try {
+            resp = await callFal(
+              "fal-ai/nano-banana-pro/edit",
+              {
+                prompt: safePrompt,
+                image_urls: [prep.url],
+                aspect_ratio: "1:1",
+                resolution: targetResolution,
+                output_format: "jpeg",
+                num_images: 1,
+              },
+              FAL_KEY,
+            );
+          } catch (err2) {
+            const msg2 = err2 instanceof Error ? err2.message : String(err2);
+            lastFalErr = msg2;
+            await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg2.slice(0, 240)}` });
+            continue;
+          }
+        } else {
+          await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg.slice(0, 240)}` });
+          continue;
+        }
+      }
+      try {
+        const genUrl = resp?.images?.[0]?.url;
         if (!genUrl) throw new Error("brak url");
         const bytes = await fetchBytes(genUrl);
         const stamp = Date.now();
@@ -1997,7 +2039,8 @@ export async function runPimVisualization(
         await emit(ctx, { level: "success", message: `   ✔ wizualizacja ${i + 1}` });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg}` });
+        lastFalErr = msg;
+        await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg.slice(0, 240)}` });
       }
     }
   } finally {
@@ -2021,4 +2064,13 @@ export async function runPimVisualization(
     level: "success",
     message: `✅ ${label} — ${generated.length}/${count} wizualizacji dopisanych do galerii`,
   });
+
+  // If nothing was generated, surface the failure so the bulk job's
+  // failed_count/last_error reflect reality. Otherwise the user sees a
+  // "COMPLETED" job with no visualizations and no explanation.
+  if (generated.length === 0) {
+    throw new Error(
+      `FAL nie wygenerował żadnej wizualizacji dla „${label}". ${lastFalErr ? `Ostatni błąd: ${lastFalErr.slice(0, 200)}` : ""}`.trim(),
+    );
+  }
 }
