@@ -750,6 +750,14 @@ function ProjectPage() {
               >
                 <Sparkles className="h-4 w-4 mr-1" /> Wizualizacje
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => generateAllegroAll([...selectedIds])}
+                disabled={!!allegroActive}
+              >
+                <Sparkles className="h-4 w-4 mr-1" /> {allegroActive ? "Allegro…" : "Opisy Allegro"}
+              </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV
               </Button>
