@@ -719,3 +719,79 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       failed,
     };
   });
+
+// ---------------------------------------------------------------------------
+// Visualization field suggestions (Styl / Wymagania) based on project name.
+// ---------------------------------------------------------------------------
+
+const SuggestVizInput = z.object({
+  projectId: z.string().uuid(),
+  field: z.enum(["style", "requirements"]),
+});
+
+export const suggestVisualizationField = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => SuggestVizInput.parse(input))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: proj, error } = await supabase
+      .from("projects")
+      .select("name, visualization_style_prompt, visualization_requirements_pl")
+      .eq("id", data.projectId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!proj) throw new Error("Nie znaleziono projektu");
+
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
+
+    const projectName = (proj.name ?? "").trim() || "(bez nazwy)";
+    const currentStyle = (proj.visualization_style_prompt ?? "").trim();
+
+    const system =
+      data.field === "style"
+        ? [
+            "Jesteś dyrektorem artystycznym fotografii produktowej e-commerce.",
+            "Na podstawie NAZWY PROJEKTU (kategoria / typ asortymentu) zaproponuj po polsku styl i scenę dla wizualizacji lifestyle produktów z tego projektu.",
+            "Wymogi:",
+            "- 1–2 zdania, maks. 220 znaków.",
+            "- Konkretne otoczenie, powierzchnia/tło, pora dnia, charakter światła, nastrój.",
+            "- Bez marek, bez ludzi z twarzą, bez cen, bez CTA.",
+            "- Zwróć wyłącznie treść propozycji (czysty tekst, bez nagłówków, bez cudzysłowów).",
+          ].join("\n")
+        : [
+            "Jesteś fotografem produktowym. Na podstawie NAZWY PROJEKTU (kategoria / typ asortymentu) wypisz po polsku wymagania techniczne dla wizualizacji lifestyle.",
+            "Wymogi:",
+            "- 3–5 krótkich punktów oddzielonych przecinkami lub myślnikami (nie lista markdown), maks. 320 znaków łącznie.",
+            "- Uwzględnij: kąt kamery, głębię ostrości, kierunek i temperaturę światła, kompozycję/tło, obecność rekwizytów.",
+            "- Nie zmieniaj koloru, logo ani proporcji produktu — to zasada domyślna.",
+            "- Zwróć wyłącznie treść propozycji (czysty tekst, bez nagłówków, bez cudzysłowów).",
+          ].join("\n");
+
+    const user =
+      data.field === "style"
+        ? `Nazwa projektu: "${projectName}".`
+        : `Nazwa projektu: "${projectName}".${currentStyle ? `\nWybrany styl/scena: "${currentStyle}".` : ""}`;
+
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": apiKey,
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-5.5",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (res.status === 429) throw new Error("Przekroczono limit zapytań AI — spróbuj za chwilę.");
+    if (res.status === 402) throw new Error("Brak kredytów AI w workspace.");
+    if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = (json.choices?.[0]?.message?.content ?? "").trim().replace(/^["„"]|["""]$/g, "");
+    if (!text) throw new Error("Model nie zwrócił treści");
+    return { text };
+  });

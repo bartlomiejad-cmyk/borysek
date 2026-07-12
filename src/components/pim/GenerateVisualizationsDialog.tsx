@@ -8,9 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Wand2 } from "lucide-react";
+import { Wand2, Sparkles, Loader2 } from "lucide-react";
 import { createBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { updateProject } from "@/lib/pim/projects.functions";
+import { suggestVisualizationField } from "@/lib/pim/ai.functions";
 import { friendlyError } from "@/lib/utils";
 
 export type VizTarget = {
@@ -51,6 +52,7 @@ export function GenerateVisualizationsDialog({
   const qc = useQueryClient();
   const createJob = useServerFn(createBulkJob);
   const updProject = useServerFn(updateProject);
+  const suggestField = useServerFn(suggestVisualizationField);
 
   const selectedTargets = useMemo(
     () => allProducts.filter((p) => selectedIds.has(p.id)),
@@ -66,6 +68,22 @@ export function GenerateVisualizationsDialog({
   const [reqPl, setReqPl] = useState<string>(defaultRequirementsPl ?? "");
   const [quality, setQuality] = useState<"2K" | "4K">("2K");
   const [busy, setBusy] = useState(false);
+  const [busyStyle, setBusyStyle] = useState(false);
+  const [busyReq, setBusyReq] = useState(false);
+
+  const suggest = async (field: "style" | "requirements") => {
+    const setBusyFn = field === "style" ? setBusyStyle : setBusyReq;
+    setBusyFn(true);
+    try {
+      const { text } = await suggestField({ data: { projectId, field } });
+      if (field === "style") setStyle(text);
+      else setReqPl(text);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się wygenerować propozycji"));
+    } finally {
+      setBusyFn(false);
+    }
+  };
 
   // Re-sync form defaults when opened (project settings may have changed).
   useEffect(() => {
@@ -171,7 +189,20 @@ export function GenerateVisualizationsDialog({
           </div>
 
           <div className="space-y-1">
-            <Label htmlFor="viz-style">Styl / scena (opcjonalnie)</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="viz-style">Styl / scena (opcjonalnie)</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => suggest("style")}
+                disabled={busyStyle || busy}
+              >
+                {busyStyle ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                Zaproponuj AI
+              </Button>
+            </div>
             <Textarea
               id="viz-style"
               rows={2}
@@ -182,7 +213,20 @@ export function GenerateVisualizationsDialog({
           </div>
 
           <div className="space-y-1">
-            <Label htmlFor="viz-req">Wymagania (PL) — AI przepisze na prompt EN</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="viz-req">Wymagania (PL) — AI przepisze na prompt EN</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => suggest("requirements")}
+                disabled={busyReq || busy}
+              >
+                {busyReq ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                Zaproponuj AI
+              </Button>
+            </div>
             <Textarea
               id="viz-req"
               rows={4}
