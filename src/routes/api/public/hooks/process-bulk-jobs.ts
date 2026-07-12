@@ -41,13 +41,13 @@ async function processItem(
   productId: string,
   ctx: WorkerCtx,
   payload: Record<string, unknown> | null,
-): Promise<void> {
+): Promise<{ complete: boolean }> {
   switch (kind) {
     case "GENERATE_GOLDEN":
       // Verification of source images is a separate, opt-in action. Bulk
       // golden generation must stay fast so the queue does not appear stuck.
       await runGenerateGoldenRecord(productId, "all", ctx);
-      return;
+      return { complete: true };
     case "REGENERATE_MEDIA":
       await runRegenerateMedia(productId, ctx, {
         maxGallery:
@@ -57,29 +57,28 @@ async function processItem(
             ? (payload.targetResolution as number)
             : undefined,
       });
-      return;
+      return { complete: true };
     case "FIRECRAWL_DISCOVERY":
       await runFirecrawlDiscovery(productId, ctx);
-      return;
+      return { complete: true };
     case "PHOTO_TOOL_GENERATE":
       await runPhotoToolGenerate(productId, ctx);
-      return;
+      return { complete: true };
     case "PHOTO_TOOL_EDIT_IMAGE": {
       const slot = (payload?.slot as "thumbnail" | "lifestyle") ?? "thumbnail";
       const idx = typeof payload?.lifestyleIndex === "number" ? (payload!.lifestyleIndex as number) : 0;
       const requirementsPl = typeof payload?.requirementsPl === "string" ? (payload!.requirementsPl as string) : "";
       await runPhotoToolEditImage(productId, { slot, lifestyleIndex: idx, requirementsPl }, ctx);
-      return;
+      return { complete: true };
     }
     case "PIM_VISUALIZATIONS": {
-      await runPimVisualization(productId, ctx, {
+      return await runPimVisualization(productId, ctx, {
         count: typeof payload?.count === "number" ? (payload.count as number) : 0,
         requirementsPl: typeof payload?.requirementsPl === "string" ? (payload.requirementsPl as string) : "",
         stylePrompt: typeof payload?.stylePrompt === "string" ? (payload.stylePrompt as string) : "",
         targetResolution:
           typeof payload?.targetResolution === "number" ? (payload.targetResolution as number) : undefined,
       });
-      return;
     }
     default:
       throw new Error(`Unknown job kind: ${kind as string}`);
@@ -132,18 +131,29 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
       break;
     }
 
-    const pid = remaining.shift()!;
+    const pid = remaining[0]!;
+    const shiftBeforeProcessing = job.kind !== "PIM_VISUALIZATIONS";
+    if (shiftBeforeProcessing) {
+      remaining.shift();
+    }
     // Persist the shifted queue BEFORE processing. PHOTO_TOOL_GENERATE can
     // take longer than the Worker's 30s hard limit; if we only persist after
     // processItem returns, a hard timeout leaves pid in `items`, the next
     // cron tick re-picks it and the whole product restarts from scratch
     // (miniaturka → wizualizacja 1 → hard kill → miniaturka again…).
-    // Removing it up front means at-most-once processing per pickup.
-    await supabaseAdmin
-      .from("bulk_jobs" as never)
-      .update({ items: remaining as never } as never)
-      .eq("id", job.id);
+    // Removing it up front means at-most-once processing per pickup. PIM
+    // visualizations are different: a single FAL render can outlive this
+    // request, so the product stays in the queue until all slots are saved.
+    if (shiftBeforeProcessing) {
+      await supabaseAdmin
+        .from("bulk_jobs" as never)
+        .update({ items: remaining as never } as never)
+        .eq("id", job.id);
+    }
     const ctx: WorkerCtx = {
+      deadline,
+      bulkJobId: job.id,
+      bulkPayload: job.payload,
       onEvent: async (e) => {
         try {
           await supabaseAdmin.from("bulk_job_events" as never).insert({
@@ -160,9 +170,15 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
       },
     };
     try {
-      await processItem(job.kind, pid, ctx, job.payload);
-      processed++;
+      const itemResult = await processItem(job.kind, pid, ctx, job.payload);
+      if (itemResult.complete) {
+        if (!shiftBeforeProcessing) remaining.shift();
+        processed++;
+      } else {
+        break;
+      }
     } catch (e) {
+      if (!shiftBeforeProcessing) remaining.shift();
       failed++;
       lastError = e instanceof Error ? e.message : String(e);
       await ctx.onEvent?.({ level: "error", message: `❌ ${lastError}` });
@@ -207,13 +223,30 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
         if (result.cancelled) {
           patch = { status: "CANCELLED", finished_at: new Date().toISOString() };
         } else if (result.remaining.length === 0) {
-          patch = { status: "COMPLETED", finished_at: new Date().toISOString() };
+          const totalProcessed = job.processed_count + result.processed;
+          const totalFailed = job.failed_count + result.failed;
+          patch = {
+            status: totalProcessed === 0 && totalFailed > 0 ? "FAILED" : "COMPLETED",
+            finished_at: new Date().toISOString(),
+          };
         }
         if (patch) {
           await supabaseAdmin
             .from("bulk_jobs" as never)
             .update(patch as never)
             .eq("id", job.id);
+        } else if (job.kind === "PIM_VISUALIZATIONS" && result.remaining.length > 0) {
+          // FAL visualizations can span multiple request windows. Kick the
+          // worker again immediately (cron remains the fallback) so completed
+          // queue renders are polled, uploaded, and saved without waiting.
+          const apikey = process.env.SUPABASE_PUBLISHABLE_KEY;
+          if (apikey) {
+            void fetch(new URL(request.url).toString(), {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey },
+              body: "{}",
+            }).catch(() => undefined);
+          }
         }
 
         return Response.json({

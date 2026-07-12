@@ -27,6 +27,7 @@ const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
 const CLASSIFY_MODEL = "google/gemini-2.5-flash";
 const FAL_BASE = "https://fal.run";
+const FAL_QUEUE_BASE = "https://queue.fal.run";
 
 // ---------------------------------------------------------------------------
 // Bulk-job event callback — used by the queue runner to stream live progress
@@ -41,6 +42,9 @@ export type JobEvent = {
 };
 
 export type WorkerCtx = {
+  deadline?: number;
+  bulkJobId?: string;
+  bulkPayload?: Record<string, unknown> | null;
   onEvent?: (e: JobEvent) => void | Promise<void>;
 };
 
@@ -278,6 +282,92 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   }
   return (await res.json()) as FalResp;
 }
+
+type FalQueueRequest = {
+  request_id: string;
+  status_url: string;
+  response_url: string;
+  cancel_url?: string;
+};
+
+type FalQueueStatus =
+  | { pending: true; status: string }
+  | { pending: false; response: FalResp };
+
+type PimVisualizationSlot = {
+  slot: number;
+  request?: FalQueueRequest;
+  mode?: "edit" | "safe-edit" | "generate";
+  sourceUrl?: string;
+  sourcePath?: string;
+  lastError?: string;
+};
+
+type PimVisualizationProgress = {
+  products?: Record<string, PimVisualizationSlot>;
+  prompts?: Record<string, string>;
+};
+
+function falHttpError(path: string, status: number, text: string): Error & { status?: number } {
+  const err = new Error(`FAL ${path} ${status}: ${text.slice(0, 300)}`) as Error & { status?: number };
+  err.status = status;
+  return err;
+}
+
+function errorStatus(err: unknown): number | undefined {
+  return (err as { status?: number } | null)?.status;
+}
+
+async function submitFalQueue(path: string, body: unknown, apiKey: string): Promise<FalQueueRequest> {
+  const res = await fetch(`${FAL_QUEUE_BASE}/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw falHttpError(path, res.status, txt);
+  }
+  const data = (await res.json()) as Partial<FalQueueRequest>;
+  if (!data.request_id || !data.status_url || !data.response_url) {
+    throw new Error("FAL queue: brak request_id/status_url/response_url");
+  }
+  return {
+    request_id: data.request_id,
+    status_url: data.status_url,
+    response_url: data.response_url,
+    cancel_url: data.cancel_url,
+  };
+}
+
+async function readFalQueue(req: FalQueueRequest, apiKey: string): Promise<FalQueueStatus> {
+  const statusRes = await fetch(req.status_url, {
+    headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
+  });
+  const statusText = await statusRes.text().catch(() => "");
+  if (!statusRes.ok) throw falHttpError("queue/status", statusRes.status, statusText);
+
+  let statusJson: Record<string, unknown> = {};
+  try { statusJson = JSON.parse(statusText) as Record<string, unknown>; } catch { statusJson = {}; }
+  const status = String(statusJson.status ?? statusJson.state ?? "").toUpperCase();
+  if (status && status !== "COMPLETED" && status !== "FAILED" && status !== "ERROR") {
+    return { pending: true, status };
+  }
+  if (status === "FAILED" || status === "ERROR") {
+    const rawError = statusJson.error ?? statusJson.detail ?? statusJson.message ?? statusText;
+    throw new Error(typeof rawError === "string" ? rawError : JSON.stringify(rawError).slice(0, 300));
+  }
+
+  const responseRes = await fetch(req.response_url, {
+    headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
+  });
+  const responseText = await responseRes.text().catch(() => "");
+  if (responseRes.status === 202) return { pending: true, status: "IN_PROGRESS" };
+  if (!responseRes.ok) throw falHttpError("queue/response", responseRes.status, responseText);
+  return { pending: false, response: JSON.parse(responseText) as FalResp };
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function prepareFalSource(enrichmentId: string, srcUrl: string): Promise<{ url: string; path: string }> {
   const bytes = await fetchBytes(srcUrl);
@@ -1889,14 +1979,14 @@ export async function runPimVisualization(
     stylePrompt?: string;
     targetResolution?: number;
   },
-): Promise<void> {
+): Promise<{ complete: boolean }> {
   const FAL_KEY = process.env.FAL_KEY;
   if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
 
   const count = Math.max(0, Math.min(8, Math.floor(payload?.count ?? 0)));
   if (count === 0) {
     await emit(ctx, { level: "info", message: `⏭  ${productId.slice(0, 8)} — 0 wizualizacji, pomijam` });
-    return;
+    return { complete: true };
   }
   const targetResolution = payload?.targetResolution === 4096 ? "4K" : "2K";
   const requirementsPl = (payload?.requirementsPl ?? "").trim();
@@ -1942,181 +2032,292 @@ export async function runPimVisualization(
     message: `🎨 ${label} — ${count} wizualizacji (nano-banana-pro, ${targetResolution})`,
   });
 
+  const jobPayload = (ctx?.bulkPayload ?? {}) as Record<string, unknown>;
+  const progress = ((jobPayload.visualizationProgress ?? {}) as PimVisualizationProgress) || {};
+  let productsProgress = progress.products ?? {};
+  let slotState: PimVisualizationSlot = productsProgress[productId] ?? { slot: 0 };
+  slotState.slot = Math.max(0, Math.min(count, Math.floor(slotState.slot || 0)));
+
+  let lifePrompt = (progress.prompts?.[productId] ?? "").trim();
+  const saveProgress = async (next: PimVisualizationSlot | null) => {
+    if (!ctx?.bulkJobId) return;
+    const nextProducts = { ...productsProgress };
+    const nextPrompts = { ...(progress.prompts ?? {}) };
+    if (next) {
+      nextProducts[productId] = next;
+      if (lifePrompt) nextPrompts[productId] = lifePrompt;
+    } else {
+      delete nextProducts[productId];
+      delete nextPrompts[productId];
+    }
+    productsProgress = nextProducts;
+    const nextPayload = {
+      ...jobPayload,
+      visualizationProgress: { ...progress, products: nextProducts, prompts: nextPrompts },
+    };
+    await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .update({ payload: nextPayload as never } as never)
+      .eq("id", ctx.bulkJobId);
+  };
+
   // Build EN prompt from Polish requirements. Prefer golden record if present.
   const nameForPrompt = e.golden_name?.trim() || productName || "product";
   const descForPrompt = e.golden_description?.trim() || productDesc;
-  let lifePrompt: string;
-  try {
-    await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
-    const built = await buildFalPromptsFromPolish({
-      productName: nameForPrompt,
-      productDesc: descForPrompt,
-      requirementsPl,
-      projectStyle,
-    });
-    lifePrompt = built.lifestyle_prompt;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
-    const fb = fallbackPrompts({
-      productName: nameForPrompt,
-      productDesc: descForPrompt,
-      requirementsPl,
-      projectStyle,
-    });
-    lifePrompt = fb.lifestyle_prompt;
-  }
-
-  const prep = await prepareFalSource(e.id, mainUrl);
-  const generated: string[] = [];
-  let lastFalErr: string | null = null;
-  try {
-    for (let i = 0; i < count; i++) {
-      await emit(ctx, { level: "info", message: `   • wizualizacja ${i + 1}/${count}…` });
-      let resp: FalResp | null = null;
-      try {
-        resp = await callFal(
-          "fal-ai/nano-banana-pro/edit",
-          {
-            prompt: lifePrompt,
-            image_urls: [prep.url],
-            aspect_ratio: "1:1",
-            resolution: targetResolution,
-            output_format: "jpeg",
-            num_images: 1,
-          },
-          FAL_KEY,
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        const status = (err as { status?: number } | null)?.status;
-        lastFalErr = msg;
-        // FAL 422 = model refused this specific prompt/image combo (safety
-        // filter or "could not generate"). Retry once with a minimal,
-        // safety-friendly prompt so users still get a result.
-        if (status === 422 || /\b422\b/.test(msg)) {
-          await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
-          const safePrompt = [
-            `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
-            `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field.`,
-            `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
-            projectStyle ? `Scene style: ${projectStyle}.` : "",
-            `Sharp, no motion blur, no text overlays, no watermarks.`,
-          ].filter(Boolean).join(" ");
-          try {
-            resp = await callFal(
-              "fal-ai/nano-banana-pro/edit",
-              {
-                prompt: safePrompt,
-                image_urls: [prep.url],
-                aspect_ratio: "1:1",
-                resolution: targetResolution,
-                output_format: "jpeg",
-                num_images: 1,
-              },
-              FAL_KEY,
-            );
-          } catch (err2) {
-            const msg2 = err2 instanceof Error ? err2.message : String(err2);
-            const status2 = (err2 as { status?: number } | null)?.status;
-            lastFalErr = msg2;
-            // Second fallback: FAL edit refused even the safe prompt (often
-            // because the reference image itself is deemed sensitive, e.g.
-            // ammunition/firearms). Try text-to-image without any reference.
-            if (status2 === 422 || /\b422\b/.test(msg2)) {
-              await emit(ctx, {
-                level: "warn",
-                message: `   ⚠ FAL 422 przy edycji — próbuję generowania bez referencji`,
-              });
-              const descBrief = (descForPrompt || "").replace(/\s+/g, " ").trim().slice(0, 600);
-              const genPrompt = [
-                `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
-                descBrief ? `Product context: ${descBrief}.` : "",
-                `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
-                projectStyle ? `Scene style: ${projectStyle}.` : "",
-                `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
-              ].filter(Boolean).join(" ");
-              try {
-                resp = await callFal(
-                  "fal-ai/nano-banana-pro",
-                  {
-                    prompt: genPrompt,
-                    aspect_ratio: "1:1",
-                    resolution: targetResolution,
-                    output_format: "jpeg",
-                    num_images: 1,
-                  },
-                  FAL_KEY,
-                );
-              } catch (err3) {
-                const msg3 = err3 instanceof Error ? err3.message : String(err3);
-                const status3 = (err3 as { status?: number } | null)?.status;
-                if (status3 === 422 || /\b422\b/.test(msg3)) {
-                  lastFalErr =
-                    "FAL odrzucił zarówno edycję jak i generowanie od zera (422) — najpewniej treść uznana za wrażliwą";
-                } else {
-                  lastFalErr = msg3;
-                }
-                await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${lastFalErr.slice(0, 240)}` });
-                continue;
-              }
-            } else {
-              await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg2.slice(0, 240)}` });
-              continue;
-            }
-          }
-        } else {
-          await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg.slice(0, 240)}` });
-          continue;
-        }
-      }
-      try {
-        const genUrl = resp?.images?.[0]?.url;
-        if (!genUrl) throw new Error("brak url");
-        const bytes = await fetchBytes(genUrl);
-        const stamp = Date.now();
-        const path = `visualizations/${e.id}-${stamp}-${i + 1}.jpg`;
-        const { error: upErr } = await supabaseAdmin.storage
-          .from("regenerated-images")
-          .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
-        if (upErr) throw new Error(upErr.message);
-        const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(path);
-        generated.push(`${pub.publicUrl}?v=${stamp}`);
-        await emit(ctx, { level: "success", message: `   ✔ wizualizacja ${i + 1}` });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        lastFalErr = msg;
-        await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg.slice(0, 240)}` });
-      }
+  if (!lifePrompt) {
+    try {
+      await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
+      const built = await buildFalPromptsFromPolish({
+        productName: nameForPrompt,
+        productDesc: descForPrompt,
+        requirementsPl,
+        projectStyle,
+      });
+      lifePrompt = built.lifestyle_prompt;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
+      const fb = fallbackPrompts({
+        productName: nameForPrompt,
+        productDesc: descForPrompt,
+        requirementsPl,
+        projectStyle,
+      });
+      lifePrompt = fb.lifestyle_prompt;
     }
-  } finally {
-    await supabaseAdmin.storage
-      .from("regenerated-images")
-      .remove([prep.path])
-      .catch(() => undefined);
+    await saveProgress(slotState);
+    if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
+      await emit(ctx, { level: "info", message: `   • prompt gotowy — render wystartuje w następnym przebiegu` });
+      return { complete: false };
+    }
   }
 
-  if (generated.length) {
-    const existing = Array.isArray(e.ai_gallery_urls) ? e.ai_gallery_urls : [];
-    const merged = [...existing, ...generated];
+  const appendVisualization = async (url: string, slot: number) => {
+    const bytes = await fetchBytes(url);
+    const stamp = Date.now();
+    const path = `visualizations/${e.id}-${stamp}-${slot + 1}.jpg`;
+    const { error: upErr } = await supabaseAdmin.storage
+      .from("regenerated-images")
+      .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
+    if (upErr) throw new Error(upErr.message);
+    const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(path);
+    const publicUrl = `${pub.publicUrl}?v=${stamp}`;
+
+    const { data: fresh, error: readErr } = await supabaseAdmin
+      .from("enrichments")
+      .select("ai_gallery_urls")
+      .eq("id", e.id)
+      .single();
+    if (readErr) throw new Error(readErr.message);
+    const existing = Array.isArray((fresh as { ai_gallery_urls?: unknown }).ai_gallery_urls)
+      ? ((fresh as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [])
+      : [];
+    const merged = existing.includes(publicUrl) ? existing : [...existing, publicUrl];
     const { error: dbErr } = await supabaseAdmin
       .from("enrichments")
       .update({ ai_gallery_urls: merged as never } as never)
       .eq("id", e.id);
     if (dbErr) throw new Error(dbErr.message);
+    await emit(ctx, { level: "success", message: `   ✔ odebrano z FAL, upload OK, dopisano do galerii (${slot + 1}/${count})` });
+  };
+
+  const isRefusal = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = errorStatus(err);
+    return status === 422 || /\b422\b|could not generate|given prompts and images/i.test(msg);
+  };
+
+  const buildRequest = (mode: PimVisualizationSlot["mode"]) => {
+    if (mode === "safe-edit") {
+      const safePrompt = [
+        `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
+        `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field.`,
+        `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
+        projectStyle ? `Scene style: ${projectStyle}.` : "",
+        `Sharp, no motion blur, no text overlays, no watermarks.`,
+      ].filter(Boolean).join(" ");
+      return {
+        path: "fal-ai/nano-banana-pro/edit",
+        body: {
+          prompt: safePrompt,
+          image_urls: [] as string[],
+          aspect_ratio: "1:1",
+          resolution: targetResolution,
+          output_format: "jpeg",
+          num_images: 1,
+        },
+      };
+    }
+    if (mode === "generate") {
+      const descBrief = (descForPrompt || "").replace(/\s+/g, " ").trim().slice(0, 600);
+      const genPrompt = [
+        `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
+        descBrief ? `Product context: ${descBrief}.` : "",
+        `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
+        projectStyle ? `Scene style: ${projectStyle}.` : "",
+        `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
+      ].filter(Boolean).join(" ");
+      return {
+        path: "fal-ai/nano-banana-pro",
+        body: {
+          prompt: genPrompt,
+          aspect_ratio: "1:1",
+          resolution: targetResolution,
+          output_format: "jpeg",
+          num_images: 1,
+        },
+      };
+    }
+    return {
+      path: "fal-ai/nano-banana-pro/edit",
+      body: {
+        prompt: lifePrompt,
+        image_urls: [] as string[],
+        aspect_ratio: "1:1",
+        resolution: targetResolution,
+        output_format: "jpeg",
+        num_images: 1,
+      },
+    };
+  };
+
+  const cleanupSource = async (state: PimVisualizationSlot) => {
+    if (!state.sourcePath) return;
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([state.sourcePath])
+      .catch(() => undefined);
+  };
+
+  let lastFalErr: string | null = null;
+  try {
+    while (slotState.slot < count) {
+      if (ctx?.deadline && Date.now() > ctx.deadline - 4_000) {
+        await saveProgress(slotState);
+        await emit(ctx, { level: "info", message: `   • kontynuacja w następnym przebiegu (${slotState.slot}/${count})` });
+        return { complete: false };
+      }
+
+      const slot = slotState.slot;
+      await emit(ctx, { level: "info", message: `   • wizualizacja ${slot + 1}/${count}…` });
+      if (!slotState.mode) slotState = { ...slotState, mode: "edit" };
+
+      if (!slotState.request) {
+        if ((slotState.mode === "edit" || slotState.mode === "safe-edit") && !slotState.sourceUrl) {
+          const source = await prepareFalSource(e.id, mainUrl);
+          slotState = { ...slotState, sourceUrl: source.url, sourcePath: source.path };
+        }
+        const req = buildRequest(slotState.mode);
+        const body = req.body as { image_urls?: string[] };
+        if (body.image_urls) body.image_urls = slotState.sourceUrl ? [slotState.sourceUrl] : [];
+        try {
+          const queued = await submitFalQueue(req.path, req.body, FAL_KEY);
+          slotState = { ...slotState, request: queued };
+          await saveProgress(slotState);
+          await emit(ctx, { level: "info", message: `   • FAL przyjął zadanie ${slot + 1}/${count} (${slotState.mode})` });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          lastFalErr = msg;
+          if (isRefusal(err) && slotState.mode === "edit") {
+            await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
+            await cleanupSource(slotState);
+            slotState = { slot, mode: "safe-edit", lastError: msg };
+            await saveProgress(slotState);
+            continue;
+          }
+          if (isRefusal(err) && slotState.mode === "safe-edit") {
+            await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 przy edycji — próbuję generowania bez referencji` });
+            await cleanupSource(slotState);
+            slotState = { slot, mode: "generate", lastError: msg };
+            await saveProgress(slotState);
+            continue;
+          }
+          if (isRefusal(err) && slotState.mode === "generate") {
+            lastFalErr = "FAL odrzucił zarówno edycję jak i generowanie od zera (422) — najpewniej treść uznana za wrażliwą";
+          }
+          await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${slot + 1}: ${lastFalErr.slice(0, 240)}` });
+          await cleanupSource(slotState);
+          slotState = { slot: slot + 1 };
+          await saveProgress(slotState);
+          continue;
+        }
+      }
+
+      try {
+        let queueResult: FalQueueStatus | null = null;
+        while (slotState.request) {
+          queueResult = await readFalQueue(slotState.request, FAL_KEY);
+          if (!queueResult.pending) break;
+          if (!ctx?.deadline || Date.now() > ctx.deadline - 6_000) {
+            await saveProgress(slotState);
+            await emit(ctx, { level: "info", message: `   • FAL nadal renderuje — sprawdzę w następnym przebiegu` });
+            return { complete: false };
+          }
+          await wait(1_500);
+        }
+        if (!queueResult || queueResult.pending) return { complete: false };
+        const genUrl = queueResult.response.images?.[0]?.url;
+        if (!genUrl) throw new Error("brak url");
+        await appendVisualization(genUrl, slot);
+        await cleanupSource(slotState);
+        slotState = { slot: slot + 1 };
+        await saveProgress(slotState.slot < count ? slotState : null);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastFalErr = msg;
+        if (isRefusal(err) && slotState.mode === "edit") {
+          await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
+          await cleanupSource(slotState);
+          slotState = { slot, mode: "safe-edit", lastError: msg };
+          await saveProgress(slotState);
+          continue;
+        }
+        if (isRefusal(err) && slotState.mode === "safe-edit") {
+          await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 przy edycji — próbuję generowania bez referencji` });
+          await cleanupSource(slotState);
+          slotState = { slot, mode: "generate", lastError: msg };
+          await saveProgress(slotState);
+          continue;
+        }
+        if (isRefusal(err) && slotState.mode === "generate") {
+          lastFalErr = "FAL odrzucił zarówno edycję jak i generowanie od zera (422) — najpewniej treść uznana za wrażliwą";
+        }
+        await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${slot + 1}: ${lastFalErr.slice(0, 240)}` });
+        await cleanupSource(slotState);
+        slotState = { slot: slot + 1 };
+        await saveProgress(slotState.slot < count ? slotState : null);
+      }
+    }
+  } finally {
+    // Source files for in-flight FAL queue jobs are intentionally kept until
+    // the request is polled to completion; cleanup happens after each slot.
   }
+
+  await saveProgress(null);
+
+  const { data: finalEn } = await supabaseAdmin
+    .from("enrichments")
+    .select("ai_gallery_urls")
+    .eq("id", e.id)
+    .single();
+  const finalGallery = Array.isArray((finalEn as { ai_gallery_urls?: unknown } | null)?.ai_gallery_urls)
+    ? ((finalEn as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [])
+    : [];
+  const initialCount = Array.isArray(e.ai_gallery_urls) ? e.ai_gallery_urls.length : 0;
+  const added = Math.max(0, finalGallery.length - initialCount);
 
   await emit(ctx, {
     level: "success",
-    message: `✅ ${label} — ${generated.length}/${count} wizualizacji dopisanych do galerii`,
+    message: `✅ ${label} — ${added}/${count} wizualizacji dopisanych do galerii`,
   });
 
   // If nothing was generated, surface the failure so the bulk job's
   // failed_count/last_error reflect reality. Otherwise the user sees a
   // "COMPLETED" job with no visualizations and no explanation.
-  if (generated.length === 0) {
+  if (added === 0) {
     throw new Error(
       `FAL nie wygenerował żadnej wizualizacji dla „${label}". ${lastFalErr ? `Ostatni błąd: ${lastFalErr.slice(0, 200)}` : ""}`.trim(),
     );
   }
+  return { complete: true };
 }
