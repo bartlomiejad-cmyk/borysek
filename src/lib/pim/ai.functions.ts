@@ -9,6 +9,8 @@ import {
   dedupeKeywords,
   GOLDEN_SEO_SYSTEM_PROMPT,
   sanitizeGoldenDescriptionHtml,
+  ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
+  sanitizeAllegroDescriptionHtml,
 } from "./seo";
 
 const MODEL = "google/gemini-3-flash-preview";
