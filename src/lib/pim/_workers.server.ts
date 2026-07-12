@@ -298,6 +298,8 @@ type PimVisualizationSlot = {
   slot: number;
   request?: FalQueueRequest;
   mode?: "edit" | "safe-edit" | "generate";
+  sourceUrl?: string;
+  sourcePath?: string;
   lastError?: string;
 };
 
@@ -2163,11 +2165,16 @@ export async function runPimVisualization(
     };
   };
 
-  let prep: { url: string; path: string } | null = null;
+  const cleanupSource = async (state: PimVisualizationSlot) => {
+    if (!state.sourcePath) return;
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([state.sourcePath])
+      .catch(() => undefined);
+  };
+
   let lastFalErr: string | null = null;
   try {
-    prep = await prepareFalSource(e.id, mainUrl);
-
     while (slotState.slot < count) {
       if (ctx?.deadline && Date.now() > ctx.deadline - 4_000) {
         await saveProgress(slotState);
@@ -2180,9 +2187,13 @@ export async function runPimVisualization(
       if (!slotState.mode) slotState = { ...slotState, mode: "edit" };
 
       if (!slotState.request) {
+        if ((slotState.mode === "edit" || slotState.mode === "safe-edit") && !slotState.sourceUrl) {
+          const source = await prepareFalSource(e.id, mainUrl);
+          slotState = { ...slotState, sourceUrl: source.url, sourcePath: source.path };
+        }
         const req = buildRequest(slotState.mode);
         const body = req.body as { image_urls?: string[] };
-        if (body.image_urls) body.image_urls = [prep.url];
+        if (body.image_urls) body.image_urls = slotState.sourceUrl ? [slotState.sourceUrl] : [];
         try {
           const queued = await submitFalQueue(req.path, req.body, FAL_KEY);
           slotState = { ...slotState, request: queued };
@@ -2207,6 +2218,7 @@ export async function runPimVisualization(
             lastFalErr = "FAL odrzucił zarówno edycję jak i generowanie od zera (422) — najpewniej treść uznana za wrażliwą";
           }
           await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${slot + 1}: ${lastFalErr.slice(0, 240)}` });
+          await cleanupSource(slotState);
           slotState = { slot: slot + 1 };
           await saveProgress(slotState);
           continue;
@@ -2229,6 +2241,7 @@ export async function runPimVisualization(
         const genUrl = queueResult.response.images?.[0]?.url;
         if (!genUrl) throw new Error("brak url");
         await appendVisualization(genUrl, slot);
+        await cleanupSource(slotState);
         slotState = { slot: slot + 1 };
         await saveProgress(slotState.slot < count ? slotState : null);
       } catch (err) {
@@ -2242,6 +2255,7 @@ export async function runPimVisualization(
         }
         if (isRefusal(err) && slotState.mode === "safe-edit") {
           await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 przy edycji — próbuję generowania bez referencji` });
+          await cleanupSource(slotState);
           slotState = { slot, mode: "generate", lastError: msg };
           await saveProgress(slotState);
           continue;
@@ -2250,17 +2264,14 @@ export async function runPimVisualization(
           lastFalErr = "FAL odrzucił zarówno edycję jak i generowanie od zera (422) — najpewniej treść uznana za wrażliwą";
         }
         await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${slot + 1}: ${lastFalErr.slice(0, 240)}` });
+        await cleanupSource(slotState);
         slotState = { slot: slot + 1 };
         await saveProgress(slotState.slot < count ? slotState : null);
       }
     }
   } finally {
-    if (prep) {
-      await supabaseAdmin.storage
-        .from("regenerated-images")
-        .remove([prep.path])
-        .catch(() => undefined);
-    }
+    // Source files for in-flight FAL queue jobs are intentionally kept until
+    // the request is polled to completion; cleanup happens after each slot.
   }
 
   await saveProgress(null);
