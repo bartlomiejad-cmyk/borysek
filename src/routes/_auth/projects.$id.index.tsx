@@ -183,14 +183,20 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_VISUALIZATIONS" } }),
     refetchInterval: 3000,
   });
+  const { data: allegroJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_ALLEGRO_DESCRIPTION"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_ALLEGRO_DESCRIPTION" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
   const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
+  const allegroActive = allegroJob && (allegroJob.status === "PENDING" || allegroJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob, vizJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -202,7 +208,9 @@ function ProjectPage() {
             ? "Regeneracja zdjęć"
             : job.kind === "FIRECRAWL_DISCOVERY"
               ? "Wyszukiwanie źródeł (Firecrawl)"
-              : "Wizualizacje produktowe";
+              : job.kind === "PIM_ALLEGRO_DESCRIPTION"
+                ? "Opisy Allegro"
+                : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -212,7 +220,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, vizJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, allegroJob, refetchProducts]);
 
   useEffect(() => {
     if (!vizActive) return;
