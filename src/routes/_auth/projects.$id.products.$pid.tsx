@@ -239,6 +239,29 @@ function ProductDetail() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
+  const genAllegro = useMutation({
+    mutationFn: () => genAllegroFn({ data: { productId: pid } }),
+    onSuccess: (res: { html: string }) => {
+      setAllegroHtml(res.html);
+      setAllegroGenAt(new Date().toISOString());
+      toast.success("Opis Allegro wygenerowany");
+      invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się wygenerować opisu Allegro")),
+  });
+
+  const saveAllegro = useMutation({
+    mutationFn: () =>
+      updFn({
+        data: {
+          enrichmentId: data!.enrichment!.id,
+          allegro_description: allegroHtml || null,
+        } as never,
+      }),
+    onSuccess: () => { toast.success("Opis Allegro zapisany"); invalidate(); },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się zapisać")),
+  });
+
   const hideMut = useMutation({
     mutationFn: (url: string) => hideFn({ data: { enrichmentId: data!.enrichment!.id, url } }),
     onSuccess: () => invalidate(),
