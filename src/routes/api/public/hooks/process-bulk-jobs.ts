@@ -223,7 +223,12 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
         if (result.cancelled) {
           patch = { status: "CANCELLED", finished_at: new Date().toISOString() };
         } else if (result.remaining.length === 0) {
-          patch = { status: "COMPLETED", finished_at: new Date().toISOString() };
+          const totalProcessed = job.processed_count + result.processed;
+          const totalFailed = job.failed_count + result.failed;
+          patch = {
+            status: totalProcessed === 0 && totalFailed > 0 ? "FAILED" : "COMPLETED",
+            finished_at: new Date().toISOString(),
+          };
         }
         if (patch) {
           await supabaseAdmin
