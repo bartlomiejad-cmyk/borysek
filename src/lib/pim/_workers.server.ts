@@ -294,6 +294,17 @@ type FalQueueStatus =
   | { pending: true; status: string }
   | { pending: false; response: FalResp };
 
+type PimVisualizationSlot = {
+  slot: number;
+  request?: FalQueueRequest;
+  mode?: "edit" | "safe-edit" | "generate";
+  lastError?: string;
+};
+
+type PimVisualizationProgress = {
+  products?: Record<string, PimVisualizationSlot>;
+};
+
 function falHttpError(path: string, status: number, text: string): Error & { status?: number } {
   const err = new Error(`FAL ${path} ${status}: ${text.slice(0, 300)}`) as Error & { status?: number };
   err.status = status;
