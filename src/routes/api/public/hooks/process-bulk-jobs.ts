@@ -7,6 +7,7 @@ import {
   runPhotoToolGenerate,
   runPhotoToolEditImage,
   runPimVisualization,
+  runPimAllegroDescription,
   type WorkerCtx,
 } from "@/lib/pim/_workers.server";
 
@@ -20,7 +21,8 @@ type JobKind =
   | "FIRECRAWL_DISCOVERY"
   | "PHOTO_TOOL_GENERATE"
   | "PHOTO_TOOL_EDIT_IMAGE"
-  | "PIM_VISUALIZATIONS";
+  | "PIM_VISUALIZATIONS"
+  | "PIM_ALLEGRO_DESCRIPTION";
 
 type BulkJobRow = {
   id: string;
@@ -80,6 +82,9 @@ async function processItem(
           typeof payload?.targetResolution === "number" ? (payload.targetResolution as number) : undefined,
       });
     }
+    case "PIM_ALLEGRO_DESCRIPTION":
+      await runPimAllegroDescription(productId, ctx);
+      return { complete: true };
     default:
       throw new Error(`Unknown job kind: ${kind as string}`);
   }
