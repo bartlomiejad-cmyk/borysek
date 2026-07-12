@@ -2323,3 +2323,102 @@ export async function runPimVisualization(
   }
   return { complete: true };
 }
+
+// ---------------------------------------------------------------------------
+// runPimAllegroDescription — generuje sprzedażowy opis HTML pod Allegro
+// dla pojedynczego produktu (używany w bulk_jobs PIM_ALLEGRO_DESCRIPTION).
+// ---------------------------------------------------------------------------
+
+export async function runPimAllegroDescription(productId: string, ctx?: WorkerCtx): Promise<void> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+  const { data: product, error: pErr } = await supabaseAdmin
+    .from("source_products")
+    .select("id, project_id, nazwa, kod, ean")
+    .eq("id", productId)
+    .single();
+  if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+  const { data: enrichment } = await supabaseAdmin
+    .from("enrichments")
+    .select("*")
+    .eq("source_product_id", product.id)
+    .maybeSingle();
+  if (!enrichment) throw new Error("Brak wzbogacenia — najpierw wygeneruj złoty rekord.");
+
+  const en = enrichment as typeof enrichment & {
+    golden_name?: string | null;
+    golden_description?: string | null;
+    golden_features?: Array<{ key: string; value: string }> | null;
+    golden_seo_keywords?: string[] | null;
+    golden_meta_description?: string | null;
+  };
+  const goldenName = (en.golden_name ?? product.nazwa ?? "").trim();
+  const goldenDescription = (en.golden_description ?? "").trim();
+  const features = Array.isArray(en.golden_features) ? en.golden_features : [];
+  const keywords = Array.isArray(en.golden_seo_keywords) ? en.golden_seo_keywords : [];
+  const meta = (en.golden_meta_description ?? "").trim();
+
+  if (!goldenName) throw new Error("Brak nazwy — wygeneruj najpierw złoty rekord.");
+
+  await emit(ctx, { level: "info", message: `📝 Allegro: generuję opis dla „${goldenName}"…` });
+
+  const userPrompt = [
+    `NAZWA PRODUKTU: ${goldenName}`,
+    `KOD: ${product.kod ?? ""}`,
+    `EAN: ${product.ean ?? ""}`,
+    "",
+    "META DESCRIPTION (dla kontekstu):",
+    meta || "(brak)",
+    "",
+    "OPIS ZŁOTEGO REKORDU (HTML, źródło faktów):",
+    goldenDescription || "(brak)",
+    "",
+    "CECHY / PARAMETRY:",
+    features.length ? features.map((f) => `- ${f.key}: ${f.value}`).join("\n") : "(brak)",
+    "",
+    "FRAZY KLUCZOWE:",
+    keywords.length ? keywords.join(", ") : "(brak)",
+    "",
+    'Wygeneruj JSON {"html": string} — kompletny, sprzedażowy opis Allegro zgodny z system promptem. Bierz fakty wyłącznie z podanych danych.',
+  ].join("\n");
+
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Lovable-API-Key": apiKey,
+      "X-Lovable-AIG-SDK": "raw",
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-5.5",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: ALLEGRO_DESCRIPTION_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+  if (res.status === 429) throw new Error("RATE_LIMIT");
+  if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+  if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const content = json.choices?.[0]?.message?.content ?? "";
+  let parsed: unknown;
+  try { parsed = JSON.parse(content); } catch { throw new Error("Model nie zwrócił poprawnego JSON"); }
+  const shape = z.object({ html: z.string().min(1).max(60000) }).parse(parsed);
+  const html = sanitizeAllegroDescriptionHtml(shape.html);
+  if (!html) throw new Error("Model zwrócił pusty opis");
+
+  const { error: upErr } = await supabaseAdmin
+    .from("enrichments")
+    .update({
+      allegro_description: html,
+      allegro_generated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", enrichment.id);
+  if (upErr) throw new Error(upErr.message);
+
+  await emit(ctx, { level: "success", message: `✅ Allegro: opis zapisany (${html.length} znaków)` });
+}
