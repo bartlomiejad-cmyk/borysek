@@ -27,6 +27,7 @@ const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
 const CLASSIFY_MODEL = "google/gemini-2.5-flash";
 const FAL_BASE = "https://fal.run";
+const FAL_QUEUE_BASE = "https://queue.fal.run";
 
 // ---------------------------------------------------------------------------
 // Bulk-job event callback — used by the queue runner to stream live progress
@@ -278,6 +279,78 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   }
   return (await res.json()) as FalResp;
 }
+
+type FalQueueRequest = {
+  request_id: string;
+  status_url: string;
+  response_url: string;
+  cancel_url?: string;
+};
+
+type FalQueueStatus =
+  | { pending: true; status: string }
+  | { pending: false; response: FalResp };
+
+function falHttpError(path: string, status: number, text: string): Error & { status?: number } {
+  const err = new Error(`FAL ${path} ${status}: ${text.slice(0, 300)}`) as Error & { status?: number };
+  err.status = status;
+  return err;
+}
+
+function errorStatus(err: unknown): number | undefined {
+  return (err as { status?: number } | null)?.status;
+}
+
+async function submitFalQueue(path: string, body: unknown, apiKey: string): Promise<FalQueueRequest> {
+  const res = await fetch(`${FAL_QUEUE_BASE}/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw falHttpError(path, res.status, txt);
+  }
+  const data = (await res.json()) as Partial<FalQueueRequest>;
+  if (!data.request_id || !data.status_url || !data.response_url) {
+    throw new Error("FAL queue: brak request_id/status_url/response_url");
+  }
+  return {
+    request_id: data.request_id,
+    status_url: data.status_url,
+    response_url: data.response_url,
+    cancel_url: data.cancel_url,
+  };
+}
+
+async function readFalQueue(req: FalQueueRequest, apiKey: string): Promise<FalQueueStatus> {
+  const statusRes = await fetch(req.status_url, {
+    headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
+  });
+  const statusText = await statusRes.text().catch(() => "");
+  if (!statusRes.ok) throw falHttpError("queue/status", statusRes.status, statusText);
+
+  let statusJson: Record<string, unknown> = {};
+  try { statusJson = JSON.parse(statusText) as Record<string, unknown>; } catch { statusJson = {}; }
+  const status = String(statusJson.status ?? statusJson.state ?? "").toUpperCase();
+  if (status && status !== "COMPLETED" && status !== "FAILED" && status !== "ERROR") {
+    return { pending: true, status };
+  }
+  if (status === "FAILED" || status === "ERROR") {
+    const rawError = statusJson.error ?? statusJson.detail ?? statusJson.message ?? statusText;
+    throw new Error(typeof rawError === "string" ? rawError : JSON.stringify(rawError).slice(0, 300));
+  }
+
+  const responseRes = await fetch(req.response_url, {
+    headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
+  });
+  const responseText = await responseRes.text().catch(() => "");
+  if (responseRes.status === 202) return { pending: true, status: "IN_PROGRESS" };
+  if (!responseRes.ok) throw falHttpError("queue/response", responseRes.status, responseText);
+  return { pending: false, response: JSON.parse(responseText) as FalResp };
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function prepareFalSource(enrichmentId: string, srcUrl: string): Promise<{ url: string; path: string }> {
   const bytes = await fetchBytes(srcUrl);
