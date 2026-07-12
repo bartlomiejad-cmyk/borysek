@@ -352,6 +352,27 @@ function ProjectPage() {
     }
   };
 
+  const generateAllegroAll = async (productIds?: string[]) => {
+    const idSet = productIds ? new Set(productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
+    const targets = source.filter(
+      (p) => !!(p as { enrichment_id?: string | null }).enrichment_id && p.status === "GENERATED",
+    );
+    if (!targets.length) {
+      toast.info("Brak produktów ze złotym rekordem — najpierw wygeneruj złote rekordy.");
+      return;
+    }
+    try {
+      await createJobFn({
+        data: { projectId: id, kind: "PIM_ALLEGRO_DESCRIPTION", items: targets.map((t) => t.id) },
+      });
+      toast.success(`Uruchomiono w tle: opisy Allegro dla ${targets.length} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_ALLEGRO_DESCRIPTION"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
+    }
+  };
+
   const regenerateAll = async (productIds?: string[]) => {
     const idSet = productIds ? new Set(productIds) : null;
     const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
