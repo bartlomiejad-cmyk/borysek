@@ -88,6 +88,7 @@ import {
   PinOff,
   RefreshCw,
   ImagePlus,
+  Wand2,
 } from "lucide-react";
 
 const searchSchema = z.object({
@@ -791,6 +792,15 @@ function ProjectPage() {
                       {p.golden_name && p.nazwa && (
                         <div className="text-xs text-muted-foreground line-clamp-1">{p.nazwa}</div>
                       )}
+                      {(() => {
+                        const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
+                        if (!g.length) return null;
+                        return (
+                          <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-violet-500/10 text-violet-700 border-violet-400/50 dark:text-violet-300">
+                            <Wand2 className="h-2.5 w-2.5" /> Wizualizacje AI · {g.length}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-xs">
                       <div>{p.ean ?? "—"}</div>

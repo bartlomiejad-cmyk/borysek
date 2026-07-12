@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
-import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
+import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ function ProductDetail() {
   const regenFn = useServerFn(regenerateMainImage);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
+  const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
   const reclean = useMutation({
     mutationFn: () => recleanFn({ data: { projectId: id } }),
@@ -521,6 +522,79 @@ function ProductDetail() {
                 </details>
               )}
             </div>
+
+            {/* Wizualizacje AI (lifestyle) */}
+            {(() => {
+              const gallery = (((enrichment as { ai_gallery_urls?: string[] | null } | null)?.ai_gallery_urls) ?? []) as string[];
+              if (!gallery.length) return null;
+              return (
+                <div className="rounded border bg-muted/30 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <Wand2 className="h-4 w-4" /> Wizualizacje AI
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">{gallery.length} obraz(ów)</p>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {gallery.map((u) => {
+                      const isPinned = u === pinnedMainUrl;
+                      return (
+                        <div
+                          key={u}
+                          className={cn(
+                            "relative group rounded border-2 p-0.5",
+                            isPinned ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-violet-400/60",
+                          )}
+                        >
+                          <a href={u} target="_blank" rel="noreferrer">
+                            <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+                          </a>
+                          <Badge
+                            variant="outline"
+                            className="absolute top-0 left-0 text-[10px] px-1 py-0 bg-violet-500/10 text-violet-700 border-violet-400/50 dark:text-violet-300"
+                          >
+                            AI
+                          </Badge>
+                          {enrichment && (
+                            <button
+                              onClick={() =>
+                                pinMut.mutate({
+                                  enrichmentId: enrichment.id,
+                                  url: isPinned ? null : u,
+                                })
+                              }
+                              className={cn(
+                                "absolute bottom-0 left-0 rounded p-0.5 transition opacity-0 group-hover:opacity-100",
+                                isPinned ? "bg-emerald-600 text-white opacity-100" : "bg-background/90 border",
+                              )}
+                              title={isPinned ? "Odepnij" : "Ustaw jako główne"}
+                            >
+                              {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              if (!enrichment) return;
+                              try {
+                                await removeGalleryFn({ data: { enrichmentId: enrichment.id, url: u } });
+                                toast.success("Wizualizacja usunięta");
+                                invalidate();
+                              } catch (e) {
+                                toast.error(friendlyError(e, "Nie udało się usunąć"));
+                              }
+                            }}
+                            className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded p-0.5 opacity-0 group-hover:opacity-100 transition"
+                            title="Usuń wizualizację"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nazwa</label>

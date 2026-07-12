@@ -119,3 +119,29 @@ export const setPinnedMainImage = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+export const removeGalleryUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      enrichmentId: z.string().uuid(),
+      url: z.string().url(),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: cur, error: readErr } = await supabase
+      .from("enrichments")
+      .select("id, ai_gallery_urls")
+      .eq("id", data.enrichmentId)
+      .single();
+    if (readErr || !cur) throw new Error(readErr?.message ?? "Enrichment not found");
+    const existing = ((cur as unknown as { ai_gallery_urls?: string[] | null }).ai_gallery_urls ?? []) as string[];
+    const next = existing.filter((u) => u !== data.url);
+    const { error } = await supabase
+      .from("enrichments")
+      .update({ ai_gallery_urls: next as never } as never)
+      .eq("id", data.enrichmentId);
+    if (error) throw new Error(error.message);
+    return { ok: true, ai_gallery_urls: next };
+  });
