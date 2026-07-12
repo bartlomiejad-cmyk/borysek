@@ -272,7 +272,9 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   if (res.status === 429) throw new Error("FAL: limit zapytań");
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`FAL ${path} ${res.status}: ${txt.slice(0, 300)}`);
+    const err = new Error(`FAL ${path} ${res.status}: ${txt.slice(0, 300)}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return (await res.json()) as FalResp;
 }
