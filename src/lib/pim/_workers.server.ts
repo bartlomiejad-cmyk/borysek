@@ -305,6 +305,7 @@ type PimVisualizationSlot = {
 
 type PimVisualizationProgress = {
   products?: Record<string, PimVisualizationSlot>;
+  prompts?: Record<string, string>;
 };
 
 function falHttpError(path: string, status: number, text: string): Error & { status?: number } {
@@ -2031,50 +2032,65 @@ export async function runPimVisualization(
     message: `🎨 ${label} — ${count} wizualizacji (nano-banana-pro, ${targetResolution})`,
   });
 
-  // Build EN prompt from Polish requirements. Prefer golden record if present.
-  const nameForPrompt = e.golden_name?.trim() || productName || "product";
-  const descForPrompt = e.golden_description?.trim() || productDesc;
-  let lifePrompt: string;
-  try {
-    await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
-    const built = await buildFalPromptsFromPolish({
-      productName: nameForPrompt,
-      productDesc: descForPrompt,
-      requirementsPl,
-      projectStyle,
-    });
-    lifePrompt = built.lifestyle_prompt;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
-    const fb = fallbackPrompts({
-      productName: nameForPrompt,
-      productDesc: descForPrompt,
-      requirementsPl,
-      projectStyle,
-    });
-    lifePrompt = fb.lifestyle_prompt;
-  }
-
   const jobPayload = (ctx?.bulkPayload ?? {}) as Record<string, unknown>;
   const progress = ((jobPayload.visualizationProgress ?? {}) as PimVisualizationProgress) || {};
-  const productsProgress = progress.products ?? {};
+  let productsProgress = progress.products ?? {};
   let slotState: PimVisualizationSlot = productsProgress[productId] ?? { slot: 0 };
   slotState.slot = Math.max(0, Math.min(count, Math.floor(slotState.slot || 0)));
+
+  let lifePrompt = (progress.prompts?.[productId] ?? "").trim();
   const saveProgress = async (next: PimVisualizationSlot | null) => {
     if (!ctx?.bulkJobId) return;
     const nextProducts = { ...productsProgress };
-    if (next) nextProducts[productId] = next;
-    else delete nextProducts[productId];
+    const nextPrompts = { ...(progress.prompts ?? {}) };
+    if (next) {
+      nextProducts[productId] = next;
+      if (lifePrompt) nextPrompts[productId] = lifePrompt;
+    } else {
+      delete nextProducts[productId];
+      delete nextPrompts[productId];
+    }
+    productsProgress = nextProducts;
     const nextPayload = {
       ...jobPayload,
-      visualizationProgress: { ...progress, products: nextProducts },
+      visualizationProgress: { ...progress, products: nextProducts, prompts: nextPrompts },
     };
     await supabaseAdmin
       .from("bulk_jobs" as never)
       .update({ payload: nextPayload as never } as never)
       .eq("id", ctx.bulkJobId);
   };
+
+  // Build EN prompt from Polish requirements. Prefer golden record if present.
+  const nameForPrompt = e.golden_name?.trim() || productName || "product";
+  const descForPrompt = e.golden_description?.trim() || productDesc;
+  if (!lifePrompt) {
+    try {
+      await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
+      const built = await buildFalPromptsFromPolish({
+        productName: nameForPrompt,
+        productDesc: descForPrompt,
+        requirementsPl,
+        projectStyle,
+      });
+      lifePrompt = built.lifestyle_prompt;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
+      const fb = fallbackPrompts({
+        productName: nameForPrompt,
+        productDesc: descForPrompt,
+        requirementsPl,
+        projectStyle,
+      });
+      lifePrompt = fb.lifestyle_prompt;
+    }
+    await saveProgress(slotState);
+    if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
+      await emit(ctx, { level: "info", message: `   • prompt gotowy — render wystartuje w następnym przebiegu` });
+      return { complete: false };
+    }
+  }
 
   const appendVisualization = async (url: string, slot: number) => {
     const bytes = await fetchBytes(url);
