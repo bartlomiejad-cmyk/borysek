@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
-import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
+import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ function ProductDetail() {
   const regenFn = useServerFn(regenerateMainImage);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
+  const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
   const reclean = useMutation({
     mutationFn: () => recleanFn({ data: { projectId: id } }),
