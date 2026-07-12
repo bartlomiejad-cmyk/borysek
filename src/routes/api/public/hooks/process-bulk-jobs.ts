@@ -131,7 +131,7 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
       break;
     }
 
-    const pid = remaining.shift()!;
+    const pid = remaining[0]!;
     const shiftBeforeProcessing = job.kind !== "PIM_VISUALIZATIONS";
     if (shiftBeforeProcessing) {
       remaining.shift();
