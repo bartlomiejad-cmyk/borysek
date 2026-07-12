@@ -757,7 +757,7 @@ function ProductDetail() {
                 value={allegroHtml}
                 onChange={(e) => setAllegroHtml(e.target.value)}
                 rows={16}
-                placeholder="HTML opisu Allegro (h1/h2/h3, p, ul/li, strong). Kliknij „Generuj Allegro"."
+                placeholder='HTML opisu Allegro (h1/h2/h3, p, ul/li, strong). Kliknij "Generuj Allegro".'
                 className="font-mono text-xs"
               />
               <div className="flex items-center justify-between">
