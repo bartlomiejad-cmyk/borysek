@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
+import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
@@ -36,6 +37,7 @@ function ProductDetail() {
   const { id, pid } = Route.useParams();
   const qc = useQueryClient();
   const getFn = useServerFn(getProductDetail);
+  const getActiveJobFn = useServerFn(getActiveBulkJob);
   const genFn = useServerFn(generateGoldenRecord);
   const updFn = useServerFn(updateGoldenRecord);
   const genFeatFn = useServerFn(generateFeatures);
@@ -65,9 +67,17 @@ function ProductDetail() {
     onError: (e) => toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł")),
   });
 
+  const { data: vizJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_VISUALIZATIONS"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_VISUALIZATIONS" } }),
+    refetchInterval: 3000,
+  });
+  const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
+
   const { data, isLoading } = useQuery({
     queryKey: ["product", id, pid],
     queryFn: () => getFn({ data: { projectId: id, productId: pid } }),
+    refetchInterval: vizActive ? 5000 : false,
   });
 
   const [name, setName] = useState("");

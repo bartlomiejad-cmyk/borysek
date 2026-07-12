@@ -235,6 +235,18 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
             .from("bulk_jobs" as never)
             .update(patch as never)
             .eq("id", job.id);
+        } else if (result.remaining.length > 0) {
+          // FAL visualizations can span multiple request windows. Kick the
+          // worker again immediately (cron remains the fallback) so completed
+          // queue renders are polled, uploaded, and saved without waiting.
+          const apikey = process.env.SUPABASE_PUBLISHABLE_KEY;
+          if (apikey) {
+            void fetch(new URL(request.url).toString(), {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey },
+              body: "{}",
+            }).catch(() => undefined);
+          }
         }
 
         return Response.json({

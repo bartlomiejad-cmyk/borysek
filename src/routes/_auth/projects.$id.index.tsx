@@ -214,6 +214,14 @@ function ProjectPage() {
     }
   }, [genJob, regenJob, discJob, vizJob, refetchProducts]);
 
+  useEffect(() => {
+    if (!vizActive) return;
+    const timer = window.setInterval(() => {
+      refetchProducts();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [vizActive, refetchProducts]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return products.filter((p) => {
