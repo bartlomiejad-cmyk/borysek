@@ -2204,12 +2204,14 @@ export async function runPimVisualization(
           lastFalErr = msg;
           if (isRefusal(err) && slotState.mode === "edit") {
             await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
+            await cleanupSource(slotState);
             slotState = { slot, mode: "safe-edit", lastError: msg };
             await saveProgress(slotState);
             continue;
           }
           if (isRefusal(err) && slotState.mode === "safe-edit") {
             await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 przy edycji — próbuję generowania bez referencji` });
+            await cleanupSource(slotState);
             slotState = { slot, mode: "generate", lastError: msg };
             await saveProgress(slotState);
             continue;
@@ -2249,6 +2251,7 @@ export async function runPimVisualization(
         lastFalErr = msg;
         if (isRefusal(err) && slotState.mode === "edit") {
           await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
+          await cleanupSource(slotState);
           slotState = { slot, mode: "safe-edit", lastError: msg };
           await saveProgress(slotState);
           continue;
