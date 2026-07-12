@@ -20,6 +20,8 @@ import {
   dedupeKeywords as dedupeKeywordsShared,
   GOLDEN_SEO_SYSTEM_PROMPT,
   sanitizeGoldenDescriptionHtml,
+  ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
+  sanitizeAllegroDescriptionHtml,
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 
