@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
+import { generateAllegroDescription } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
@@ -46,6 +47,7 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const genAllegroFn = useServerFn(generateAllegroDescription);
   const regenFn = useServerFn(regenerateMainImage);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
@@ -86,6 +88,8 @@ function ProductDetail() {
   const [slug, setSlug] = useState("");
   const [metaDesc, setMetaDesc] = useState("");
   const [seoKeywords, setSeoKeywords] = useState("");
+  const [allegroHtml, setAllegroHtml] = useState("");
+  const [allegroGenAt, setAllegroGenAt] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
@@ -105,6 +109,12 @@ function ProductDetail() {
       setSlug(en.golden_slug ?? "");
       setMetaDesc(en.golden_meta_description ?? "");
       setSeoKeywords(Array.isArray(en.golden_seo_keywords) ? en.golden_seo_keywords.join(", ") : "");
+      const en2 = data.enrichment as unknown as {
+        allegro_description?: string | null;
+        allegro_generated_at?: string | null;
+      };
+      setAllegroHtml(en2.allegro_description ?? "");
+      setAllegroGenAt(en2.allegro_generated_at ?? null);
     }
   }, [data?.enrichment]);
 
