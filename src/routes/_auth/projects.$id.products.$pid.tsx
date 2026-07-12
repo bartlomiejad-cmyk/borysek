@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
+import { generateAllegroDescription } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
@@ -46,6 +47,7 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const genAllegroFn = useServerFn(generateAllegroDescription);
   const regenFn = useServerFn(regenerateMainImage);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
@@ -86,6 +88,8 @@ function ProductDetail() {
   const [slug, setSlug] = useState("");
   const [metaDesc, setMetaDesc] = useState("");
   const [seoKeywords, setSeoKeywords] = useState("");
+  const [allegroHtml, setAllegroHtml] = useState("");
+  const [allegroGenAt, setAllegroGenAt] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
@@ -105,6 +109,12 @@ function ProductDetail() {
       setSlug(en.golden_slug ?? "");
       setMetaDesc(en.golden_meta_description ?? "");
       setSeoKeywords(Array.isArray(en.golden_seo_keywords) ? en.golden_seo_keywords.join(", ") : "");
+      const en2 = data.enrichment as unknown as {
+        allegro_description?: string | null;
+        allegro_generated_at?: string | null;
+      };
+      setAllegroHtml(en2.allegro_description ?? "");
+      setAllegroGenAt(en2.allegro_generated_at ?? null);
     }
   }, [data?.enrichment]);
 
@@ -227,6 +237,29 @@ function ProductDetail() {
     mutationFn: () => updFeatFn({ data: { enrichmentId: data!.enrichment!.id, features: features.filter((f) => f.key.trim() && f.value.trim()) } }),
     onSuccess: () => { toast.success("Cechy zapisane"); invalidate(); },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  const genAllegro = useMutation({
+    mutationFn: () => genAllegroFn({ data: { productId: pid } }),
+    onSuccess: (res: { html: string }) => {
+      setAllegroHtml(res.html);
+      setAllegroGenAt(new Date().toISOString());
+      toast.success("Opis Allegro wygenerowany");
+      invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się wygenerować opisu Allegro")),
+  });
+
+  const saveAllegro = useMutation({
+    mutationFn: () =>
+      updFn({
+        data: {
+          enrichmentId: data!.enrichment!.id,
+          allegro_description: allegroHtml || null,
+        } as never,
+      }),
+    onSuccess: () => { toast.success("Opis Allegro zapisany"); invalidate(); },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się zapisać")),
   });
 
   const hideMut = useMutation({
@@ -709,6 +742,69 @@ function ProductDetail() {
               <Button size="sm" onClick={() => saveFeat.mutate()} disabled={!enrichment || saveFeat.isPending}>
                 <Save className="h-3 w-3 mr-1" /> Zapisz cechy
               </Button>
+            </div>
+
+            {/* Allegro description */}
+            <div className="pt-4 border-t mt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Opis Allegro {allegroGenAt && (
+                    <span className="ml-1 text-[10px] italic">
+                      · wygenerowano {new Date(allegroGenAt).toLocaleString("pl-PL")}
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!enrichment || genAllegro.isPending}
+                    onClick={() => genAllegro.mutate()}
+                  >
+                    <Sparkles className="h-3 w-3 mr-1" /> {genAllegro.isPending ? "..." : "Generuj Allegro"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!allegroHtml}
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(allegroHtml); toast.success("Skopiowano HTML"); }
+                      catch { toast.error("Nie udało się skopiować"); }
+                    }}
+                  >
+                    Kopiuj HTML
+                  </Button>
+                </div>
+              </div>
+              <Textarea
+                value={allegroHtml}
+                onChange={(e) => setAllegroHtml(e.target.value)}
+                rows={16}
+                placeholder='HTML opisu Allegro (h1/h2/h3, p, ul/li, strong). Kliknij "Generuj Allegro".'
+                className="font-mono text-xs"
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-muted-foreground">
+                  {allegroHtml.replace(/<[^>]+>/g, "").length} znaków widocznego tekstu · {allegroHtml.length} z HTML
+                </p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!enrichment || saveAllegro.isPending}
+                  onClick={() => saveAllegro.mutate()}
+                >
+                  <Save className="h-3 w-3 mr-1" /> Zapisz Allegro
+                </Button>
+              </div>
+              {allegroHtml.trim() && (
+                <details className="mt-2 rounded border bg-muted/20 p-2 text-sm">
+                  <summary className="cursor-pointer text-xs text-muted-foreground">Podgląd</summary>
+                  <div
+                    className="mt-2 text-sm [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-0 [&_h1]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold"
+                    dangerouslySetInnerHTML={{ __html: allegroHtml }}
+                  />
+                </details>
+              )}
             </div>
 
             {/* Verification */}

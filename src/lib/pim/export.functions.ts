@@ -25,7 +25,7 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at, allegro_description, allegro_generated_at",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
@@ -130,6 +130,8 @@ export const exportProject = createServerFn({ method: "GET" })
         golden_seo_keywords: (((e as { golden_seo_keywords?: string[] | null } | undefined)?.golden_seo_keywords) ?? []).join(" | "),
         features_text: features.map((f) => `${f.key}: ${f.value}`).join(" | "),
         ...featureCols,
+        allegro_description: ((e as { allegro_description?: string | null } | undefined)?.allegro_description) ?? "",
+        allegro_generated_at: ((e as { allegro_generated_at?: string | null } | undefined)?.allegro_generated_at) ?? "",
         model: e?.model ?? "",
         generated_at: e?.generated_at ?? "",
       };

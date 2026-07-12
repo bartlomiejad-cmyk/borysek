@@ -183,14 +183,20 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_VISUALIZATIONS" } }),
     refetchInterval: 3000,
   });
+  const { data: allegroJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_ALLEGRO_DESCRIPTION"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_ALLEGRO_DESCRIPTION" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
   const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
+  const allegroActive = allegroJob && (allegroJob.status === "PENDING" || allegroJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob, vizJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -202,7 +208,9 @@ function ProjectPage() {
             ? "Regeneracja zdjęć"
             : job.kind === "FIRECRAWL_DISCOVERY"
               ? "Wyszukiwanie źródeł (Firecrawl)"
-              : "Wizualizacje produktowe";
+              : job.kind === "PIM_ALLEGRO_DESCRIPTION"
+                ? "Opisy Allegro"
+                : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -212,7 +220,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, vizJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, allegroJob, refetchProducts]);
 
   useEffect(() => {
     if (!vizActive) return;
@@ -339,6 +347,27 @@ function ProjectPage() {
       });
       toast.success(`Uruchomiono w tle: ${targets.length} produktów. Możesz zamknąć kartę.`);
       qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "GENERATE_GOLDEN"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
+    }
+  };
+
+  const generateAllegroAll = async (productIds?: string[]) => {
+    const idSet = productIds ? new Set(productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
+    const targets = source.filter(
+      (p) => !!(p as { enrichment_id?: string | null }).enrichment_id && p.status === "GENERATED",
+    );
+    if (!targets.length) {
+      toast.info("Brak produktów ze złotym rekordem — najpierw wygeneruj złote rekordy.");
+      return;
+    }
+    try {
+      await createJobFn({
+        data: { projectId: id, kind: "PIM_ALLEGRO_DESCRIPTION", items: targets.map((t) => t.id) },
+      });
+      toast.success(`Uruchomiono w tle: opisy Allegro dla ${targets.length} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_ALLEGRO_DESCRIPTION"] });
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
     }
@@ -720,6 +749,14 @@ function ProjectPage() {
                 disabled={!!vizActive}
               >
                 <Sparkles className="h-4 w-4 mr-1" /> Wizualizacje
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => generateAllegroAll([...selectedIds])}
+                disabled={!!allegroActive}
+              >
+                <Sparkles className="h-4 w-4 mr-1" /> {allegroActive ? "Allegro…" : "Opisy Allegro"}
               </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV

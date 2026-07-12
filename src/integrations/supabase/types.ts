@@ -107,6 +107,8 @@ export type Database = {
       enrichments: {
         Row: {
           ai_gallery_urls: Json
+          allegro_description: string | null
+          allegro_generated_at: string | null
           error: string | null
           generated_at: string | null
           golden_description: string | null
@@ -135,6 +137,8 @@ export type Database = {
         }
         Insert: {
           ai_gallery_urls?: Json
+          allegro_description?: string | null
+          allegro_generated_at?: string | null
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
@@ -163,6 +167,8 @@ export type Database = {
         }
         Update: {
           ai_gallery_urls?: Json
+          allegro_description?: string | null
+          allegro_generated_at?: string | null
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
@@ -537,6 +543,7 @@ export type Database = {
         | "PHOTO_TOOL_GENERATE"
         | "PHOTO_TOOL_EDIT_IMAGE"
         | "PIM_VISUALIZATIONS"
+        | "PIM_ALLEGRO_DESCRIPTION"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -681,6 +688,7 @@ export const Constants = {
         "PHOTO_TOOL_GENERATE",
         "PHOTO_TOOL_EDIT_IMAGE",
         "PIM_VISUALIZATIONS",
+        "PIM_ALLEGRO_DESCRIPTION",
       ],
       bulk_job_status: [
         "PENDING",

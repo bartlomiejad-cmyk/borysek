@@ -199,27 +199,37 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
   .inputValidator((i) =>
     z.object({
       enrichmentId: z.string().uuid(),
-      golden_name: z.string().max(500).nullable(),
-      golden_description: z.string().max(20000).nullable(),
+      golden_name: z.string().max(500).nullable().optional(),
+      golden_description: z.string().max(20000).nullable().optional(),
       golden_slug: z.string().max(200).nullable().optional(),
       golden_meta_description: z.string().max(400).nullable().optional(),
       golden_seo_keywords: z.array(z.string().max(120)).max(20).nullable().optional(),
+      allegro_description: z.string().max(60000).nullable().optional(),
     }).parse(i),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const description = data.golden_description == null
-      ? null
-      : sanitizeGoldenDescriptionHtml(data.golden_description, { name: data.golden_name });
+    const patch: Record<string, unknown> = {};
+    if (data.golden_name !== undefined) patch.golden_name = data.golden_name;
+    if (data.golden_description !== undefined) {
+      patch.golden_description = data.golden_description == null
+        ? null
+        : sanitizeGoldenDescriptionHtml(data.golden_description, { name: data.golden_name ?? null });
+    }
+    if (data.golden_slug !== undefined) patch.golden_slug = data.golden_slug ?? null;
+    if (data.golden_meta_description !== undefined) patch.golden_meta_description = data.golden_meta_description ?? null;
+    if (data.golden_seo_keywords !== undefined) patch.golden_seo_keywords = data.golden_seo_keywords ?? null;
+    if (data.allegro_description !== undefined) {
+      const { sanitizeAllegroDescriptionHtml } = await import("./seo");
+      patch.allegro_description = data.allegro_description == null
+        ? null
+        : sanitizeAllegroDescriptionHtml(data.allegro_description);
+      patch.allegro_generated_at = new Date().toISOString();
+    }
+    if (!Object.keys(patch).length) return { ok: true };
     const { error } = await supabase
       .from("enrichments")
-      .update({
-        golden_name: data.golden_name,
-        golden_description: description,
-        golden_slug: data.golden_slug ?? null,
-        golden_meta_description: data.golden_meta_description ?? null,
-        golden_seo_keywords: data.golden_seo_keywords ?? null,
-      } as never)
+      .update(patch as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
     return { ok: true };
