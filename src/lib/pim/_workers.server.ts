@@ -1989,11 +1989,12 @@ export async function runPimVisualization(
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        const status = (err as { status?: number } | null)?.status;
         lastFalErr = msg;
         // FAL 422 = model refused this specific prompt/image combo (safety
         // filter or "could not generate"). Retry once with a minimal,
         // safety-friendly prompt so users still get a result.
-        if (/\b422\b/.test(msg)) {
+        if (status === 422 || /\b422\b/.test(msg)) {
           await emit(ctx, { level: "warn", message: `   ⚠ FAL 422 — próbuję z uproszczonym promptem` });
           const safePrompt = [
             `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
@@ -2017,9 +2018,52 @@ export async function runPimVisualization(
             );
           } catch (err2) {
             const msg2 = err2 instanceof Error ? err2.message : String(err2);
+            const status2 = (err2 as { status?: number } | null)?.status;
             lastFalErr = msg2;
-            await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg2.slice(0, 240)}` });
-            continue;
+            // Second fallback: FAL edit refused even the safe prompt (often
+            // because the reference image itself is deemed sensitive, e.g.
+            // ammunition/firearms). Try text-to-image without any reference.
+            if (status2 === 422 || /\b422\b/.test(msg2)) {
+              await emit(ctx, {
+                level: "warn",
+                message: `   ⚠ FAL 422 przy edycji — próbuję generowania bez referencji`,
+              });
+              const descBrief = (descForPrompt || "").replace(/\s+/g, " ").trim().slice(0, 600);
+              const genPrompt = [
+                `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
+                descBrief ? `Product context: ${descBrief}.` : "",
+                `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
+                projectStyle ? `Scene style: ${projectStyle}.` : "",
+                `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
+              ].filter(Boolean).join(" ");
+              try {
+                resp = await callFal(
+                  "fal-ai/nano-banana-pro",
+                  {
+                    prompt: genPrompt,
+                    aspect_ratio: "1:1",
+                    resolution: targetResolution,
+                    output_format: "jpeg",
+                    num_images: 1,
+                  },
+                  FAL_KEY,
+                );
+              } catch (err3) {
+                const msg3 = err3 instanceof Error ? err3.message : String(err3);
+                const status3 = (err3 as { status?: number } | null)?.status;
+                if (status3 === 422 || /\b422\b/.test(msg3)) {
+                  lastFalErr =
+                    "FAL odrzucił zarówno edycję jak i generowanie od zera (422) — najpewniej treść uznana za wrażliwą";
+                } else {
+                  lastFalErr = msg3;
+                }
+                await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${lastFalErr.slice(0, 240)}` });
+                continue;
+              }
+            } else {
+              await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg2.slice(0, 240)}` });
+              continue;
+            }
           }
         } else {
           await emit(ctx, { level: "warn", message: `   ⚠ wizualizacja ${i + 1}: ${msg.slice(0, 240)}` });
