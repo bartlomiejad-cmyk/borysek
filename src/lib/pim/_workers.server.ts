@@ -42,6 +42,9 @@ export type JobEvent = {
 };
 
 export type WorkerCtx = {
+  deadline?: number;
+  bulkJobId?: string;
+  bulkPayload?: Record<string, unknown> | null;
   onEvent?: (e: JobEvent) => void | Promise<void>;
 };
 
