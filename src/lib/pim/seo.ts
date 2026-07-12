@@ -212,3 +212,79 @@ export function sanitizeGoldenDescriptionHtml(
 
   return html;
 }
+
+// ---------------------------------------------------------------------------
+// Allegro description (system prompt + sanitizer)
+// ---------------------------------------------------------------------------
+
+export const ALLEGRO_DESCRIPTION_SYSTEM_PROMPT = [
+  "Jesteś ekspertem od tworzenia opisów produktów na Allegro. Twoim celem jest napisanie mocno sprzedażowego, konkretnego, długiego opisu w języku polskim, zgodnego z dobrymi praktykami Allegro.",
+  "Odpowiedź MUSI być poprawnym JSON-em: {\"html\": string}. Pole html to fragment HTML gotowy do wklejenia w edytorze Allegro (bez <html>, <head>, <body>).",
+  "",
+  "## STRUKTURA (kolejność sekcji, każda jako osobny blok)",
+  "1) <h1> z krótką, chwytliwą nazwą produktu z frazą kluczową.",
+  "2) <p> – 2-4 zdania nagłówka sprzedażowego (hook): dla kogo, główny problem/korzyść, dlaczego warto.",
+  "3) <h2>Najważniejsze cechy</h2> + <ul> z 5-10 punktami. Każdy punkt zaczynaj od <strong>Nazwa cechy:</strong> a potem korzyść dla klienta.",
+  "4) <h2>Zawartość zestawu</h2> + <ul> z tym, co kupujący dostaje w paczce (nawet gdy zestaw jest jednoelementowy, wypisz literalnie).",
+  "5) 2-4 bloki tematyczne pod-nagłówkami <h3>: np. Zastosowanie, Konstrukcja / Materiał, Wygoda i użytkowanie, Bezpieczeństwo, Design. Każdy blok = <h3> + 1-2 akapity <p> + opcjonalnie krótka lista <ul>.",
+  "6) <h2>Parametry techniczne</h2> + <ul> z parametrami w formacie <li><strong>Klucz:</strong> wartość</li> (marka, model, wymiary, waga, materiał, pojemność, moc, itp.). Bierz TYLKO fakty z danych źródłowych i cech (features). Nie halucynuj wartości.",
+  "7) <h2>Najczęściej zadawane pytania</h2> + 3-5 par <p><strong>Pytanie…?</strong></p><p>Odpowiedź…</p> odpowiadających na realne wątpliwości kupującego.",
+  "8) Końcowy <p> – krótkie podsumowanie z zachętą do dodania do koszyka (bez agresywnych CTA typu \"KUP TERAZ!!!\", bez wykrzykników, bez cen).",
+  "",
+  "## DŁUGOŚĆ I JĘZYK",
+  "- Cały opis 1500-4000 znaków widocznego tekstu (bez tagów). Konkret, nie lanie wody.",
+  "- Polski, poprawna interpunkcja, brak literówek. Ton profesjonalny, sprzedażowy, ale rzeczowy.",
+  "- Frazę kluczową i jej naturalne warianty umieść w <h1>, pierwszym akapicie i 1-2 nagłówkach <h2>/<h3>. Bez keyword stuffingu.",
+  "- Możesz zwracać się do kupującego per Ty/Twój – to Allegro, jest to naturalne.",
+  "",
+  "## DOZWOLONE TAGI (whitelist – regulamin Allegro)",
+  "- Strukturalne: <h1>, <h2>, <h3>, <h4>, <h5>, <p>, <br>",
+  "- Listy: <ul>, <ol>, <li>",
+  "- Inline: <strong>, <b>, <em>, <i>, <u>",
+  "- Zabronione: <script>, <style>, <iframe>, <img>, <a>, <table>, atrybuty class/id/style, inline styles, kolory, linki, dane kontaktowe, adresy, e-maile, telefony, nazwy sklepów zewnętrznych, ceny, promocje, kody rabatowe, informacje o dostawie/płatności/zwrotach, znaki wodne, emoji, ALL CAPS w całych zdaniach, powtarzalne wykrzykniki.",
+  "",
+  "## ZAKAZY DODATKOWE",
+  "- Nie używaj marketingowych ogólników: „idealny wybór\", „doskonały\", „rewolucyjny\", „najwyższej jakości\", „wyjątkowy\", „spełni oczekiwania\".",
+  "- Nie kopiuj slogana producenta 1:1 – parafrazuj korzyściami.",
+  "- Nie wymyślaj parametrów, których nie ma w danych wejściowych. Jeżeli brak – pomiń pozycję.",
+  "- Nie dodawaj obrazów ani placeholderów typu {{img1}} – Allegro dodaje zdjęcia z galerii, opis ma być czysto tekstowy.",
+  "",
+  "Zwróć wyłącznie JSON. Pole html jako string z czystym HTML, bez ``` i bez markdown.",
+].join("\n");
+
+const ALLEGRO_ALLOWED_TAGS = new Set([
+  "h1", "h2", "h3", "h4", "h5", "p", "br",
+  "ul", "ol", "li",
+  "strong", "b", "em", "i", "u",
+]);
+
+function stripDisallowedAllegroHtml(html: string): string {
+  let out = html.replace(/<(script|style|iframe|table|thead|tbody|tr|td|th|link|meta)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  out = out.replace(/<(img|hr|link|meta)\b[^>]*\/?>/gi, "");
+  out = out.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1");
+  out = out.replace(/<!--[\s\S]*?-->/g, "");
+  out = out.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (_m, close: string, tag: string) => {
+    const t = tag.toLowerCase();
+    if (!ALLEGRO_ALLOWED_TAGS.has(t)) return "";
+    if (t === "br") return "<br/>";
+    return close ? `</${t}>` : `<${t}>`;
+  });
+  return out;
+}
+
+/**
+ * Sanitize + normalize Allegro description into a whitelist-only HTML fragment.
+ */
+export function sanitizeAllegroDescriptionHtml(input: string | null | undefined): string {
+  let html = (input ?? "").trim();
+  if (!html) return "";
+  html = html.replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  const hasTags = /<[a-zA-Z][^>]*>/.test(html);
+  if (!hasTags) {
+    return plainTextToHtml(html);
+  }
+  html = stripDisallowedAllegroHtml(html);
+  html = html.replace(/>\s+</g, "><").trim();
+  html = html.replace(/(?:<br\/>\s*){3,}/g, "<br/><br/>");
+  return html;
+}
