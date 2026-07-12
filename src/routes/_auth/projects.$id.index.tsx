@@ -88,6 +88,7 @@ import {
   PinOff,
   RefreshCw,
   ImagePlus,
+  Wand2,
 } from "lucide-react";
 
 const searchSchema = z.object({
