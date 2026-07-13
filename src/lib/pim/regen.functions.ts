@@ -149,12 +149,13 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const generatedUrl = shot.images?.[0]?.url;
     if (!generatedUrl) throw new Error("FAL nie zwróciło zdjęcia");
 
-    // Step 2 — pobierz gotowy plik z FAL i zapisz w formacie, który zwrócił model.
-    const generated = await fetchImageBytes(generatedUrl);
-    const generatedFormat = detectImageFormat(generated.bytes, generated.contentType);
-    const bytes = generated.bytes;
-    const ext = generatedFormat.ext;
-    const contentType = generatedFormat.contentType;
+    // Step 2 — enforce a mathematically pure #FFFFFF background: strip whatever
+    // tint the model left and composite the product over flat white. Deterministic,
+    // no more beige/gray residue that pure-prompt engineering can't guarantee.
+    const { flattenToWhiteBackground } = await import("./_workers.server");
+    const bytes = await flattenToWhiteBackground(generatedUrl, FAL_KEY);
+    const ext: ImageExt = "png";
+    const contentType = "image/png";
 
     const path = `${data.enrichmentId}.${ext}`;
 
