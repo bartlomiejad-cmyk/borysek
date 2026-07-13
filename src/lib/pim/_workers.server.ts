@@ -1918,84 +1918,17 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       });
       continue;
     }
-    try {
-      const scrape = (await firecrawl.scrape(url, {
-        formats: ["markdown", "rawHtml"],
-        onlyMainContent: true,
-      } as never)) as Record<string, unknown>;
-      const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
-      const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
-      const rawMarkdown = typeof scrape.markdown === "string" ? scrape.markdown : "";
-      const candidateImages = pickImagesFromScrape(scrape);
-      const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
-
-      await emit(ctx, {
-        level: "info",
-        message: `   🧠 ${host} — filtruję dane pod produkt (${candidateImages.length} kandydatów zdjęć)`,
-        details: { url, candidates: candidateImages.length },
-      });
-
-      const filteredData = await filterScrapedForProduct(
-        aiKey,
-        { nazwa: product.nazwa ?? null, kod: product.kod ?? null, ean: product.ean ?? null },
-        title,
-        rawMarkdown,
-        candidateImages,
-        url,
-      );
-
-      if (!filteredData.is_product_page && filteredData.usedAi) {
-        await emit(ctx, {
-          level: "warn",
-          message: `   ⚠️ ${host} — strona nie dotyczy produktu, pominięto${filteredData.rejectedReason ? ` (${filteredData.rejectedReason})` : ""}`,
-          details: { url, reason: filteredData.rejectedReason },
-        });
-        continue;
-      }
-
-      const rejectedImages = candidateImages.filter((u) => !filteredData.imageUrls.includes(u));
-
-      await supabaseAdmin
-        .from("product_sources")
-        .upsert(
-          {
-            project_id: product.project_id,
-            url,
-            title,
-            description: filteredData.description || null,
-            images: filteredData.imageUrls as never,
-            extra_images: [] as never,
-            raw: {
-              source: "firecrawl",
-              metadata: meta,
-              ai_filter: {
-                used: filteredData.usedAi,
-                features: filteredData.features,
-                rejected_images: rejectedImages,
-                at: new Date().toISOString(),
-              },
-            } as never,
-          } as never,
-          { onConflict: "project_id,url" },
-        );
+    const res = await scrapeAndStoreSource(
+      firecrawl,
+      aiKey,
+      { id: product.id, project_id: product.project_id, nazwa: product.nazwa ?? null, kod: product.kod ?? null, ean: product.ean ?? null },
+      url,
+      ctx,
+    );
+    if (res.ok) {
       scraped++;
-      totalImages += filteredData.imageUrls.length;
-      if (filteredData.imageUrls.length > 0) goodHits++;
-      await emit(ctx, {
-        level: "success",
-        message: `   ✓ ${host} — ${filteredData.imageUrls.length}/${candidateImages.length} zdjęć produktu, ${filteredData.features.length} cech`,
-        details: {
-          url,
-          kept_images: filteredData.imageUrls.length,
-          total_candidates: candidateImages.length,
-          features: filteredData.features.length,
-          ai: filteredData.usedAi,
-        },
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("firecrawl scrape failed", url, e);
-      await emit(ctx, { level: "warn", message: `   ⚠️ ${url} — ${msg}`, details: { url, error: msg } });
+      totalImages += res.imageCount;
+      if (res.imageCount > 0) goodHits++;
     }
   }
   await emit(ctx, {
@@ -2003,6 +1936,258 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
     details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Shared: scrape one URL with Firecrawl + AI filter, upsert into product_sources.
+// Extracted so discovery + rescrape share identical logic (idempotent upsert).
+// ---------------------------------------------------------------------------
+async function scrapeAndStoreSource(
+  firecrawl: Firecrawl,
+  aiKey: string | undefined,
+  product: { id: string; project_id: string; nazwa: string | null; kod: string | null; ean: string | null },
+  url: string,
+  ctx: WorkerCtx | undefined,
+): Promise<{ ok: boolean; imageCount: number }> {
+  const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
+  try {
+    const scrape = (await firecrawl.scrape(url, {
+      formats: ["markdown", "rawHtml"],
+      onlyMainContent: true,
+    } as never)) as Record<string, unknown>;
+    const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
+    const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
+    const rawMarkdown = typeof scrape.markdown === "string" ? scrape.markdown : "";
+    const candidateImages = pickImagesFromScrape(scrape);
+
+    await emit(ctx, {
+      level: "info",
+      message: `   🧠 ${host} — filtruję dane pod produkt (${candidateImages.length} kandydatów zdjęć)`,
+      details: { url, candidates: candidateImages.length },
+    });
+
+    const filteredData = await filterScrapedForProduct(
+      aiKey,
+      { nazwa: product.nazwa, kod: product.kod, ean: product.ean },
+      title,
+      rawMarkdown,
+      candidateImages,
+      url,
+    );
+
+    if (!filteredData.is_product_page && filteredData.usedAi) {
+      await emit(ctx, {
+        level: "warn",
+        message: `   ⚠️ ${host} — strona nie dotyczy produktu, pominięto${filteredData.rejectedReason ? ` (${filteredData.rejectedReason})` : ""}`,
+        details: { url, reason: filteredData.rejectedReason },
+      });
+      return { ok: false, imageCount: 0 };
+    }
+
+    const rejectedImages = candidateImages.filter((u) => !filteredData.imageUrls.includes(u));
+
+    await supabaseAdmin
+      .from("product_sources")
+      .upsert(
+        {
+          project_id: product.project_id,
+          url,
+          title,
+          description: filteredData.description || null,
+          images: filteredData.imageUrls as never,
+          extra_images: [] as never,
+          raw: {
+            source: "firecrawl",
+            metadata: meta,
+            ai_filter: {
+              used: filteredData.usedAi,
+              features: filteredData.features,
+              rejected_images: rejectedImages,
+              at: new Date().toISOString(),
+            },
+          } as never,
+        } as never,
+        { onConflict: "project_id,url" },
+      );
+    await emit(ctx, {
+      level: "success",
+      message: `   ✓ ${host} — ${filteredData.imageUrls.length}/${candidateImages.length} zdjęć produktu, ${filteredData.features.length} cech`,
+      details: {
+        url,
+        kept_images: filteredData.imageUrls.length,
+        total_candidates: candidateImages.length,
+        features: filteredData.features.length,
+        ai: filteredData.usedAi,
+      },
+    });
+    return { ok: true, imageCount: filteredData.imageUrls.length };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("firecrawl scrape failed", url, e);
+    await emit(ctx, { level: "warn", message: `   ⚠️ ${url} — ${msg}`, details: { url, error: msg } });
+    return { ok: false, imageCount: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Run: PIM rescrape — top up weak-scored products by scraping the NEXT batch
+// of unscraped search-result URLs, then re-run scoring for this product only.
+// Hard cap of 2 rounds per product tracked on enrichments.rescrape_rounds.
+// ---------------------------------------------------------------------------
+export async function runPimRescrape(productId: string, ctx?: WorkerCtx): Promise<void> {
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+  if (!apiKey) throw new Error("FIRECRAWL_API_KEY is not configured");
+  const aiKey = process.env.LOVABLE_API_KEY;
+
+  const { data: product, error: pErr } = await supabaseAdmin
+    .from("source_products")
+    .select("id, project_id, nazwa, kod, ean, raw")
+    .eq("id", productId)
+    .single();
+  if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+  const { data: enrichmentRow } = await supabaseAdmin
+    .from("enrichments")
+    .select("id, rescrape_rounds, picked_urls")
+    .eq("source_product_id", productId)
+    .maybeSingle();
+  const enrichment = enrichmentRow as
+    | { id: string; rescrape_rounds: number | null; picked_urls: string[] | null }
+    | null;
+  const rounds = enrichment?.rescrape_rounds ?? 0;
+  if (rounds >= 2) {
+    await emit(ctx, { level: "warn", message: `⏹ ${product.nazwa ?? productId} — osiągnięto limit rund doscrapowania (${rounds}/2)` });
+    return;
+  }
+
+  const { data: projectRow } = await supabaseAdmin
+    .from("projects")
+    .select("blacklist")
+    .eq("id", product.project_id)
+    .single();
+  const extraBlacklist = ((projectRow?.blacklist as string[] | null) ?? []);
+
+  // Collect candidate URLs from search_results — union across all terms
+  // (nazwa/ean/hybrid) previously stored for this product's project.
+  const nazwa = (product.nazwa ?? "").trim();
+  const terms: string[] = [];
+  if (nazwa) terms.push(nazwa.toLowerCase());
+  if (product.ean) terms.push((product.ean ?? "").trim().toLowerCase());
+  if (nazwa && product.ean) terms.push(`${nazwa} ${product.ean}`.toLowerCase());
+  const { data: searchRows } = await supabaseAdmin
+    .from("search_results")
+    .select("term, organic_urls, query_variants")
+    .eq("project_id", product.project_id);
+  const candidateSet = new Map<string, string>(); // norm -> original
+  for (const r of searchRows ?? []) {
+    const rr = r as { term: string; organic_urls: unknown; query_variants: unknown };
+    if (!terms.includes(rr.term.trim().toLowerCase())) continue;
+    const urls: string[] = [];
+    if (Array.isArray(rr.organic_urls)) urls.push(...(rr.organic_urls as string[]));
+    if (Array.isArray(rr.query_variants)) {
+      for (const v of rr.query_variants as Array<{ urls?: string[] }>) {
+        if (Array.isArray(v?.urls)) urls.push(...v.urls);
+      }
+    }
+    for (const u of urls) {
+      if (typeof u !== "string" || !u) continue;
+      const key = normalizeUrlForDedup(u);
+      if (!candidateSet.has(key)) candidateSet.set(key, u);
+    }
+  }
+  const allCandidates = Array.from(candidateSet.values());
+  if (!allCandidates.length) {
+    await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak kandydatów do doscrapowania` });
+    return;
+  }
+
+  // Exclude URLs already in product_sources for this project (idempotency).
+  const { data: existing } = await supabaseAdmin
+    .from("product_sources")
+    .select("url")
+    .eq("project_id", product.project_id)
+    .in("url", allCandidates);
+  const alreadyScraped = new Set((existing ?? []).map((r) => (r as { url: string }).url));
+
+  const seenHosts = new Set<string>();
+  const next3 = allCandidates
+    .filter((u) => !alreadyScraped.has(u))
+    .filter((u) => !isMarketplaceUrl(u, extraBlacklist))
+    .filter((u) => {
+      const h = (() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } })();
+      if (!h || seenHosts.has(h)) return false;
+      seenHosts.add(h);
+      return true;
+    })
+    .slice(0, 3);
+
+  await emit(ctx, {
+    level: next3.length ? "info" : "warn",
+    message: `🔁 ${nazwa} — runda #${rounds + 1}/2 — ${next3.length} URL do doscrapowania (z ${allCandidates.length} znanych)`,
+    details: { candidates: allCandidates.length, picked: next3 },
+  });
+
+  if (!next3.length) {
+    // Still bump the counter so we do not loop forever.
+    if (enrichment) {
+      await supabaseAdmin
+        .from("enrichments")
+        .update({ rescrape_rounds: rounds + 1 } as never)
+        .eq("id", enrichment.id);
+    }
+    return;
+  }
+
+  const firecrawl = new Firecrawl({ apiKey });
+  const newlyScraped: string[] = [];
+  for (const url of next3) {
+    const res = await scrapeAndStoreSource(
+      firecrawl,
+      aiKey,
+      { id: product.id, project_id: product.project_id, nazwa: product.nazwa ?? null, kod: product.kod ?? null, ean: product.ean ?? null },
+      url,
+      ctx,
+    );
+    if (res.ok) newlyScraped.push(url);
+  }
+
+  // Re-run scoring for this single product using existing picked_urls
+  // union new URLs. We call the shared rescorer below.
+  await rescoreSingleProduct(product.project_id, productId, aiKey, ctx);
+
+  // Bump rounds counter.
+  if (enrichment) {
+    await supabaseAdmin
+      .from("enrichments")
+      .update({ rescrape_rounds: rounds + 1 } as never)
+      .eq("id", enrichment.id);
+  }
+  await emit(ctx, {
+    level: "success",
+    message: `✅ ${nazwa} — doscrapowanie: +${newlyScraped.length} źródeł, przeliczono scoring (runda ${rounds + 1}/2)`,
+  });
+}
+
+// Single-product rescorer. Mirrors the scoring block from runMatching but for
+// one enrichment row. Uses supabaseAdmin because it is invoked from the worker.
+async function rescoreSingleProduct(
+  projectId: string,
+  productId: string,
+  aiKey: string | undefined,
+  ctx: WorkerCtx | undefined,
+): Promise<void> {
+  const { scoreAndCapForProduct } = await import("./matching.functions");
+  try {
+    const res = await scoreAndCapForProduct(projectId, productId, aiKey);
+    await emit(ctx, {
+      level: res.count ? "info" : "warn",
+      message: `   scoring: ${res.count} źródeł po capie TOP 5, ${res.strong} silnych (≥ próg)`,
+      details: res,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await emit(ctx, { level: "warn", message: `   scoring nieudany: ${msg}` });
+  }
 }
 
 // ---------------------------------------------------------------------------

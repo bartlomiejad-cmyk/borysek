@@ -185,6 +185,7 @@ export type Database = {
           project_id: string
           quality: Json | null
           regenerated_main_image: string | null
+          rescrape_rounds: number
           score_breakdown: Json | null
           source_product_id: string
           status: Database["public"]["Enums"]["enrichment_status"]
@@ -216,6 +217,7 @@ export type Database = {
           project_id: string
           quality?: Json | null
           regenerated_main_image?: string | null
+          rescrape_rounds?: number
           score_breakdown?: Json | null
           source_product_id: string
           status?: Database["public"]["Enums"]["enrichment_status"]
@@ -247,6 +249,7 @@ export type Database = {
           project_id?: string
           quality?: Json | null
           regenerated_main_image?: string | null
+          rescrape_rounds?: number
           score_breakdown?: Json | null
           source_product_id?: string
           status?: Database["public"]["Enums"]["enrichment_status"]
@@ -657,6 +660,7 @@ export type Database = {
         | "PHOTO_TOOL_EDIT_IMAGE"
         | "PIM_VISUALIZATIONS"
         | "PIM_ALLEGRO_DESCRIPTION"
+        | "PIM_RESCRAPE"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -802,6 +806,7 @@ export const Constants = {
         "PHOTO_TOOL_EDIT_IMAGE",
         "PIM_VISUALIZATIONS",
         "PIM_ALLEGRO_DESCRIPTION",
+        "PIM_RESCRAPE",
       ],
       bulk_job_status: [
         "PENDING",

@@ -9,7 +9,8 @@ export type BulkJobKind =
   | "PHOTO_TOOL_GENERATE"
   | "PHOTO_TOOL_EDIT_IMAGE"
   | "PIM_VISUALIZATIONS"
-  | "PIM_ALLEGRO_DESCRIPTION";
+  | "PIM_ALLEGRO_DESCRIPTION"
+  | "PIM_RESCRAPE";
 export type BulkJobStatus =
   | "PENDING"
   | "PROCESSING"
@@ -43,6 +44,7 @@ const KindSchema = z.enum([
   "PHOTO_TOOL_EDIT_IMAGE",
   "PIM_VISUALIZATIONS",
   "PIM_ALLEGRO_DESCRIPTION",
+  "PIM_RESCRAPE",
 ]);
 
 function mapRow(row: Record<string, unknown>): BulkJob {

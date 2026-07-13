@@ -271,7 +271,9 @@ function ProjectPage() {
               ? "Wyszukiwanie źródeł (Firecrawl)"
               : job.kind === "PIM_ALLEGRO_DESCRIPTION"
                 ? "Opisy Allegro"
-                : "Wizualizacje produktowe";
+                : job.kind === "PIM_RESCRAPE"
+                  ? "Doscrapowanie źródeł"
+                  : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -931,6 +933,21 @@ function ProjectPage() {
                     </TableCell>
                     <TableCell>
                       <MatchBadge type={p.match_type as string} />
+                      {(() => {
+                        const rounds = (p as { rescrape_rounds?: number }).rescrape_rounds ?? 0;
+                        const breakdown = ((p as { score_breakdown?: Array<{ total: number }> }).score_breakdown ?? []) as Array<{ total: number }>;
+                        const strong = breakdown.filter((b) => (b?.total ?? 0) >= 4).length;
+                        if (rounds < 2 || strong >= 3) return null;
+                        return (
+                          <Badge
+                            variant="outline"
+                            className="ml-1 border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            title={`Po ${rounds} rundach doscrapowania nadal ${strong} silnych źródeł (< 3). Rozważ ręczne dodanie linków.`}
+                          >
+                            Słabe źródła
+                          </Badge>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={p.status as string} error={p.error} />
