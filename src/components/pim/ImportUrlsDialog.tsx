@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Link2, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { importProductsFromUrls } from "@/lib/pim/import-urls.functions";
 import { friendlyError } from "@/lib/utils";
@@ -55,6 +56,7 @@ export function ImportUrlsDialog({ projectId, onDone }: Props) {
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [done, setDone] = useState(0);
+  const [stealth, setStealth] = useState(false);
 
   const qc = useQueryClient();
   const importFn = useServerFn(importProductsFromUrls);
@@ -65,6 +67,7 @@ export function ImportUrlsDialog({ projectId, onDone }: Props) {
     setText("");
     setRows([]);
     setDone(0);
+    setStealth(false);
   };
 
   const run = async () => {
@@ -91,7 +94,7 @@ export function ImportUrlsDialog({ projectId, onDone }: Props) {
           prev.map((r) => (batch.includes(r.url) ? { ...r, status: "processing" } : r)),
         );
         try {
-          const res = await importFn({ data: { projectId, urls: batch } });
+          const res = await importFn({ data: { projectId, urls: batch, stealth } });
           setRows((prev) => {
             const byUrl = new Map(res.results.map((x) => [x.url, x]));
             return prev.map((r) => {
@@ -199,6 +202,20 @@ export function ImportUrlsDialog({ projectId, onDone }: Props) {
             </span>
             <span>Maks. 200 na paczkę · przetwarzane po {BATCH_SIZE}</span>
           </div>
+
+          <label className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs cursor-pointer hover:bg-muted/50">
+            <Checkbox
+              checked={stealth}
+              onCheckedChange={(v) => setStealth(v === true)}
+              disabled={busy}
+              className="mt-0.5"
+            />
+            <span>
+              <b>Tryb stealth</b> (wolniejszy, zużywa więcej kredytów Firecrawl) — użyj dla stron
+              z Cloudflare / reCAPTCHA / Datadome. Bez tej opcji spróbujemy najpierw
+              taniej ścieżki i włączymy stealth automatycznie, jeśli wykryjemy blokadę.
+            </span>
+          </label>
 
           {rows.length > 0 && (
             <>
