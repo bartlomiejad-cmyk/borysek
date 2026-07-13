@@ -35,6 +35,67 @@ type ScoreResult = {
   trusted_boost: boolean;
 };
 
+type ValidationResult = {
+  keep: Set<string>;
+  clustersByUrl: Map<string, string>;
+  ok: boolean;
+};
+
+type BreakdownEntry = {
+  url: string;
+  total: number;
+  producer_boost: boolean;
+  trusted_boost: boolean;
+  variant_key: string | null;
+  deduped: boolean;
+};
+
+/**
+ * Given a set of URLs allowed to be picked, apply variant-cluster dedup.
+ * Within each cluster keep only the best URL (score, then cleaning confidence,
+ * then description length). Returns dedup outcome per URL.
+ */
+function applyClusterDedup(
+  urls: string[],
+  scoreByUrl: Map<string, number>,
+  clustersByUrl: Map<string, string>,
+  confidenceByUrl: Map<string, number | null>,
+  descLenByUrl: Map<string, number>,
+): { keptUrls: Set<string>; deduped: Set<string>; keyByUrl: Map<string, string | null> } {
+  const buckets = new Map<string, string[]>();
+  const keyByUrl = new Map<string, string | null>();
+  const unclustered: string[] = [];
+  for (const u of urls) {
+    const k = clustersByUrl.get(u);
+    if (!k) {
+      keyByUrl.set(u, null);
+      unclustered.push(u);
+      continue;
+    }
+    keyByUrl.set(u, k);
+    const arr = buckets.get(k) ?? [];
+    arr.push(u);
+    buckets.set(k, arr);
+  }
+  const keptUrls = new Set<string>(unclustered);
+  const deduped = new Set<string>();
+  for (const [, arr] of buckets) {
+    if (arr.length === 1) { keptUrls.add(arr[0]); continue; }
+    const winner = arr.slice().sort((a, b) => {
+      const sa = scoreByUrl.get(a) ?? 0;
+      const sb = scoreByUrl.get(b) ?? 0;
+      if (sb !== sa) return sb - sa;
+      const ca = confidenceByUrl.get(a) ?? -1;
+      const cb = confidenceByUrl.get(b) ?? -1;
+      if ((cb ?? -1) !== (ca ?? -1)) return (cb ?? -1) - (ca ?? -1);
+      return (descLenByUrl.get(b) ?? 0) - (descLenByUrl.get(a) ?? 0);
+    })[0];
+    keptUrls.add(winner);
+    for (const u of arr) if (u !== winner) deduped.add(u);
+  }
+  return { keptUrls, deduped, keyByUrl };
+}
+
 function scoreSource(
   meta: SourceMeta,
   product: { nazwa: string | null; ean: string | null; producer: string | null },
@@ -101,8 +162,8 @@ async function validateSourcesWithAI(
   productName: string,
   productEan: string | null,
   sources: Array<{ url: string; title: string | null; description: string | null }>,
-): Promise<Set<string>> {
-  if (!sources.length) return new Set();
+): Promise<ValidationResult> {
+  if (!sources.length) return { keep: new Set(), clustersByUrl: new Map(), ok: true };
   const blocks = sources
     .map((s, idx) => {
       const desc = (s.description ?? "").slice(0, 800);
@@ -114,7 +175,11 @@ async function validateSourcesWithAI(
     "Dla podanego PRODUKTU oraz listy ŹRÓDEŁ (stron internetowych) zdecyduj, które źródła opisują DOKŁADNIE ten sam produkt (ten sam wariant, marka, model, rozmiar/gramatura).",
     "Bardzo restrykcyjnie: jeśli marka, model lub kluczowy wariant (np. nazwa serii, granulacja, kaliber, pojemność, kolor) różni się lub brakuje w źródle — odrzuć źródło.",
     "Brak frazy z nazwy produktu (np. nazwa marki) w tytule/URL/opisie źródła = źródło NIE pasuje.",
-    "Zwróć JSON: {\"keep\": number[]} gdzie liczby to indeksy źródeł (1-based) które pasują. Jeśli żadne nie pasuje, zwróć {\"keep\": []}.",
+    "Następnie POGRUPUJ zaakceptowane źródła w klastry, gdzie jeden klaster = DOKŁADNIE ten sam wariant fizyczny produktu (te same rozmiar/kolor/gramatura/kaliber).",
+    "Różne rozmiary/kolory tego samego modelu = RÓŻNE klastry. Te same wariant z różnych sklepów = TEN SAM klaster.",
+    "variant_key: string w formacie \"marka|model|wariant\" małymi literami, np. \"nike|air max 90|white 42\". Gdy wariant nieznany, użyj \"-\".",
+    "Zwróć JSON: {\"keep\": number[], \"clusters\": [{\"variant_key\": string, \"indices\": number[]}]}. Indeksy 1-based. Każdy indeks z keep musi wystąpić w dokładnie jednym klastrze.",
+    "Jeśli żadne nie pasuje: {\"keep\": [], \"clusters\": []}.",
   ].join("\n");
   const user = [
     `PRODUKT: ${productName}`,
@@ -141,12 +206,12 @@ async function validateSourcesWithAI(
       }),
     });
     if (!res.ok) {
-      console.warn(`validateSourcesWithAI: gateway ${res.status}; keeping all`);
-      return new Set(sources.map((s) => s.url));
+      console.warn(`[matching] validateSourcesWithAI: gateway ${res.status}; keeping all, no clustering`);
+      return { keep: new Set(sources.map((s) => s.url)), clustersByUrl: new Map(), ok: false };
     }
     const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = j.choices?.[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(content) as { keep?: unknown };
+    const parsed = JSON.parse(content) as { keep?: unknown; clusters?: unknown };
     const idxs = Array.isArray(parsed.keep)
       ? parsed.keep.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
       : [];
@@ -155,10 +220,34 @@ async function validateSourcesWithAI(
       const s = sources[i - 1];
       if (s) kept.add(s.url);
     }
-    return kept;
+    const clustersByUrl = new Map<string, string>();
+    let clustersOk = true;
+    if (!Array.isArray(parsed.clusters)) {
+      clustersOk = false;
+    } else {
+      for (const c of parsed.clusters as unknown[]) {
+        if (!c || typeof c !== "object") { clustersOk = false; break; }
+        const cc = c as { variant_key?: unknown; indices?: unknown };
+        if (typeof cc.variant_key !== "string" || !Array.isArray(cc.indices)) {
+          clustersOk = false; break;
+        }
+        const key = (cc.variant_key as string).trim().toLowerCase();
+        if (!key) continue;
+        for (const ix of cc.indices as unknown[]) {
+          if (typeof ix !== "number") continue;
+          const s = sources[ix - 1];
+          if (s && kept.has(s.url)) clustersByUrl.set(s.url, key);
+        }
+      }
+    }
+    if (!clustersOk) {
+      console.warn("[matching] validateSourcesWithAI: clusters schema invalid; skipping dedup");
+      return { keep: kept, clustersByUrl: new Map(), ok: false };
+    }
+    return { keep: kept, clustersByUrl, ok: true };
   } catch (e) {
-    console.warn("validateSourcesWithAI failed; keeping all:", e);
-    return new Set(sources.map((s) => s.url));
+    console.warn("[matching] validateSourcesWithAI failed; keeping all, no clustering:", e);
+    return { keep: new Set(sources.map((s) => s.url)), clustersByUrl: new Map(), ok: false };
   }
 }
 
@@ -230,7 +319,7 @@ export const runMatching = createServerFn({ method: "POST" })
       match_type: MatchType;
       matched_term: string | null;
       picked_urls: string[];
-      score_breakdown?: Array<{ url: string; total: number; producer_boost: boolean; trusted_boost: boolean }>;
+      score_breakdown?: BreakdownEntry[];
     }> = [];
 
     for (const p of products) {
@@ -282,7 +371,20 @@ export const runMatching = createServerFn({ method: "POST" })
       );
       const srcMap = new Map<string, { title: string | null; description: string | null }>();
       const metaMap = new Map<string, SourceMeta>();
+      const confidenceMap = new Map<string, number | null>();
+      const descLenMap = new Map<string, number>();
       const productById = new Map(products.map((p) => [p.id, p]));
+      // Load pinned_main_url per product so we can skip clustering on manually-pinned products.
+      const { data: pinRows } = await supabase
+        .from("enrichments")
+        .select("source_product_id, pinned_main_url")
+        .eq("project_id", data.projectId)
+        .in("source_product_id", updates.map((u) => u.source_product_id));
+      const pinnedByProduct = new Map<string, string | null>();
+      for (const r of pinRows ?? []) {
+        const rr = r as { source_product_id: string; pinned_main_url: string | null };
+        pinnedByProduct.set(rr.source_product_id, rr.pinned_main_url);
+      }
       const urlToProduct = new Map<string, { nazwa: string | null; ean: string | null }>();
       for (const u of updates) {
         const p = productById.get(u.source_product_id);
@@ -348,6 +450,8 @@ export const runMatching = createServerFn({ method: "POST" })
             description: descClean || null,
             imagesCount: mainClean.length + extraClean.length,
           });
+          confidenceMap.set(rr.url, cleaningMeta.confidence ?? null);
+          descLenMap.set(rr.url, (descClean ?? "").length);
         }
       }
       let validated = 0;
@@ -357,6 +461,8 @@ export const runMatching = createServerFn({ method: "POST" })
         if (!prod || !prod.nazwa) continue;
 
         let kept = u.picked_urls;
+        let clustersByUrl = new Map<string, string>();
+        const skipClustering = !!pinnedByProduct.get(u.source_product_id);
         if (apiKey) {
           const sources = u.picked_urls
             .map((url) => ({
@@ -366,8 +472,9 @@ export const runMatching = createServerFn({ method: "POST" })
             }))
             .filter((s) => s.title || s.description);
           if (sources.length) {
-            const keep = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
-            kept = u.picked_urls.filter((url) => keep.has(url));
+            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
+            kept = u.picked_urls.filter((url) => val.keep.has(url));
+            if (!skipClustering && val.ok) clustersByUrl = val.clustersByUrl;
             validated++;
           }
         }
@@ -389,17 +496,39 @@ export const runMatching = createServerFn({ method: "POST" })
           );
           return { url, ...r };
         });
-        const rankedFull = scored
-          .filter((x) => x.total > 0)
+        const positive = scored.filter((x) => x.total > 0);
+        const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+        const dedup = applyClusterDedup(
+          positive.map((x) => x.url),
+          scoreByUrl,
+          clustersByUrl,
+          confidenceMap,
+          descLenMap,
+        );
+        const rankedFull = positive
+          .filter((x) => dedup.keptUrls.has(x.url))
           .sort((a, b) => b.total - a.total)
           .slice(0, TOP_SOURCES_PER_PRODUCT);
         const ranked = rankedFull.map((x) => x.url);
-        u.score_breakdown = rankedFull.map((x) => ({
+        const winners: BreakdownEntry[] = rankedFull.map((x) => ({
           url: x.url,
           total: x.total,
           producer_boost: x.producer_boost,
           trusted_boost: x.trusted_boost,
+          variant_key: dedup.keyByUrl.get(x.url) ?? null,
+          deduped: false,
         }));
+        const droppedByDedup: BreakdownEntry[] = positive
+          .filter((x) => dedup.deduped.has(x.url))
+          .map((x) => ({
+            url: x.url,
+            total: x.total,
+            producer_boost: x.producer_boost,
+            trusted_boost: x.trusted_boost,
+            variant_key: dedup.keyByUrl.get(x.url) ?? null,
+            deduped: true,
+          }));
+        u.score_breakdown = [...winners, ...droppedByDedup];
 
         const wasMatched = u.picked_urls.length > 0;
         if (ranked.length !== u.picked_urls.length) {
@@ -535,18 +664,21 @@ export async function scoreAndCapForProduct(
   // may not be in enrichment.picked_urls yet — pull both and rescore all.
   const { data: enRow } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, matched_term")
+    .select("id, picked_urls, matched_term, pinned_main_url")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enRow) return { count: 0, strong: 0 };
   const currentPicked = (enRow.picked_urls as string[] | null) ?? [];
+  const pinned = (enRow as { pinned_main_url?: string | null }).pinned_main_url ?? null;
 
   // Also pull ALL product_sources for the term(s) — union with existing picks.
   const { data: allSrcs } = await supabaseAdmin
     .from("product_sources")
-    .select("id, url, title, description, images, extra_images")
+    .select("id, url, title, description, images, extra_images, cleaning_meta")
     .eq("project_id", projectId);
   const bySrcUrl = new Map<string, { title: string | null; description: string | null; imagesCount: number }>();
+  const confidenceByUrl = new Map<string, number | null>();
+  const descLenByUrl = new Map<string, number>();
   for (const s of allSrcs ?? []) {
     const rr = s as {
       url: string;
@@ -554,6 +686,7 @@ export async function scoreAndCapForProduct(
       description: string | null;
       images: unknown;
       extra_images: unknown;
+      cleaning_meta: unknown;
     };
     const main = Array.isArray(rr.images) ? (rr.images as string[]) : [];
     const extra = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
@@ -562,6 +695,9 @@ export async function scoreAndCapForProduct(
       description: rr.description ?? null,
       imagesCount: main.length + extra.length,
     });
+    const cm = (rr.cleaning_meta ?? null) as { confidence?: number | null } | null;
+    confidenceByUrl.set(rr.url, cm?.confidence ?? null);
+    descLenByUrl.set(rr.url, (rr.description ?? "").length);
   }
 
   // Candidate URLs = union of previously picked + everything freshly scraped
@@ -590,6 +726,7 @@ export async function scoreAndCapForProduct(
 
   // AI validation (best-effort).
   let kept = candidates;
+  let clustersByUrl = new Map<string, string>();
   if (apiKey && nazwa) {
     const sources = candidates
       .map((url) => {
@@ -598,8 +735,9 @@ export async function scoreAndCapForProduct(
       })
       .filter((s) => s.title || s.description);
     if (sources.length) {
-      const keep = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources);
-      kept = candidates.filter((url) => keep.has(url));
+      const val = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources);
+      kept = candidates.filter((url) => val.keep.has(url));
+      if (!pinned && val.ok) clustersByUrl = val.clustersByUrl;
     }
   }
 
@@ -613,17 +751,39 @@ export async function scoreAndCapForProduct(
     );
     return { url, ...r };
   });
-  const rankedFull = scored
-    .filter((x) => x.total > 0)
+  const positive = scored.filter((x) => x.total > 0);
+  const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+  const dedup = applyClusterDedup(
+    positive.map((x) => x.url),
+    scoreByUrl,
+    clustersByUrl,
+    confidenceByUrl,
+    descLenByUrl,
+  );
+  const rankedFull = positive
+    .filter((x) => dedup.keptUrls.has(x.url))
     .sort((a, b) => b.total - a.total)
     .slice(0, TOP_SOURCES_PER_PRODUCT);
   const ranked = rankedFull.map((x) => x.url);
-  const breakdown = rankedFull.map((x) => ({
+  const winners: BreakdownEntry[] = rankedFull.map((x) => ({
     url: x.url,
     total: x.total,
     producer_boost: x.producer_boost,
     trusted_boost: x.trusted_boost,
+    variant_key: dedup.keyByUrl.get(x.url) ?? null,
+    deduped: false,
   }));
+  const dropped: BreakdownEntry[] = positive
+    .filter((x) => dedup.deduped.has(x.url))
+    .map((x) => ({
+      url: x.url,
+      total: x.total,
+      producer_boost: x.producer_boost,
+      trusted_boost: x.trusted_boost,
+      variant_key: dedup.keyByUrl.get(x.url) ?? null,
+      deduped: true,
+    }));
+  const breakdown: BreakdownEntry[] = [...winners, ...dropped];
 
   await supabaseAdmin
     .from("enrichments")
