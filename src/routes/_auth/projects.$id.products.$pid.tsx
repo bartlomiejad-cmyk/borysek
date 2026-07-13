@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
-import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
+import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
@@ -61,6 +61,7 @@ function ProductDetail() {
   const analyzeFn = useServerFn(analyzeProductImages);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const regenFn = useServerFn(regenerateMainImage);
+  const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
@@ -301,11 +302,28 @@ function ProductDetail() {
   });
 
   const regenMut = useMutation({
-    mutationFn: (vars: { enrichmentId: string; imageUrl: string }) =>
+    mutationFn: (vars: { enrichmentId: string; imageUrl: string; customStyle?: string; customRequirements?: string }) =>
       regenFn({ data: vars }),
     onSuccess: () => { toast.success("Zdjęcie zregenerowane"); invalidate(); },
     onError: (e) => toast.error(friendlyError(e, "Regeneracja nie powiodła się")),
   });
+
+  const [regenStyle, setRegenStyle] = useState("");
+  const [regenReq, setRegenReq] = useState("");
+  const [visionBusy, setVisionBusy] = useState(false);
+  const analyzeForThumb = async () => {
+    setVisionBusy(true);
+    try {
+      const out = await analyzeForPromptFn({ data: { productId: pid, mode: "thumbnail" } });
+      setRegenStyle(out.style);
+      setRegenReq(out.requirements);
+      toast.success(`AI przeanalizowała ${out.analyzed} zdjęcie/zdjęć`);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się przeanalizować zdjęć"));
+    } finally {
+      setVisionBusy(false);
+    }
+  };
 
   const clearRegenMut = useMutation({
     mutationFn: (enrichmentId: string) => clearRegenFn({ data: { enrichmentId } }),
