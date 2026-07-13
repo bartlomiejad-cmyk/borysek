@@ -33,6 +33,7 @@ import {
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import { deleteProducts } from "@/lib/pim/products.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
@@ -67,6 +68,16 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
@@ -129,6 +140,7 @@ function ProjectPage() {
   const cancelJobFn = useServerFn(cancelBulkJob);
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
   const recleanFn = useServerFn(recleanProductSources);
+  const deleteProductsFn = useServerFn(deleteProducts);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -153,6 +165,52 @@ function ProjectPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: "one"; id: string; name: string }
+    | { kind: "bulk"; ids: string[]; names: string[] }
+    | null
+  >(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const runDelete = async () => {
+    if (!deleteTarget) return;
+    const ids =
+      deleteTarget.kind === "one" ? [deleteTarget.id] : deleteTarget.ids;
+    if (!ids.length) return;
+    setDeleting(true);
+    const t = toast.loading(
+      ids.length === 1 ? "Usuwam produkt…" : `Usuwam ${ids.length} produktów…`,
+    );
+    try {
+      // Chunk to stay under the 500-per-call server limit.
+      let total = 0;
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        const res = await deleteProductsFn({
+          data: { projectId: id, productIds: chunk },
+        });
+        total += res.deleted;
+      }
+      toast.success(
+        total === 1
+          ? "Produkt usunięty"
+          : `Usunięto ${total} produktów`,
+        { id: t },
+      );
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const pid of ids) next.delete(pid);
+        return next;
+      });
+      setDeleteTarget(null);
+      qc.invalidateQueries({ queryKey: ["project", id] });
+      refetchProducts();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się usunąć"), { id: t });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
@@ -764,6 +822,20 @@ function ProjectPage() {
               <Button size="sm" variant="outline" onClick={() => exportFile("xlsx")}>
                 <Download className="h-4 w-4 mr-1" /> XLSX
               </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => {
+                  const ids = [...selectedIds];
+                  const names = products
+                    .filter((p) => selectedIds.has(p.id))
+                    .map((p) => p.golden_name ?? p.nazwa ?? p.id);
+                  setDeleteTarget({ kind: "bulk", ids, names });
+                }}
+                disabled={deleting}
+              >
+                <Trash2 className="h-4 w-4 mr-1" /> Usuń zaznaczone
+              </Button>
             </div>
           )}
           <div className="rounded-md border">
@@ -888,6 +960,21 @@ function ProjectPage() {
                             <ArrowRight className="h-4 w-4" />
                           </Link>
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Usuń produkt"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() =>
+                            setDeleteTarget({
+                              kind: "one",
+                              id: p.id,
+                              name: p.golden_name ?? p.nazwa ?? p.id,
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -973,6 +1060,62 @@ function ProjectPage() {
             ?.visualization_requirements_pl ?? null
         }
       />
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => {
+          if (!v && !deleting) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.kind === "bulk"
+                ? `Usunąć ${deleteTarget.ids.length} produktów?`
+                : "Usunąć produkt?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Ta operacja jest nieodwracalna. Usunięte zostaną także złote
+                  rekordy, wizualizacje AI i dopasowania dla wskazanych
+                  produktów. Źródła (product_sources) i wyniki wyszukiwań
+                  pozostają nienaruszone.
+                </p>
+                {deleteTarget?.kind === "one" && (
+                  <p className="text-foreground font-medium line-clamp-2">
+                    „{deleteTarget.name}"
+                  </p>
+                )}
+                {deleteTarget?.kind === "bulk" && deleteTarget.names.length > 0 && (
+                  <ul className="text-xs text-foreground/80 list-disc pl-5 space-y-0.5">
+                    {deleteTarget.names.slice(0, 5).map((n, i) => (
+                      <li key={i} className="line-clamp-1">{n}</li>
+                    ))}
+                    {deleteTarget.names.length > 5 && (
+                      <li className="text-muted-foreground">
+                        …i {deleteTarget.names.length - 5} więcej
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                runDelete();
+              }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Usuwam…" : "Usuń"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

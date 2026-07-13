@@ -1,47 +1,37 @@
 ## Cel
-Zwiększyć skuteczność importu z linków dla stron chronionych anty-botem (reCAPTCHA, Cloudflare, Datadome), tak jak mieloch.pl, przez wymuszenie renderowania w przeglądarce po stronie Firecrawl zamiast prostego pobrania HTML.
+Umożliwić usuwanie produktów z projektu PIM — pojedynczo (z listy i edytora) oraz masowo (dla zaznaczonych).
 
-## Diagnoza
-Obecnie `src/lib/pim/import-urls.functions.ts` woła Firecrawl w trybie zwykłego scrape'a. Strony za challenge'em (Cloudflare/reCAPTCHA) zwracają wtedy stronę interstitial zamiast produktu — stąd fallback łapał `reCAPTCHA` jako `<h1>`.
+## Zakres
 
-Firecrawl v2 udostępnia mechanizmy, które w większości przypadków rozwiązują problem bez uciekania się do szarej strefy:
-- `formats: ['markdown','html']` + `onlyMainContent: true` (już mamy)
-- `waitFor` — czekanie aż JS zdąży się wykonać po challenge'u
-- `mobile: true` / rotacja User-Agenta — mniej stron wymaga wtedy challenge'u
-- `location: { country, languages }` — geo dopasowane do sklepu (PL)
-- `proxy: 'stealth'` (nowość v2) — rezydencjalne proxy + stealth browser, dedykowane do stron z anty-botem
-- `actions: [{ type: 'wait', milliseconds }, { type: 'screenshot' }]` — pozwala poczekać na Cloudflare turnstile i zweryfikować
+### 1. Server function — `src/lib/pim/products.functions.ts` (nowy plik)
+Dwie funkcje z `requireSupabaseAuth`:
+- `deleteProducts({ projectId, productIds: string[] })` — walidacja `z.array(uuid).min(1).max(500)`.
+- Wewnątrz: `supabase.from("source_products").delete().eq("project_id", projectId).in("id", productIds)`.
+- `enrichments` znika automatycznie (FK `ON DELETE CASCADE` na `source_product_id`).
+- Zwraca `{ deleted: number }`.
+- RLS na `source_products` już scopuje przez projekt/usera, więc nie trzeba dodatkowej autoryzacji, ale i tak weryfikujemy że projekt należy do zalogowanego usera (jeden SELECT `projects.id`).
 
-## Zakres zmian
+Nie ruszamy `product_sources` ani `search_results` — są per-projekt, nie per-produkt (współdzielone przez discovery).
 
-### 1. `src/lib/pim/import-urls.functions.ts`
-- Pierwsza próba scrape'a bez zmian (tanio).
-- Jeśli wynik przechodzi przez `looksLikeChallengePage` LUB `isJunkName` LUB brak treści produktowej → automatyczny retry z „trybem stealth":
-  - `proxy: 'stealth'`
-  - `waitFor: 4000`
-  - `location: { country: 'PL', languages: ['pl'] }`
-  - `mobile: true` (rotacyjnie na drugiej próbie)
-- Dopiero po drugiej nieudanej próbie zwracamy błąd „Nie udało się przejść przez zabezpieczenie anty-botowe strony" z sugestią wklejenia treści ręcznie.
-- Loguj do konsoli serwera (`console.warn`) info, że włączono stealth — do diagnostyki bez ujawniania kluczy.
+### 2. UI — lista `src/routes/_auth/projects.$id.index.tsx`
+- **Pojedynczo:** w kolumnie akcji każdego wiersza dodać ikonę kosza (`Trash2`) obok istniejących akcji, otwierającą `AlertDialog` „Usuń produkt X? Tej operacji nie można cofnąć".
+- **Masowo:** w istniejącym pasku „Zaznaczono N produktów" dodać czerwony przycisk **„Usuń zaznaczone"** (destructive variant, ikona `Trash2`) → `AlertDialog` z listą pierwszych ~5 nazw i licznikiem.
+- Po sukcesie: toast, `qc.invalidateQueries(["project", id])`, czyszczenie `selectedIds`.
 
-### 2. UI — `src/components/pim/ImportUrlsDialog.tsx`
-- Dodaj opcjonalny checkbox **„Tryb stealth (wolniejszy, dla stron z Cloudflare/reCAPTCHA)"**, który wymusza od razu drugą ścieżkę i zwiększa timeout klienta.
-- Komunikat błędu z serwera pokazany 1:1 w dialogu (już jest, ale wzbogacony o podpowiedź).
+### 3. UI — edytor `src/routes/_auth/projects.$id.products.$pid.tsx`
+- W nagłówku edytora (obok „Podgląd karty") dodać przycisk **„Usuń produkt"** (destructive-ghost) → `AlertDialog` → po usunięciu `router.navigate({ to: "/projects/$id", params: { id } })`.
 
-### 3. Fallback ręczny (opcjonalny, do decyzji)
-Gdy nawet stealth zawiedzie — pole tekstowe w dialogu do wklejenia HTML/tekstu produktu, który idzie do tej samej pipeline'y AI extract co dziś. To eliminuje twarde blokady bez łamania regulaminów sklepów.
+## Nie robimy
+- Nie dodajemy „soft delete" / kosza — użytkownik nie prosił, a złożoność zapisu w tabelach downstream (zadania masowe, wizualizacje) byłaby duża.
+- Nie przerywamy aktywnych `bulk_jobs` — jeśli w trakcie usuwania trwa job, worker po prostu pominie brakujące produkty (`enrichments` już nie istnieje). Zostaje bez zmian.
 
-## Czego świadomie NIE robimy
-- Nie omijamy CAPTCHA przez zewnętrzne solvery (2Captcha itp.) — narusza to regulaminy większości sklepów i jest kruche.
-- Nie stawiamy własnego headless-browsera w Workerze — nie zmieści się w limitach runtime'u (patrz `server-runtime`).
-- Nie zmieniamy nagłówków HTTP „na siłę" po naszej stronie — Firecrawl robi to lepiej i legalnie w swojej infrastrukturze.
+## Techniczne detale
+- Kaskada: `source_products` → `enrichments` (już `ON DELETE CASCADE`), więc jedna operacja DELETE wystarczy.
+- Limit 500 na wywołanie zabezpiecza przed timeoutem Workera; masowe usuwanie >500 zaznaczonych chunkujemy po stronie klienta jak inne akcje.
+- Klucz zapytania `["project", id]` już jest w użyciu — jedno `invalidateQueries` odświeży wszystko.
 
-## Detale techniczne
-- Firecrawl v2 `scrape` przyjmuje `proxy: 'basic' | 'stealth' | 'auto'`. Stealth kosztuje więcej kredytów per request, więc używamy go tylko jako fallback.
-- Kolejność prób: `basic` (domyślne) → `stealth + waitFor 4s + PL geo` → błąd.
-- `import-urls.functions.ts` już centralizuje wywołanie Firecrawl — zmiana lokalna, bez ruszania `_workers.server.ts` i głównego Discovery.
-
-## Test manualny (po wdrożeniu)
-1. Import `https://mieloch.pl/wydech-yasuni-carrera-16-aluminium-red-gilera-piaggio` → powinien wpaść w stealth i wrócić z nazwą „Wydech Yasuni Carrera 16 …".
-2. Import losowej strony bez ochrony → dalej idzie tanią ścieżką (1 kredyt).
-3. Strona z twardym CAPTCHA → czytelny błąd + podpowiedź o ręcznym wklejeniu.
+## Test manualny
+1. Zaznacz 3 produkty → „Usuń zaznaczone" → znikają z listy, licznik projektu spada.
+2. Ikona kosza w wierszu → potwierdź → produkt znika.
+3. W edytorze produktu → „Usuń produkt" → wraca na listę projektu.
+4. Odśwież stronę — usunięte produkty nie wracają.

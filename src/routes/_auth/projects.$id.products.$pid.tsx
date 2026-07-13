@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +12,18 @@ import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.fu
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import { deleteProducts } from "@/lib/pim/products.functions";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,6 +65,20 @@ function ProductDetail() {
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
+  const deleteProductsFn = useServerFn(deleteProducts);
+  const navigate = useNavigate();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const deleteMut = useMutation({
+    mutationFn: () =>
+      deleteProductsFn({ data: { projectId: id, productIds: [pid] } }),
+    onSuccess: () => {
+      toast.success("Produkt usunięty");
+      navigate({ to: "/projects/$id", params: { id } });
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Nie udało się usunąć");
+    },
+  });
   const reclean = useMutation({
     mutationFn: () => recleanFn({ data: { projectId: id } }),
     onSuccess: (res) => {
@@ -424,6 +450,15 @@ function ProductDetail() {
         >
           <Sparkles className="h-4 w-4 mr-2" />
           {regenAll.isPending ? "Generowanie..." : "Generuj z 3 źródeł"}
+        </Button>
+        <Button
+          variant="destructive"
+          onClick={() => setDeleteOpen(true)}
+          disabled={deleteMut.isPending}
+          title="Usuń ten produkt z projektu"
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          {deleteMut.isPending ? "Usuwam…" : "Usuń produkt"}
         </Button>
         </div>
       </div>
@@ -991,6 +1026,46 @@ function ProductDetail() {
           })}
         </div>
       </div>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(v) => {
+          if (!deleteMut.isPending) setDeleteOpen(v);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunąć produkt?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Ta operacja jest nieodwracalna. Usunięte zostaną także złoty
+                  rekord, wizualizacje AI i dopasowania tego produktu. Źródła
+                  (product_sources) i wyniki wyszukiwań pozostają
+                  nienaruszone.
+                </p>
+                <p className="text-foreground font-medium line-clamp-2">
+                  „{product.nazwa}"
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMut.isPending}>
+              Anuluj
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                deleteMut.mutate();
+              }}
+              disabled={deleteMut.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMut.isPending ? "Usuwam…" : "Usuń"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }
