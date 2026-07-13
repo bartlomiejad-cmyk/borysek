@@ -264,6 +264,7 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
       .object({
         projectId: z.string().uuid(),
         urls: z.array(z.string().url()).min(1).max(20),
+        stealth: z.boolean().optional().default(false),
       })
       .parse(i),
   )
@@ -283,36 +284,86 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
     // Deduplicate URLs preserving order.
     const urls = Array.from(new Set(data.urls.map((u) => u.trim()))).filter(Boolean);
 
+    // Scrape helper with optional stealth mode. Stealth uses Firecrawl's
+    // residential proxy + real browser rendering to bypass Cloudflare /
+    // reCAPTCHA / Datadome challenges. Costs more credits, so we only use
+    // it as a fallback (or when the user explicitly checks the box).
+    async function scrapeOnce(
+      targetUrl: string,
+      stealth: boolean,
+    ): Promise<Record<string, unknown>> {
+      const opts: Record<string, unknown> = {
+        formats: ["markdown", "rawHtml"],
+        onlyMainContent: true,
+      };
+      if (stealth) {
+        opts.proxy = "stealth";
+        opts.waitFor = 4000;
+        opts.mobile = true;
+        opts.location = { country: "PL", languages: ["pl"] };
+      }
+      return (await firecrawl.scrape(targetUrl, opts as never)) as Record<string, unknown>;
+    }
+
+    function scrapeLooksBlocked(scrape: Record<string, unknown>): {
+      blocked: boolean;
+      pageTitle: string;
+      h1Title: string;
+      rawHtml: string;
+      rawMarkdown: string;
+      meta: Record<string, unknown>;
+    } {
+      const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
+      const rawMarkdown =
+        typeof scrape.markdown === "string" ? scrape.markdown : "";
+      const rawHtml =
+        typeof scrape.rawHtml === "string"
+          ? scrape.rawHtml
+          : typeof scrape.html === "string"
+            ? (scrape.html as string)
+            : "";
+      const pageTitle = extractPageTitle(meta, rawHtml) || "";
+      const h1Title = extractProductH1(rawHtml);
+      const blocked =
+        looksLikeChallengePage(rawHtml, rawMarkdown, pageTitle) ||
+        (!!h1Title && isJunkName(h1Title) && !pageTitle) ||
+        (!pageTitle && !h1Title && rawMarkdown.trim().length < 200);
+      return { blocked, pageTitle, h1Title, rawHtml, rawMarkdown, meta };
+    }
+
     // Process in parallel with a small concurrency cap so we stay within
     // Cloudflare Worker time budget. The client sends small batches (~5 URLs).
     const results = await Promise.all(
       urls.map(async (url): Promise<ExtractResult> => {
         try {
-          const scrape = (await firecrawl.scrape(url, {
-            formats: ["markdown", "rawHtml"],
-            onlyMainContent: true,
-          } as never)) as Record<string, unknown>;
+          // First pass: cheap scrape unless caller pre-selected stealth.
+          let scrape = await scrapeOnce(url, data.stealth);
+          let inspected = scrapeLooksBlocked(scrape);
 
-          const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
-          const rawMarkdown =
-            typeof scrape.markdown === "string" ? scrape.markdown : "";
-          const rawHtml =
-            typeof scrape.rawHtml === "string"
-              ? scrape.rawHtml
-              : typeof scrape.html === "string"
-                ? (scrape.html as string)
-                : "";
-          const pageTitle = extractPageTitle(meta, rawHtml) || null;
-          const h1Title = extractProductH1(rawHtml);
+          // Fallback: retry through Firecrawl's stealth proxy + real browser.
+          if (inspected.blocked && !data.stealth) {
+            console.warn(
+              `importProductsFromUrls: challenge detected on ${url} — retrying with stealth proxy`,
+            );
+            try {
+              scrape = await scrapeOnce(url, true);
+              inspected = scrapeLooksBlocked(scrape);
+            } catch (e) {
+              console.warn(`importProductsFromUrls: stealth retry failed for ${url}`, e);
+            }
+          }
 
-          if (looksLikeChallengePage(rawHtml, rawMarkdown, pageTitle ?? "")) {
+          if (inspected.blocked) {
             return {
               url,
               ok: false,
               error:
-                "Strona zablokowana przez zabezpieczenia antybotowe (reCAPTCHA/Cloudflare). Spróbuj innego linku lub uruchom import ponownie.",
+                "Strona zablokowana przez zabezpieczenia antybotowe (reCAPTCHA/Cloudflare). Spróbowaliśmy trybu stealth — bez skutku. Spróbuj wkleić inny link do tego samego produktu lub pobrać dane ręcznie.",
             };
           }
+
+          const { meta, rawMarkdown, rawHtml, h1Title } = inspected;
+          const pageTitle = inspected.pageTitle || null;
 
           const candidateImages = pickImagesFromScrape(scrape);
           const jsonLd = parseJsonLdProducts(rawHtml);
