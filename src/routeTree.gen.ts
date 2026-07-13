@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
 import { Route as AuthPhotoIndexRouteImport } from './routes/_auth/photo.index'
 import { Route as AuthPhotoIdRouteImport } from './routes/_auth/photo.$id'
@@ -33,6 +34,11 @@ const AuthRoute = AuthRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthProjectsIndexRoute = AuthProjectsIndexRouteImport.update({
@@ -82,6 +88,7 @@ const AuthProjectsIdProductsPidPreviewRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/share/$token': typeof ShareTokenRoute
   '/photo/$id': typeof AuthPhotoIdRoute
   '/photo/': typeof AuthPhotoIndexRoute
   '/projects/': typeof AuthProjectsIndexRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/share/$token': typeof ShareTokenRoute
   '/photo/$id': typeof AuthPhotoIdRoute
   '/photo': typeof AuthPhotoIndexRoute
   '/projects': typeof AuthProjectsIndexRoute
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
+  '/share/$token': typeof ShareTokenRoute
   '/_auth/photo/$id': typeof AuthPhotoIdRoute
   '/_auth/photo/': typeof AuthPhotoIndexRoute
   '/_auth/projects/': typeof AuthProjectsIndexRoute
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/share/$token'
     | '/photo/$id'
     | '/photo/'
     | '/projects/'
@@ -134,6 +144,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/share/$token'
     | '/photo/$id'
     | '/photo'
     | '/projects'
@@ -147,6 +158,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_auth'
     | '/login'
+    | '/share/$token'
     | '/_auth/photo/$id'
     | '/_auth/photo/'
     | '/_auth/projects/'
@@ -161,6 +173,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ShareTokenRoute: typeof ShareTokenRoute
   ApiPublicHooksProcessBulkJobsRoute: typeof ApiPublicHooksProcessBulkJobsRoute
 }
 
@@ -185,6 +198,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth/projects/': {
@@ -272,6 +292,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRouteWithChildren,
   LoginRoute: LoginRoute,
+  ShareTokenRoute: ShareTokenRoute,
   ApiPublicHooksProcessBulkJobsRoute: ApiPublicHooksProcessBulkJobsRoute,
 }
 export const routeTree = rootRouteImport
