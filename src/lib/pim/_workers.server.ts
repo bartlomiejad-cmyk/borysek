@@ -1754,7 +1754,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean")
+    .select("id, project_id, nazwa, kod, ean, raw")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -1764,47 +1764,101 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   const { data: project } = await supabaseAdmin
     .from("projects")
-    .select("blacklist")
+    .select("blacklist, strategy")
     .eq("id", product.project_id)
     .single();
   const extraBlacklist = ((project?.blacklist as string[] | null) ?? []);
+  const strategy = ((project?.strategy as QueryStrategy | null) ?? "NAZWA") as QueryStrategy;
 
-  const codePart = (product.kod ?? "").trim();
-  const eanPart = (product.ean ?? "").trim();
-  const query = [nazwa, codePart || eanPart].filter(Boolean).join(" ").trim();
+  // Producent + MPN mogą być w raw.imported_extract (import z URL) lub — dla
+  // CSV — częściowo w `source_products.kod` (kod producenta lub sklepu).
+  const rawObj = (product.raw ?? {}) as {
+    imported_extract?: {
+      producent?: string | null;
+      marka?: string | null;
+      kod_producenta?: string | null;
+    } | null;
+  };
+  const extracted = rawObj.imported_extract ?? null;
+  const producent =
+    (extracted?.producent ?? extracted?.marka ?? null)?.toString().trim() || null;
+  const mpn =
+    (extracted?.kod_producenta ?? product.kod ?? null)?.toString().trim() || null;
 
-  await emit(ctx, { level: "info", message: `🔎 ${nazwa} — szukam: "${query}"`, details: { query } });
+  const variants = buildQueryVariants(
+    { nazwa, ean: product.ean ?? null, mpn, producent },
+    strategy,
+  );
+  if (!variants.length) {
+    await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak wariantów zapytań` });
+    return;
+  }
+
+  await emit(ctx, {
+    level: "info",
+    message: `🔎 ${nazwa} — ${variants.length} wariant(ów): ${variants.map((v) => `[${v.kind}] "${v.query}"`).join(" | ")}`,
+    details: { variants },
+  });
 
   const firecrawl = new Firecrawl({ apiKey });
 
-  // 1) Search.
-  let hits: FirecrawlSearchHit[] = [];
-  try {
-    const sr = (await firecrawl.search(query, {
-      limit: 10,
-      sources: ["web"],
-      location: "Poland",
-      lang: "pl",
-      country: "pl",
-    } as never)) as unknown;
-    const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
-    hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    await emit(ctx, { level: "error", message: `❌ ${nazwa} — Firecrawl search: ${msg}` });
-    throw new Error(`Firecrawl search: ${msg}`);
+  // 1) Search per wariant.
+  const perVariantUrls: Array<{ variant: string; kind: string; urls: string[] }> = [];
+  const mergedByNorm = new Map<string, string>(); // normalized -> original URL (first-seen)
+  for (const v of variants) {
+    let hits: FirecrawlSearchHit[] = [];
+    try {
+      const sr = (await firecrawl.search(v.query, {
+        limit: 10,
+        sources: ["web"],
+        location: "Poland",
+        lang: "pl",
+        country: "pl",
+      } as never)) as unknown;
+      const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
+      hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
+      continue;
+    }
+    const urls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
+    perVariantUrls.push({ variant: v.query, kind: v.kind, urls });
+    for (const u of urls) {
+      const key = normalizeUrlForDedup(u);
+      if (!mergedByNorm.has(key)) mergedByNorm.set(key, u);
+    }
   }
 
-  const allUrls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
+  const allUrls = Array.from(mergedByNorm.values());
+  if (!allUrls.length) {
+    await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak wyników w żadnym wariancie` });
+    return;
+  }
 
-  // 2) Persist raw search result (term = product name lowercased, mirrors matching).
-  await supabaseAdmin
-    .from("search_results")
-    .insert({
+  // 2) Persist raw search result. Wstawiamy wiersz per term używany przez
+  //    matching (nazwa / ean / "nazwa ean"), wszystkie z tym samym mergem —
+  //    `query_variants` trzymamy tylko na wierszu głównym (nazwa) dla debug.
+  const rowsToInsert: Array<Record<string, unknown>> = [];
+  const seenTerms = new Set<string>();
+  const pushTerm = (term: string, withVariants: boolean) => {
+    const t = term.trim();
+    if (!t || seenTerms.has(t.toLowerCase())) return;
+    seenTerms.add(t.toLowerCase());
+    rowsToInsert.push({
       project_id: product.project_id,
-      term: nazwa,
-      organic_urls: allUrls as never,
-    } as never);
+      term: t,
+      organic_urls: allUrls,
+      query_variants: withVariants ? perVariantUrls : null,
+    });
+  };
+  // Zawsze zapisz pod nazwą (matching NAZWA/HYBRID lookup).
+  pushTerm(nazwa, true);
+  if (product.ean) pushTerm((product.ean ?? "").trim(), false);
+  if (strategy === "HYBRID" && product.ean) {
+    pushTerm(`${nazwa} ${product.ean}`, false);
+  }
+  await supabaseAdmin.from("search_results").insert(rowsToInsert as never);
 
   // 3) Filter out marketplaces / blacklist, dedup po hoście (max 1 URL/host), top 5.
   const seenHosts = new Set<string>();
