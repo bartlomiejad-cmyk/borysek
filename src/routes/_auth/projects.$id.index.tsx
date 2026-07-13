@@ -1166,6 +1166,7 @@ function SettingsCard({
     ean_column?: string;
     name_column?: string;
     id_column?: string;
+    settings?: Record<string, unknown> | null;
   };
   onSave: (p: {
     name?: string;
@@ -1177,6 +1178,7 @@ function SettingsCard({
     ean_column?: string;
     name_column?: string;
     id_column?: string;
+    settings?: Record<string, unknown>;
   }) => Promise<void>;
   mediaSettings?: MediaSettings;
   onSaveMedia: (p: Omit<MediaSettings, never>) => Promise<void>;
@@ -1192,6 +1194,15 @@ function SettingsCard({
   const [nameCol, setNameCol] = useState(project?.name_column ?? "");
   const [codeCol, setCodeCol] = useState(project?.code_column ?? "");
   const [eanCol, setEanCol] = useState(project?.ean_column ?? "");
+  const initialTrusted = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const td = (s as Record<string, unknown>).trusted_domains;
+      if (Array.isArray(td)) return td.filter((x): x is string => typeof x === "string").join("\n");
+    }
+    return "";
+  })();
+  const [trustedDomains, setTrustedDomains] = useState(initialTrusted);
 
   // Media (AI images) settings.
   const [compA, setCompA] = useState(mediaSettings?.component_a ?? "");
@@ -1257,6 +1268,18 @@ function SettingsCard({
             placeholder={"kaliber.pl\nstrefacelu\nkup teraz\ngwarancja 24m"}
           />
         </div>
+        <div>
+          <Label>Zaufane domeny (jedna na linię)</Label>
+          <p className="text-xs text-muted-foreground mb-1">
+            Źródła z tych domen otrzymają bonus +4 do scoringu (np. oficjalny dystrybutor).
+          </p>
+          <Textarea
+            value={trustedDomains}
+            onChange={(e) => setTrustedDomains(e.target.value)}
+            rows={4}
+            placeholder={"producent.pl\ndystrybutor.eu"}
+          />
+        </div>
         <Button
           onClick={() =>
             onSave({
@@ -1269,6 +1292,13 @@ function SettingsCard({
               name_column: nameCol.trim(),
               code_column: codeCol.trim(),
               ean_column: eanCol.trim(),
+              settings: {
+                ...((project?.settings && typeof project.settings === "object") ? (project.settings as Record<string, unknown>) : {}),
+                trusted_domains: trustedDomains
+                  .split("\n")
+                  .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
+                  .filter(Boolean),
+              },
             })
           }
         >
