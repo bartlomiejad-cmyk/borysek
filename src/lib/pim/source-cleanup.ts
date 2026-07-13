@@ -260,7 +260,7 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
 ];
 
 const DESC_CUT_HEADINGS: RegExp[] = [
-  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?|masz pytanie|menu)\b/i,
+  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?|masz pytanie|menu|[łl]atwy zwrot(?:\s+towaru)?|kup na raty|przydatne akcesoria|opinie u[żz]ytkownik[óo]w)\b/i,
   // Bloki nagłówka sklepowego czasem lądują w markdown jako pogrubienie: **Masz pytanie ?**
   /^\s*\*\*\s*(masz pytanie|zadzwo[nń]|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?)\b/i,
 ];
