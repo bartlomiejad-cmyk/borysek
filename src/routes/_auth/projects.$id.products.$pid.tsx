@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
+import { getProductDetail, updateGoldenRecord, setImageManualKeep } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
@@ -66,6 +66,7 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
