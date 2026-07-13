@@ -394,12 +394,14 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
 
           // Enrich the product name with brand + manufacturer code so Google
           // discovery has strong, unambiguous keywords to work with.
+          const nameCandidates = [
+            extracted.nazwa.trim(),
+            hints.name.trim(),
+            pageTitle ?? "",
+            h1Title,
+          ];
           const rawNazwa =
-            extracted.nazwa.trim() ||
-            hints.name.trim() ||
-            (pageTitle ?? "") ||
-            h1Title ||
-            "";
+            nameCandidates.find((c) => c && !isJunkName(c)) ?? "";
           const marka = (extracted.marka || extracted.producent || hints.brand || "").trim();
           const mpn = (extracted.kod_producenta || hints.mpn || "").trim();
           const lowerName = rawNazwa.toLowerCase();
@@ -408,7 +410,7 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           parts.push(rawNazwa);
           if (mpn && !lowerName.includes(mpn.toLowerCase())) parts.push(mpn);
           const nazwa = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-          if (!nazwa) {
+          if (!nazwa || isJunkName(nazwa)) {
             const hint = !h1Title && !pageTitle
               ? "Strona nie zawiera nagłówka H1 ani <title> — sprawdź, czy link prowadzi do konkretnego produktu, a nie do listingu/kategorii."
               : "Nie udało się wykryć nazwy produktu (AI zwróciło pustą nazwę, brak JSON-LD Product).";
