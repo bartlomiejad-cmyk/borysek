@@ -1016,15 +1016,39 @@ function upgradeToLargeImageUrl(input: string): string {
   u = u.replace(/-\d{2,4}x\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // PrestaShop: -home_default / -cart_default / -small_default / -medium_default → -large_default
   u = u.replace(/-(?:home|cart|small|medium|thickbox|category|product)_default\./i, "-large_default.");
+  // PrestaShop bez _default: -small / -cart / -home / -thickbox przed rozszerzeniem.
+  u = u.replace(/-(?:home|cart|small|medium|thickbox|category)(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // Shopify CDN: _small / _compact / _medium / _large / _grande / _100x / _240x → _2048x.
   u = u.replace(/_(?:pico|icon|thumb|small|compact|medium|large|grande)(\.|@)/i, "_2048x$1");
   u = u.replace(/_\d{1,4}x(?:\d{1,4})?(\.(?:jpe?g|png|webp|avif))/i, "_2048x$1");
+  // Ogólny sufiks rozmiaru przed rozszerzeniem: -thumb / -thumbnail / -mini / -tiny / -xs / -preview / -small.
+  u = u.replace(/[-_](?:thumb(?:nail)?|mini|tiny|xs|xxs|preview|small)(\.(?:jpe?g|png|webp|avif))/i, "$1");
+  // IdoSell v2: nazwapliku-1_360.jpg / _100.jpg → nazwapliku-1.jpg.
+  u = u.replace(/(-\d+)_\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1$2");
+  u = u.replace(/_\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // Magento: /cache/<hash>/small_image/<W>x<H>/ lub /thumbnail/ — wytnij cały segment /cache/.../  i typ rozmiaru.
   u = u.replace(/\/cache\/[a-f0-9]+\/(?:small_image|thumbnail|image)\/\d+x\d+\//i, "/");
   u = u.replace(/\/cache\/[a-f0-9]+\//i, "/");
   // IdoSell / Shoper: /small/ /s/ /m/ /thumb/ → /source/ lub /big/.
   u = u.replace(/\/(?:small|thumb|thumbs|thumbnails|mini)\//i, "/source/");
   u = u.replace(/\/(s|m)\/(\d)/i, "/source/$2");
+  // Ogólne segmenty rozmiaru w ścieżce → usuń.
+  u = u.replace(/\/(?:thumbnail|thumbnails|thumbs|tiny|preview|resized|scaled|xs|xxs|mini|miniatures|miniatury|w\d{2,4}|h\d{2,4})\//gi, "/");
+  // Cloudinary: /upload/w_200,h_200,c_fill/ → /upload/.
+  u = u.replace(/\/upload\/(?:[a-z]_[^/,]+,?)+\//i, "/upload/");
+  // Query-size params: w/width/h/height/size/maxw/maxh/imwidth/imheight — usuń.
+  try {
+    const parsed = new URL(u);
+    const drop = ["w", "width", "h", "height", "size", "maxw", "maxh", "imwidth", "imheight", "fit", "resize"];
+    let mutated = false;
+    for (const k of drop) {
+      if (parsed.searchParams.has(k)) {
+        parsed.searchParams.delete(k);
+        mutated = true;
+      }
+    }
+    if (mutated) u = parsed.toString();
+  } catch { /* keep u */ }
   // Google CDN size hint: =s100 / =w200-h200 → =s2048.
   u = u.replace(/=(?:s|w|h)\d{1,4}(-(?:w|h|s)\d{1,4})*([?&]|$)/i, "=s2048$2");
   return u;
@@ -1174,7 +1198,9 @@ export function pickImagesFromScrape(res: unknown): string[] {
   const seen = new Set<string>();
   const push = (raw: unknown) => {
     if (typeof raw !== "string") return;
-    const t = upgradeToLargeImageUrl(raw.trim());
+    // Dwukrotny upgrade — czasem pierwsze przejście odsłania kolejny wzorzec.
+    let t = upgradeToLargeImageUrl(raw.trim());
+    t = upgradeToLargeImageUrl(t);
     if (!t || !/^https?:\/\//i.test(t)) return;
     if (seen.has(t)) return;
     const minDim = inferMinDimensionFromUrl(t);
@@ -1198,15 +1224,19 @@ export function pickImagesFromScrape(res: unknown): string[] {
     const dataAttrs = [
       "data-zoom-image", "data-large", "data-large_image", "data-src-large",
       "data-image", "data-full", "data-original", "data-big", "data-hires",
-      "data-zoom", "data-zoom-src",
+      "data-zoom", "data-zoom-src", "data-lazy-src", "data-lazy",
+      "data-flickity-lazyload", "data-flickity-lazyload-src",
+      "data-thumb-large", "data-photoswipe-src", "data-fancybox-href",
+      "data-mfp-src", "data-image-large", "data-image-src", "data-hires-src",
+      "data-src",
     ];
     for (const attr of dataAttrs) {
       const re = new RegExp(`<img\\b[^>]*\\b${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
       for (let m: RegExpExecArray | null; (m = re.exec(html)); ) push(m[1]);
     }
 
-    // 3) srcset — bierz największy wariant.
-    const srcsetRe = /<(?:img|source)\b[^>]*\bsrcset\s*=\s*["']([^"']+)["']/gi;
+    // 3) srcset (także data-srcset) — bierz największy wariant.
+    const srcsetRe = /<(?:img|source)\b[^>]*\b(?:data-)?srcset\s*=\s*["']([^"']+)["']/gi;
     for (let m: RegExpExecArray | null; (m = srcsetRe.exec(html)); ) {
       const list = m[1].split(",").map((s) => s.trim()).filter(Boolean);
       let bestUrl: string | null = null;
@@ -1229,6 +1259,50 @@ export function pickImagesFromScrape(res: unknown): string[] {
       const src = m[1];
       if (looksLikeProductPath(src)) push(src);
     }
+
+    // 5) <link rel="preload" as="image" href="...">
+    const preloadRe = /<link\b[^>]*\brel\s*=\s*["']preload["'][^>]*\bas\s*=\s*["']image["'][^>]*\bhref\s*=\s*["']([^"']+)["']/gi;
+    for (let m: RegExpExecArray | null; (m = preloadRe.exec(html)); ) push(m[1]);
+    const preloadRe2 = /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["']preload["'][^>]*\bas\s*=\s*["']image["']/gi;
+    for (let m: RegExpExecArray | null; (m = preloadRe2.exec(html)); ) push(m[1]);
+
+    // 6) JSON-LD: <script type="application/ld+json">…</script> — pole "image".
+    const jsonLdRe = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    for (let m: RegExpExecArray | null; (m = jsonLdRe.exec(html)); ) {
+      const body = m[1].trim();
+      if (!body) continue;
+      try {
+        const parsed = JSON.parse(body);
+        const stack: unknown[] = [parsed];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node) continue;
+          if (Array.isArray(node)) { for (const it of node) stack.push(it); continue; }
+          if (typeof node !== "object") continue;
+          const obj = node as Record<string, unknown>;
+          const img = obj.image ?? obj.contentUrl;
+          if (typeof img === "string") push(img);
+          else if (Array.isArray(img)) {
+            for (const it of img) {
+              if (typeof it === "string") push(it);
+              else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+            }
+          } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
+            push((img as { url: string }).url);
+          }
+          for (const v of Object.values(obj)) {
+            if (v && (Array.isArray(v) || typeof v === "object")) stack.push(v);
+          }
+        }
+      } catch { /* skip malformed JSON-LD */ }
+    }
+  }
+
+  // 7) metadata.ogImage / metadata["og:image"] — pełny obraz udostępniania.
+  const meta = r.metadata as Record<string, unknown> | undefined;
+  if (meta) {
+    const cand = [meta.ogImage, meta["og:image"], meta.twitterImage, meta["twitter:image"]];
+    for (const c of cand) if (typeof c === "string") push(c);
   }
 
   return filterImageUrls(out).slice(0, 12);
