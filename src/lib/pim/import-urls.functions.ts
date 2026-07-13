@@ -150,6 +150,52 @@ function jsonLdHints(products: Array<Record<string, unknown>>): {
   };
 }
 
+function stripTags(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractH1(rawHtml: string): string {
+  if (!rawHtml) return "";
+  const m = rawHtml.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+  if (!m) return "";
+  return stripTags(m[1]);
+}
+
+function extractHtmlTitle(rawHtml: string): string {
+  if (!rawHtml) return "";
+  const m = rawHtml.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m) return "";
+  return stripTags(m[1]);
+}
+
+function extractPageTitle(
+  meta: Record<string, unknown>,
+  rawHtml: string,
+): string {
+  const candidates = [
+    meta.title,
+    meta.ogTitle,
+    (meta as Record<string, unknown>)["og:title"],
+    meta.twitterTitle,
+    (meta as Record<string, unknown>)["twitter:title"],
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return extractHtmlTitle(rawHtml);
+}
+
 export const importProductsFromUrls = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) =>
@@ -187,10 +233,6 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           } as never)) as Record<string, unknown>;
 
           const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
-          const pageTitle =
-            (meta.title as string | undefined) ??
-            (meta.ogTitle as string | undefined) ??
-            null;
           const rawMarkdown =
             typeof scrape.markdown === "string" ? scrape.markdown : "";
           const rawHtml =
@@ -199,6 +241,8 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
               : typeof scrape.html === "string"
                 ? (scrape.html as string)
                 : "";
+          const pageTitle = extractPageTitle(meta, rawHtml) || null;
+          const h1Title = extractH1(rawHtml);
 
           const candidateImages = pickImagesFromScrape(scrape);
           const jsonLd = parseJsonLdProducts(rawHtml);
@@ -280,7 +324,12 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
 
           // Enrich the product name with brand + manufacturer code so Google
           // discovery has strong, unambiguous keywords to work with.
-          const rawNazwa = extracted.nazwa.trim() || hints.name.trim() || pageTitle || "";
+          const rawNazwa =
+            extracted.nazwa.trim() ||
+            hints.name.trim() ||
+            (pageTitle ?? "") ||
+            h1Title ||
+            "";
           const marka = (extracted.marka || extracted.producent || hints.brand || "").trim();
           const mpn = (extracted.kod_producenta || hints.mpn || "").trim();
           const lowerName = rawNazwa.toLowerCase();
@@ -290,7 +339,10 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           if (mpn && !lowerName.includes(mpn.toLowerCase())) parts.push(mpn);
           const nazwa = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
           if (!nazwa) {
-            return { url, ok: false, error: "Nie udało się wykryć nazwy produktu" };
+            const hint = !h1Title && !pageTitle
+              ? "Strona nie zawiera nagłówka H1 ani <title> — sprawdź, czy link prowadzi do konkretnego produktu, a nie do listingu/kategorii."
+              : "Nie udało się wykryć nazwy produktu (AI zwróciło pustą nazwę, brak JSON-LD Product).";
+            return { url, ok: false, error: hint };
           }
 
           const imageUrls = filterImageUrls(
