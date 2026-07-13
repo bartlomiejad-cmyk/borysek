@@ -271,7 +271,9 @@ function ProjectPage() {
               ? "Wyszukiwanie źródeł (Firecrawl)"
               : job.kind === "PIM_ALLEGRO_DESCRIPTION"
                 ? "Opisy Allegro"
-                : "Wizualizacje produktowe";
+                : job.kind === "PIM_RESCRAPE"
+                  ? "Doscrapowanie źródeł"
+                  : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
