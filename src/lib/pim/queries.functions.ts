@@ -204,6 +204,9 @@ export const getProductDetail = createServerFn({ method: "GET" })
       });
     }
     const image_scores = ((enrichment as unknown as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; identity?: "same" | "different" | "unsure"; manual_keep?: boolean; scored_at?: string }> } | null)?.image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; identity?: "same" | "different" | "unsure"; manual_keep?: boolean; scored_at?: string }>;
+    const rejected_identity_images = Object.entries(image_scores)
+      .filter(([, s]) => s?.identity === "different" && s?.manual_keep !== true)
+      .map(([u]) => u);
     return {
       product,
       enrichment,
@@ -212,6 +215,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       include_extra_images: includeExtra,
       image_meta: meta,
       image_scores,
+      rejected_identity_images,
       pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
     };
   });
