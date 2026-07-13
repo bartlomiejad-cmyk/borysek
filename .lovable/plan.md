@@ -1,65 +1,98 @@
-# Analiza zdjęć produktu przez AI (Gemini) → prompt stylu i wymagań
-
 ## Cel
 
-Zanim uruchomimy regenerację miniatury lub wygenerujemy wizualizacje, AI (Gemini multimodalny) przegląda zdjęcia źródłowe produktu i pisze spersonalizowany prompt: styl/scenę oraz wymagania techniczne. Użytkownik widzi wynik w polu tekstowym i może go edytować przed uruchomieniem generacji.
+Właściciel projektu może wygenerować **publiczny link z hasłem** do listy wszystkich produktów w projekcie. Klient bez logowania:
+- odblokowuje stronę hasłem,
+- widzi listę produktów z danymi ze złotego rekordu (bez menu bocznego, bez UI narzędzia),
+- może rozwinąć produkt inline (szybki podgląd) lub otworzyć pełną kartę produktu (`/preview`),
+- dodaje komentarz ogólny do projektu lub komentarz do pojedynczego produktu,
+- flaguje produkt jako „do poprawy".
 
-## Model
+Właściciel widzi komentarze i flagi w edytorze produktu i w liście projektu.
 
-`google/gemini-2.5-pro` przez Lovable AI Gateway (obsługuje wejście `image_url`, chat completions). Fallback: `google/gemini-3-flash-preview` przy timeoutach.
+## Backend (Lovable Cloud)
 
-## Backend
+### Migracja — nowe tabele
 
-Nowa funkcja RPC w `src/lib/pim/ai.functions.ts`:
+- `project_shares` — jeden aktywny link per projekt (można rotować):
+  - `project_id`, `token` (unikalne, losowe 32B hex), `password_hash` (sha256 hasła + salt), `salt`, `is_active`, `created_by`.
+- `client_feedback` — komentarze i flagi:
+  - `project_id`, `product_id` (nullable — NULL = komentarz ogólny do projektu),
+  - `kind` (`comment` | `needs_fix`),
+  - `body` (text, max 2000),
+  - `author_name` (opcjonalne, wpisywane w formularzu, max 80),
+  - `share_token` (do audytu),
+  - `resolved` (bool, default false — właściciel odhacza).
 
-```
-analyzeProductImagesForPrompt({ productId, mode })
-  mode: "thumbnail" | "visualization"
-```
+RLS:
+- `project_shares`: SELECT/INSERT/UPDATE tylko właściciel projektu (`projects.user_id = auth.uid()`). Brak dostępu dla `anon`.
+- `client_feedback`: SELECT/UPDATE tylko właściciel. **Insert wykonuje serwer** (server function pod publiczną trasą), więc RLS bez policy dla anon; write przez `supabaseAdmin` po weryfikacji tokenu+hasła.
 
-Kroki handlera (z `requireSupabaseAuth`):
-1. Pobiera `source_products` + `enrichments` (nazwa, marka, kategoria, cechy, `image_urls[]`).
-2. Wybiera max 4 najlepsze zdjęcia (pierwsze niepuste, deduplikacja).
-3. Buduje wiadomość multimodalną: system prompt zależny od `mode` + user content `[text, image_url, image_url, ...]` (schemat z `ai-multimodal-input`).
-4. Wywołuje `POST https://ai.gateway.lovable.dev/v1/chat/completions` z `LOVABLE_API_KEY`.
-5. Wymusza JSON: `{ style: string, requirements: string }`.
-6. Zwraca do klienta.
+GRANT-y dla `authenticated` i `service_role` wg zasad public schema.
 
-System prompty:
-- **thumbnail** — AI opisuje co widzi (kolor produktu, materiał, kształt, orientacja), pisze wymagania „zachowaj ten dokładnie ten kolor/materiał/logo, tło #FFFFFF, kąt ~45°" — dopasowane do konkretnego produktu.
-- **visualization** — AI proponuje scenę pasującą do kategorii/charakteru produktu (np. „notebook na drewnianym biurku w biurze przy oknie") + wymagania (spójność logo, proporcje, oświetlenie).
+### Publiczne endpointy w `src/routes/api/public/share/`
+
+- `POST /api/public/share/unlock` — `{ token, password }` → weryfikuje hash, ustawia szyfrowany cookie sesyjny (`useSession`, `SESSION_SECRET`) z `{ token, unlockedAt }`. Rate-limit prosty w pamięci per token.
+- `GET /api/public/share/list` — cookie musi mieć aktywny token; zwraca listę produktów projektu (nazwa, miniatura, złote SEO, opis HTML, cechy, galeria AI, licznik komentarzy, flaga „do poprawy").
+- `GET /api/public/share/product/:pid` — pełne dane jednego produktu do widoku karty.
+- `POST /api/public/share/feedback` — `{ productId|null, kind, body, authorName? }` z walidacją Zod; zapis przez `supabaseAdmin`.
+
+Sekrety: `SESSION_SECRET` (generate_secret, 64 znaki) — dodać jeżeli nie ma. Hasło do udostępniania NIE trafia do env — jest per projekt, hashowane w DB.
+
+### Server functions dla właściciela (`src/lib/pim/shares.functions.ts`)
+
+- `createOrRotateShare({ projectId, password })` — hashuje hasło (sha256 + random salt), upsertuje `project_shares`, zwraca `{ token, url }`.
+- `revokeShare({ projectId })` — `is_active=false`.
+- `listFeedback({ projectId })` — komentarze + flagi z produktami.
+- `resolveFeedback({ id, resolved })`.
 
 ## Frontend
 
-### 1. Dialog „Generuj wizualizacje" (`GenerateVisualizationsDialog.tsx`)
+### Panel właściciela
 
-Obok istniejącego przycisku „✨ Zaproponuj AI" (tekstowy, na bazie samej nazwy) dodać drugi przycisk **„🔍 Analizuj zdjęcia"** przy każdym z pól Styl/scena i Wymagania. Klik:
-- Wywołuje `analyzeProductImagesForPrompt({ productId, mode: "visualization" })` dla pierwszego zaznaczonego produktu.
-- Wynik `style` wstawia do pola Styl, `requirements` do pola Wymagania.
-- Loading state, disabled gdy brak zaznaczonych produktów lub brak zdjęć.
+- **`src/routes/_auth/projects.$id.index.tsx`**:
+  - Nowy kafelek/przycisk **„Udostępnij klientowi"** → dialog `ShareProjectDialog.tsx`:
+    - Pole hasła + generator, przycisk „Utwórz link" / „Rotuj hasło", kopiowanie URL, przycisk „Wyłącz link".
+  - Odznaka z liczbą nieprzeczytanych komentarzy / flag „do poprawy" przy produktach na liście (dot koło nazwy).
+  - Sekcja „Komentarze klienta" (rozwijana) — lista z filtrem `nierozwiązane`, klik → edytor produktu; komentarze ogólne wyświetlone osobno.
 
-Toast informacyjny gdy produkt nie ma zdjęć źródłowych.
+- **`src/routes/_auth/projects.$id.products.$pid.tsx`**:
+  - Panel „Komentarze klienta" z listą wpisów, badge „do poprawy", przycisk „Oznacz jako rozwiązane".
 
-### 2. Edytor produktu (`projects.$id.products.$pid.tsx`) — sekcja miniatury
+### Widok klienta (publiczny, bez `_auth`)
 
-W sekcji regeneracji miniatury dodać przycisk **„🔍 Analizuj zdjęcia i zaproponuj prompt"** obok istniejących kontrolek stylu. Klik:
-- Wywołuje `analyzeProductImagesForPrompt({ productId, mode: "thumbnail" })`.
-- Otwiera modal/rozwija panel z polami `style` i `requirements` do edycji.
-- Po akceptacji: przekazuje jako parametry do `regenerateMainImage` (rozszerzenie sygnatury o opcjonalne `customStyle`, `customRequirements`).
+Nowe pliki pod `src/routes/share.$token.tsx` i `src/routes/share.$token.unlock.tsx` — poza layoutem `_auth`, bez sidebaru narzędzia. Własny minimalny layout (logo klienta lub neutralny nagłówek + stopka).
 
-`regenerateMainImage` w `src/lib/pim/regen.functions.ts` przyjmuje opcjonalne pola i doklejają je do promptu FAL (przed twardymi ogranicznikami tła #FFFFFF/zakazu zmiany koloru — te zostają nienaruszone jako priorytet).
+- **`/share/$token/unlock`** — formularz hasła; POST do `/api/public/share/unlock`; po sukcesie redirect na `/share/$token`.
+- **`/share/$token`** — `beforeLoad` waliduje cookie sesji przez server fn; jeśli brak → redirect na unlock. Loader pobiera listę produktów.
+  - **Widok**: lista kart produktów; każda karta rozwija się **inline** (accordion) i pokazuje: galerię AI, opis HTML, cechy, SEO, przycisk „Otwórz pełną kartę" (link do `/share/$token/p/$pid`).
+  - Nad listą pole „Komentarz ogólny do projektu" + lista dotychczasowych ogólnych komentarzy klienta.
+  - Pod każdą kartą: pole komentarza + toggle „Do poprawy" (checkbox) + opcjonalne imię; „Wyślij".
+- **`/share/$token/p/$pid`** — pełna karta produktu (kopia layoutu `_preview` bez toolingu Lovable) z panelem komentarzy z boku i toggle „Do poprawy".
 
-## Ograniczenia / bezpieczeństwo
+Brak nawigacji do reszty aplikacji, brak linków do logowania. `robots: noindex` w head każdej trasy share.
 
-- Max 4 zdjęcia × ~1 MB base64 lub podanie jako URL (jeśli publiczne w storage). Preferuj URL — mniejszy payload.
-- Timeout 30s (limit Cloudflare Worker). Obsłużyć błędy `402` (kredyty) i `429` (rate limit) toastem.
-- Zachowaj istniejące twarde zabezpieczenia w promptach regeneracji (tło #FFFFFF, zakaz zmiany koloru produktu) — AI-generated `requirements` jest dodatkiem, nie zastępuje.
+## Bezpieczeństwo
 
-## Pliki do zmiany
+- Hasło porównywane server-side timing-safe (sha256+salt, `timingSafeEqual`).
+- Cookie `httpOnly`, `secure`, `sameSite=lax`, TTL 7 dni; scope per token (`{ token, unlockedAt }`).
+- Rate-limit unlock: max 10 prób / 10 min per token (in-memory Map w workerze — best effort).
+- `client_feedback.body` sanitizowane przez limit długości + escape HTML przy renderze (bez `dangerouslySetInnerHTML` dla treści klienta).
+- Rotacja hasła unieważnia cookie (token się nie zmienia, ale zmiana `password_hash` → `unlock` znów wymagany; cookie waliduje `unlockedAt >= password_updated_at`).
+- Publiczne endpointy zwracają wyłącznie pola przeznaczone dla klienta (bez `user_id`, bez pól administracyjnych).
 
-- `src/lib/pim/ai.functions.ts` — nowa funkcja `analyzeProductImagesForPrompt`.
-- `src/lib/pim/regen.functions.ts` — rozszerzenie sygnatury o `customStyle`/`customRequirements`.
-- `src/components/pim/GenerateVisualizationsDialog.tsx` — przyciski „🔍 Analizuj zdjęcia" przy dwóch polach.
-- `src/routes/_auth/projects.$id.products.$pid.tsx` — przycisk + panel edycji promptu w sekcji miniatury.
+## Pliki do dodania / edycji
 
-Bez zmian w schemacie DB, bez nowych migracji.
+Nowe:
+- Migracja: `project_shares`, `client_feedback` + GRANT + RLS.
+- `src/lib/pim/shares.functions.ts` (owner RPC).
+- `src/routes/api/public/share/unlock.ts`, `list.ts`, `product.$pid.ts`, `feedback.ts`.
+- `src/routes/share.$token.unlock.tsx`, `src/routes/share.$token.tsx`, `src/routes/share.$token.p.$pid.tsx`.
+- `src/components/pim/ShareProjectDialog.tsx`, `src/components/share/ClientFeedbackForm.tsx`, `src/components/share/ProductAccordionCard.tsx`.
+
+Edycje:
+- `src/routes/_auth/projects.$id.index.tsx` — kafelek udostępniania + panel feedbacku + odznaki na liście.
+- `src/routes/_auth/projects.$id.products.$pid.tsx` — sekcja komentarzy klienta + oznaczanie jako rozwiązane.
+
+Sekret: `SESSION_SECRET` (generate_secret).
+
+Bez zmian w edytorze produktu poza dodaniem panelu komentarzy; layout `/preview` pozostaje jak jest (klient używa równoległej trasy `/share/$token/p/$pid`, żeby nie widzieć środowiska aplikacji).
