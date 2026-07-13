@@ -1,7 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { randomBytes, pbkdf2Sync, createHmac, timingSafeEqual } from "node:crypto";
+
+// UWAGA: node:crypto NIE MOŻE być importowane na top-level tego pliku,
+// bo `.functions.ts` jest w grafie klienta. Ładujemy helpery dynamicznie
+// wewnątrz `.handler()` przez `@/lib/pim/shares-crypto.server`.
 
 export type SharePublicEnrichment = {
   golden_name: string | null;
@@ -26,45 +29,6 @@ export type SharePublicProduct = {
   feedback: { comments: number; fixes: number };
 };
 
-// -------- helpers (server-only) --------
-
-function hashPassword(password: string, salt: string): string {
-  return pbkdf2Sync(password, salt, 120_000, 32, "sha256").toString("hex");
-}
-
-function genToken(): string {
-  return randomBytes(18).toString("base64url");
-}
-
-function signSession(token: string, passwordUpdatedAt: string): string {
-  const secret = process.env.SHARE_SESSION_SECRET!;
-  const issuedAt = Date.now();
-  const payload = `${token}.${passwordUpdatedAt}.${issuedAt}`;
-  const sig = createHmac("sha256", secret).update(payload).digest("base64url");
-  return `${issuedAt}.${sig}`;
-}
-
-export function verifySession(
-  session: string,
-  token: string,
-  passwordUpdatedAt: string,
-  maxAgeMs = 1000 * 60 * 60 * 24 * 30, // 30 dni
-): boolean {
-  const secret = process.env.SHARE_SESSION_SECRET!;
-  const [issuedAtRaw, sig] = session.split(".");
-  if (!issuedAtRaw || !sig) return false;
-  const issuedAt = Number(issuedAtRaw);
-  if (!Number.isFinite(issuedAt)) return false;
-  if (Date.now() - issuedAt > maxAgeMs) return false;
-  const expected = createHmac("sha256", secret)
-    .update(`${token}.${passwordUpdatedAt}.${issuedAt}`)
-    .digest("base64url");
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
 // -------- OWNER: create / rotate / revoke --------
 
 export const upsertProjectShare = createServerFn({ method: "POST" })
@@ -88,7 +52,8 @@ export const upsertProjectShare = createServerFn({ method: "POST" })
       .maybeSingle();
     if (pe || !proj) throw new Error("Nie masz dostępu do tego projektu");
 
-    const salt = randomBytes(16).toString("hex");
+    const { hashPassword, genToken, genSalt } = await import("@/lib/pim/shares-crypto.server");
+    const salt = genSalt();
     const password_hash = hashPassword(data.password, salt);
 
     const { data: existing } = await supabase
@@ -238,9 +203,8 @@ export const unlockShare = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const share = await loadShareForPublic(data.token);
     if (!share || !share.is_active) throw new Error("Link jest nieaktywny lub nie istnieje");
-    const expected = Buffer.from(share.password_hash, "hex");
-    const attempt = Buffer.from(hashPassword(data.password, share.salt), "hex");
-    if (expected.length !== attempt.length || !timingSafeEqual(expected, attempt)) {
+    const { passwordsMatch, signSession } = await import("@/lib/pim/shares-crypto.server");
+    if (!passwordsMatch(data.password, share.salt, share.password_hash)) {
       throw new Error("Nieprawidłowe hasło");
     }
     const session = signSession(share.token, share.password_updated_at);
@@ -259,6 +223,7 @@ export const unlockShare = createServerFn({ method: "POST" })
 async function requirePublicSession(token: string, session: string) {
   const share = await loadShareForPublic(token);
   if (!share || !share.is_active) throw new Error("Link nieaktywny");
+  const { verifySession } = await import("@/lib/pim/shares-crypto.server");
   if (!verifySession(session, share.token, share.password_updated_at)) {
     throw new Error("Sesja wygasła — zaloguj się ponownie");
   }
