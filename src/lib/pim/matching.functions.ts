@@ -35,6 +35,67 @@ type ScoreResult = {
   trusted_boost: boolean;
 };
 
+type ValidationResult = {
+  keep: Set<string>;
+  clustersByUrl: Map<string, string>;
+  ok: boolean;
+};
+
+type BreakdownEntry = {
+  url: string;
+  total: number;
+  producer_boost: boolean;
+  trusted_boost: boolean;
+  variant_key: string | null;
+  deduped: boolean;
+};
+
+/**
+ * Given a set of URLs allowed to be picked, apply variant-cluster dedup.
+ * Within each cluster keep only the best URL (score, then cleaning confidence,
+ * then description length). Returns dedup outcome per URL.
+ */
+function applyClusterDedup(
+  urls: string[],
+  scoreByUrl: Map<string, number>,
+  clustersByUrl: Map<string, string>,
+  confidenceByUrl: Map<string, number | null>,
+  descLenByUrl: Map<string, number>,
+): { keptUrls: Set<string>; deduped: Set<string>; keyByUrl: Map<string, string | null> } {
+  const buckets = new Map<string, string[]>();
+  const keyByUrl = new Map<string, string | null>();
+  const unclustered: string[] = [];
+  for (const u of urls) {
+    const k = clustersByUrl.get(u);
+    if (!k) {
+      keyByUrl.set(u, null);
+      unclustered.push(u);
+      continue;
+    }
+    keyByUrl.set(u, k);
+    const arr = buckets.get(k) ?? [];
+    arr.push(u);
+    buckets.set(k, arr);
+  }
+  const keptUrls = new Set<string>(unclustered);
+  const deduped = new Set<string>();
+  for (const [, arr] of buckets) {
+    if (arr.length === 1) { keptUrls.add(arr[0]); continue; }
+    const winner = arr.slice().sort((a, b) => {
+      const sa = scoreByUrl.get(a) ?? 0;
+      const sb = scoreByUrl.get(b) ?? 0;
+      if (sb !== sa) return sb - sa;
+      const ca = confidenceByUrl.get(a) ?? -1;
+      const cb = confidenceByUrl.get(b) ?? -1;
+      if ((cb ?? -1) !== (ca ?? -1)) return (cb ?? -1) - (ca ?? -1);
+      return (descLenByUrl.get(b) ?? 0) - (descLenByUrl.get(a) ?? 0);
+    })[0];
+    keptUrls.add(winner);
+    for (const u of arr) if (u !== winner) deduped.add(u);
+  }
+  return { keptUrls, deduped, keyByUrl };
+}
+
 function scoreSource(
   meta: SourceMeta,
   product: { nazwa: string | null; ean: string | null; producer: string | null },
@@ -101,8 +162,8 @@ async function validateSourcesWithAI(
   productName: string,
   productEan: string | null,
   sources: Array<{ url: string; title: string | null; description: string | null }>,
-): Promise<Set<string>> {
-  if (!sources.length) return new Set();
+): Promise<ValidationResult> {
+  if (!sources.length) return { keep: new Set(), clustersByUrl: new Map(), ok: true };
   const blocks = sources
     .map((s, idx) => {
       const desc = (s.description ?? "").slice(0, 800);
@@ -114,7 +175,11 @@ async function validateSourcesWithAI(
     "Dla podanego PRODUKTU oraz listy ŹRÓDEŁ (stron internetowych) zdecyduj, które źródła opisują DOKŁADNIE ten sam produkt (ten sam wariant, marka, model, rozmiar/gramatura).",
     "Bardzo restrykcyjnie: jeśli marka, model lub kluczowy wariant (np. nazwa serii, granulacja, kaliber, pojemność, kolor) różni się lub brakuje w źródle — odrzuć źródło.",
     "Brak frazy z nazwy produktu (np. nazwa marki) w tytule/URL/opisie źródła = źródło NIE pasuje.",
-    "Zwróć JSON: {\"keep\": number[]} gdzie liczby to indeksy źródeł (1-based) które pasują. Jeśli żadne nie pasuje, zwróć {\"keep\": []}.",
+    "Następnie POGRUPUJ zaakceptowane źródła w klastry, gdzie jeden klaster = DOKŁADNIE ten sam wariant fizyczny produktu (te same rozmiar/kolor/gramatura/kaliber).",
+    "Różne rozmiary/kolory tego samego modelu = RÓŻNE klastry. Te same wariant z różnych sklepów = TEN SAM klaster.",
+    "variant_key: string w formacie \"marka|model|wariant\" małymi literami, np. \"nike|air max 90|white 42\". Gdy wariant nieznany, użyj \"-\".",
+    "Zwróć JSON: {\"keep\": number[], \"clusters\": [{\"variant_key\": string, \"indices\": number[]}]}. Indeksy 1-based. Każdy indeks z keep musi wystąpić w dokładnie jednym klastrze.",
+    "Jeśli żadne nie pasuje: {\"keep\": [], \"clusters\": []}.",
   ].join("\n");
   const user = [
     `PRODUKT: ${productName}`,
@@ -141,12 +206,12 @@ async function validateSourcesWithAI(
       }),
     });
     if (!res.ok) {
-      console.warn(`validateSourcesWithAI: gateway ${res.status}; keeping all`);
-      return new Set(sources.map((s) => s.url));
+      console.warn(`[matching] validateSourcesWithAI: gateway ${res.status}; keeping all, no clustering`);
+      return { keep: new Set(sources.map((s) => s.url)), clustersByUrl: new Map(), ok: false };
     }
     const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = j.choices?.[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(content) as { keep?: unknown };
+    const parsed = JSON.parse(content) as { keep?: unknown; clusters?: unknown };
     const idxs = Array.isArray(parsed.keep)
       ? parsed.keep.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
       : [];
@@ -155,10 +220,34 @@ async function validateSourcesWithAI(
       const s = sources[i - 1];
       if (s) kept.add(s.url);
     }
-    return kept;
+    const clustersByUrl = new Map<string, string>();
+    let clustersOk = true;
+    if (!Array.isArray(parsed.clusters)) {
+      clustersOk = false;
+    } else {
+      for (const c of parsed.clusters as unknown[]) {
+        if (!c || typeof c !== "object") { clustersOk = false; break; }
+        const cc = c as { variant_key?: unknown; indices?: unknown };
+        if (typeof cc.variant_key !== "string" || !Array.isArray(cc.indices)) {
+          clustersOk = false; break;
+        }
+        const key = (cc.variant_key as string).trim().toLowerCase();
+        if (!key) continue;
+        for (const ix of cc.indices as unknown[]) {
+          if (typeof ix !== "number") continue;
+          const s = sources[ix - 1];
+          if (s && kept.has(s.url)) clustersByUrl.set(s.url, key);
+        }
+      }
+    }
+    if (!clustersOk) {
+      console.warn("[matching] validateSourcesWithAI: clusters schema invalid; skipping dedup");
+      return { keep: kept, clustersByUrl: new Map(), ok: false };
+    }
+    return { keep: kept, clustersByUrl, ok: true };
   } catch (e) {
-    console.warn("validateSourcesWithAI failed; keeping all:", e);
-    return new Set(sources.map((s) => s.url));
+    console.warn("[matching] validateSourcesWithAI failed; keeping all, no clustering:", e);
+    return { keep: new Set(sources.map((s) => s.url)), clustersByUrl: new Map(), ok: false };
   }
 }
 
