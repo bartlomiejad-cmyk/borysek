@@ -119,6 +119,22 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
   /\[kontakt\]/i,
   /tel:\s*[+\d]/i,
   /mailto:/i,
+  // Sklepowe chrome PL — listing kafelków / kontakt / dostawa
+  /\bdo koszyka\b/i,
+  /^\s*szt\.?\s*$/i,
+  /^\s*_\s*\d{1,4}[.,]\d{2}\s*z[łl]\s*_\s*$/i,
+  /\bmasz pytanie\b/i,
+  /\bzadzwo[nń]\b/i,
+  /\bczekamy na tw[oó]j telefon\b/i,
+  /\bzam[oó]w do\b/i,
+  /\bwysy[łl]ka dzisiaj\b/i,
+  /\bdarmowa dostawa\b/i,
+  /\bgodziny otwarcia\b/i,
+  /\bdost[ęe]pno[śs][ćc]\s*:/i,
+  /\bod poniedzia[łl]ku do pi[ąa]tku\b/i,
+  /\bod\s+\d{1,2}[:.]\d{2}\s+do\s+\d{1,2}[:.]\d{2}\b/i,
+  // Marker markdown-owy listingu kafelków ([\\  ...])
+  /^\s*\[\\{2,}\s*$/,
   // angielskie chrome sklepu
   /only available in our stationary store/i,
   /stationary store/i,
@@ -192,7 +208,9 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
 ];
 
 const DESC_CUT_HEADINGS: RegExp[] = [
-  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store)\b/i,
+  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?|masz pytanie|menu)\b/i,
+  // Bloki nagłówka sklepowego czasem lądują w markdown jako pogrubienie: **Masz pytanie ?**
+  /^\s*\*\*\s*(masz pytanie|zadzwo[nń]|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?)\b/i,
 ];
 
 const PHONE_RE = /\+?\d{2,3}[ \-.]?\d{3}[ \-.]?\d{3}[ \-.]?\d{3}/g;
@@ -208,7 +226,20 @@ export function sanitizeProductDescription(input: string | null | undefined): st
   // Return policy) nie trafia nawet do sit regexowych.
   const section = extractDescriptionSection(input);
   const source = section ?? input;
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  let allLines = source.replace(/\r\n/g, "\n").split("\n");
+  // Nav-wall: okno 8 linii z >=5 czystymi markdown-linkami traktujemy jako
+  // menu/breadcrumb/listing i wycinamy cały blok linków (np. sidebar kategorii).
+  const linkOnlyRe = /^\s*-?\s*\[[^\]]+\]\(https?:[^)]+\)(?:\s*["'][^"']*["'])?\s*$/;
+  {
+    const marked = new Array<boolean>(allLines.length).fill(false);
+    for (let i = 0; i + 8 <= allLines.length; i++) {
+      let hits = 0;
+      for (let j = i; j < i + 8; j++) if (linkOnlyRe.test(allLines[j])) hits++;
+      if (hits >= 5) for (let j = i; j < i + 8; j++) marked[j] = true;
+    }
+    allLines = allLines.filter((_, i) => !marked[i]);
+  }
+  const lines = allLines;
   const kept: string[] = [];
   for (const line of lines) {
     if (DESC_CUT_HEADINGS.some((re) => re.test(line.trim()))) break;
@@ -252,5 +283,7 @@ export function sanitizeProductDescription(input: string | null | undefined): st
   out = out.replace(/^\s*[\[\]()]+\s*$/gm, "");
   out = out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   if (out.length > 3000) out = `${out.slice(0, 3000).trimEnd()}…`;
+  // Za mało treści po sanityzacji — nie zapisujemy śmieciowego "opisu".
+  if (out.replace(/[\s\W]/g, "").length < 30) return "";
   return out;
 }

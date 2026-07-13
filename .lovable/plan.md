@@ -1,31 +1,53 @@
 ## Problem
 
-W tej chwili `runMatching` (src/lib/pim/matching.functions.ts) zapisuje do `enrichments.picked_urls` **wszystkie** URL-e z `search_results.organic_urls` (10 z SERP-a), a walidacja AI odrzuca tylko te, które ewidentnie nie pasują nazwą/marką. Nie ma żadnego rankingu jakości danych — źródła bez tytułu, bez opisu i bez zdjęć zostają w produkcie na równi z pełnymi kartami produktowymi.
+W projekcie `hurtownia-format` `runFirecrawlDiscovery` zapisuje do `product_sources`:
+- opisy zawierające menu sklepu, „Nowości w ofercie", „Zamów do 14:00", „Zadzwoń!", ceny, „Do koszyka", stopkę,
+- zdjęcia innych produktów (bloki bestsellery / polecane / kategoria).
 
-Dlatego w projekcie `hurtownia-format` widzisz po 10 pustych/prawie-pustych źródeł na każdym produkcie.
+`onlyMainContent: true` w Firecrawl czasem nie odcina tego chrome. Sanitizer i AI-filter dostają cały markdown (do 3500 znaków) oraz wszystkie zdjęcia z HTML — dlatego śmieci przechodzą dalej.
 
-## Rozwiązanie: scoring + cap 5
+## Zakres
 
-Zmiana wyłącznie w `src/lib/pim/matching.functions.ts` (bez migracji, bez UI):
+Zmiany wyłącznie w:
+- `src/lib/pim/_workers.server.ts`
+- `src/lib/pim/source-cleanup.ts`
 
-1. Po pobraniu `product_sources` do `srcMap` rozszerzyć zapis o sygnały jakości: długość `description` po sanitizacji, obecność `title`, liczba `images` + `extra_images` po filtrze, oraz „ma-JSON-LD/EAN" (heurystycznie: EAN produktu występuje w tytule lub opisie).
-2. Zdefiniować `scoreSource(src, product)`:
-   - +3 gdy `description` po sanitize ≥ 200 znaków, +1 gdy 40–199, 0 gdy krócej
-   - +2 gdy `title` niepuste i zawiera min. jeden kluczowy token nazwy produktu (marka/model)
-   - +1 za każde zdjęcie do maks. +3 (`images.length + extra_images.length`)
-   - +2 gdy EAN produktu pojawia się w tytule lub opisie
-   - −5 gdy źródło jest w wewnętrznej liście „śmieciowych" (allegro-listing bez opisu, pusty rekord itd.) — praktycznie: `!title && description length < 40 && images.length === 0`
-3. Po walidacji AI (`kept`) posortować `u.picked_urls` malejąco wg score i przyciąć do **TOP 5**. Jeśli score TOP-a jest 0 lub ujemny → `status = "PENDING"`.
-4. `matched` liczyć dopiero po przycięciu (produkt bez 1+ jakościowego źródła nie jest „matched").
-5. Zachować obecne czyszczenie opisów/obrazków w `product_sources` — nie usuwamy rekordów z bazy (mogą wracać po ponownym scrape), tylko nie linkujemy ich w `picked_urls`.
+Bez migracji, bez UI, `runMatching` nie ruszamy (scoring TOP 5 już działa).
 
-Limit 5 zaszyty jako `const TOP_SOURCES_PER_PRODUCT = 5` na górze pliku — łatwo podnieść w przyszłości.
+## Plan
 
-## Uruchomienie po wdrożeniu
+### 1. Izolacja regionu produktu z rawHtml (nowa funkcja `extractProductRegionHtml`)
 
-Klient klika **Dopasuj** ponownie w projekcie `hurtownia-format` — `runMatching` przelicza `picked_urls` na podstawie już zescrapowanych `product_sources`, bez ponownego Firecrawla. Efekt: max 5 najlepszych źródeł na produkt, śmieciowe znikają.
+Wyznaczamy podzbiór HTML, który na pewno dotyczy produktu i tylko na nim pracujemy dalej:
 
-## Pytania kontrolne przed budową
+1. JSON-LD `Product` → `name` → najbliższy `<h1>`/`[itemprop=name]` z tą nazwą → przodek pasujący do `main`, `article`, `[itemtype*="Product"]`, `#product`, `.product-page`, `.product-detail`.
+2. Fallback: pierwszy `<main>`/`<article>`; potem pierwszy `[itemtype*="Product"]` / `.product`.
+3. `stripRelatedProductBlocks` rozszerzone o klasy/ID typowe dla PrestaShop/WooCommerce/IdoSell: `newest-products`, `bestsellers`, `products-list`, `products-grid`, `cross-sell`, `upsell`, `promo`, `sidebar`, `footer`, `header`, `nav`, `menu`.
+4. `pickImagesFromScrape` i AI-filter tekstowy pracują na HTML/markdown z tego regionu, nie na całej stronie.
 
-- Waga „ma zdjęcia" ma być mocniejsza (np. +5 zamiast +3)? Domyślnie waży tak samo jak długi opis.
-- Czy zamiast twardego cap-a 5 wolisz cap 5 **tylko** jeśli jest przynajmniej 5 „dobrych" (score ≥ 3), inaczej wszystkie z score > 0?
+### 2. Twardszy `sanitizeProductDescription`
+
+Nowe wpisy w `DESC_CUT_HEADINGS` i `DESC_BLOCK_PHRASES`:
+- odcięcie od pierwszego wystąpienia: `Nowości w ofercie`, `Bestsellery`, `Polecane produkty`, `Zobacz też`, `Klienci kupili`, `Zamów do`, `Wysyłka dzisiaj`, `Darmowa dostawa`, `Masz pytanie`, `Zadzwoń`, `Czekamy na`, `Godziny otwarcia`,
+- odrzucenie linii `Do koszyka`, `szt.`, kursywnych cen typu `_7,46 zł_`, markdown-linków obudowanych `\\` (listing kafelków),
+- detektor „ściany linków": jeżeli w oknie 8 linii ≥5 to `- [tekst](url)`, cały blok wypada,
+- odrzucenie nagłówków markdown zawierających breadcrumb kategorii (np. `# Worki na śmieci LDPE 35l czarne...`) gdy powtarzają tytuł produktu,
+- jeżeli po sanityzacji zostaje < 30 znaków tekstu, zwracamy `""` (worker zapisze `description = null`).
+
+### 3. Twardsza selekcja zdjęć
+
+- Kandydaty ze `pickImagesFromScrape` wyłącznie z regionu produktu.
+- Jeżeli JSON-LD `Product.image` istnieje — traktujemy je jako jedyne źródło; reszta HTML tylko jako fallback.
+- W `filterScrapedForProduct` dodajemy pass wizualny (`google/gemini-2.5-flash`, multimodal): nazwa produktu + top 8 kandydatów jako `image_url`. Wynik AND-ujemy z tekstowym filtrem. Timeout 15s, przy błędzie/braku klucza — zachowanie obecne.
+
+### 4. Diagnostyka
+
+Logi worker'a dostają: rozmiar markdown przed/po ekstrakcji regionu, długość opisu po sanityzacji, ile zdjęć odrzucił każdy krok (region → tekstowy filtr → wizualny filtr).
+
+## Uruchomienie
+
+Klient klika **Wyszukaj źródła (Firecrawl)** w projekcie `hurtownia-format` — nowe reguły działają w momencie scrape'u, więc istniejące `product_sources` trzeba pobrać ponownie. `runMatching` już poprawnie zdegraduje karty bez tytułu/opisu.
+
+## Pytanie kontrolne
+
+Czy włączyć wizualny AI-filter (Gemini vision) — +1 request na źródło, ~1–2 s każde? Domyślnie proponuję **tak**, bo tekstowy filtr sam nie odróżni szczotki od worka na śmieci widocznego w „Nowościach".

@@ -1173,6 +1173,13 @@ const RELATED_TOKENS = [
   "product-suggestions", "product_suggestions", "suggested-products",
   "polecane", "podobne", "klienci-kupili", "klienci_kupili",
   "zobacz-tez", "zobacz_tez", "wiecej-produktow",
+  "newest", "newest-products", "nowosci", "nowo-sci",
+  "bestseller", "bestsellers", "bestsellery", "top-sellers",
+  "promo", "promocja", "promocje", "promotions",
+  "products-list", "product-list", "products-grid", "product-grid",
+  "product-tiles", "products-carousel", "product-carousel",
+  "sidebar", "side-bar", "widget", "breadcrumb",
+  "category-list", "categories", "shop-menu", "menu-list",
 ];
 
 const RELATED_ATTR_RE = new RegExp(
@@ -1262,6 +1269,83 @@ function stripRelatedProductBlocks(html: string): string {
   return out;
 }
 
+// Strip whole chrome elements regardless of attrs: nav/header/footer/aside +
+// noise wrappers script/style/noscript. Balanced tag matcher.
+function stripChromeElements(html: string): string {
+  let out = html;
+  for (const tag of ["nav", "header", "footer", "aside", "script", "style", "noscript"]) {
+    const openRe = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+    let guard = 0;
+    while (guard++ < 100) {
+      openRe.lastIndex = 0;
+      const m = openRe.exec(out);
+      if (!m) break;
+      const start = m.index;
+      const openEnd = m.index + m[0].length;
+      const scanRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+      scanRe.lastIndex = openEnd;
+      let depth = 1;
+      let endIdx = -1;
+      let s: RegExpExecArray | null;
+      while ((s = scanRe.exec(out))) {
+        if (s[0][1] === "/") {
+          depth--;
+          if (depth === 0) { endIdx = s.index + s[0].length; break; }
+        } else {
+          depth++;
+        }
+        if (scanRe.lastIndex - start > 400_000) break;
+      }
+      if (endIdx < 0) { out = out.slice(0, start); break; }
+      out = out.slice(0, start) + out.slice(endIdx);
+    }
+  }
+  return out;
+}
+
+function sliceBalancedElement(html: string, startIdx: number, tag: string): string | null {
+  const openRe = new RegExp(`^<${tag}\\b[^>]*>`, "i");
+  const head = html.slice(startIdx);
+  const m = openRe.exec(head);
+  if (!m) return null;
+  const openEnd = startIdx + m[0].length;
+  const scanRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+  scanRe.lastIndex = openEnd;
+  let depth = 1;
+  let s: RegExpExecArray | null;
+  while ((s = scanRe.exec(html))) {
+    if (s[0][1] === "/") {
+      depth--;
+      if (depth === 0) return html.slice(startIdx, s.index + s[0].length);
+    } else {
+      depth++;
+    }
+    if (scanRe.lastIndex - startIdx > 800_000) break;
+  }
+  return null;
+}
+
+// Isolate a HTML region that is guaranteed to describe THE product:
+// 1) schema.org/Product itemtype, 2) <main>, 3) <article>. Fall back to input.
+function extractProductRegionHtml(html: string): string {
+  const prodM = /<([a-z]+)\b[^>]*itemtype\s*=\s*["'][^"']*schema\.org\/Product[^"']*["'][^>]*>/i.exec(html);
+  if (prodM) {
+    const r = sliceBalancedElement(html, prodM.index, prodM[1]);
+    if (r && r.length > 500) return r;
+  }
+  const mainM = /<main\b[^>]*>/i.exec(html);
+  if (mainM) {
+    const r = sliceBalancedElement(html, mainM.index, "main");
+    if (r && r.length > 500) return r;
+  }
+  const artM = /<article\b[^>]*>/i.exec(html);
+  if (artM) {
+    const r = sliceBalancedElement(html, artM.index, "article");
+    if (r && r.length > 500) return r;
+  }
+  return html;
+}
+
 /**
  * Wyciąga URL-e zdjęć produktu z galerii/lightboxa i metadanych produktu,
  * następnie normalizuje miniatury do największych znanych wariantów.
@@ -1286,7 +1370,49 @@ export function pickImagesFromScrape(res: unknown): string[] {
   if (!r) return out;
 
   const rawHtml = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
-  const html = rawHtml ? stripRelatedProductBlocks(rawHtml) : "";
+  // 1) usuń całe chrome sklepu (nav/header/footer/aside/script/style)
+  // 2) usuń bloki "polecane / bestsellery / newest"
+  // 3) zawęź do regionu produktu (Product itemtype / main / article)
+  const chromeless = rawHtml ? stripChromeElements(rawHtml) : "";
+  const noRelated = chromeless ? stripRelatedProductBlocks(chromeless) : "";
+  const html = noRelated ? extractProductRegionHtml(noRelated) : "";
+
+  // JSON-LD Product images (product-scoped) — priorytetowe źródło zdjęć.
+  const jsonLdProductImages: string[] = [];
+  if (rawHtml) {
+    const jsonLdRe = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    for (let m: RegExpExecArray | null; (m = jsonLdRe.exec(rawHtml)); ) {
+      const body = m[1].trim();
+      if (!body) continue;
+      try {
+        const parsed = JSON.parse(body);
+        const stack: unknown[] = [parsed];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node) continue;
+          if (Array.isArray(node)) { for (const it of node) stack.push(it); continue; }
+          if (typeof node !== "object") continue;
+          const obj = node as Record<string, unknown>;
+          const t = obj["@type"];
+          const isProduct = t === "Product" || (Array.isArray(t) && t.includes("Product"));
+          if (isProduct) {
+            const img = obj.image ?? obj.contentUrl;
+            const collect = (v: unknown) => {
+              if (typeof v === "string") jsonLdProductImages.push(v);
+              else if (v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string") {
+                jsonLdProductImages.push((v as { url: string }).url);
+              }
+            };
+            if (Array.isArray(img)) img.forEach(collect);
+            else collect(img);
+          }
+          for (const v of Object.values(obj)) {
+            if (v && (Array.isArray(v) || typeof v === "object")) stack.push(v);
+          }
+        }
+      } catch { /* skip malformed JSON-LD */ }
+    }
+  }
 
   if (html) {
     // 1) Lightbox/zoom: <a href="...jpg|png|webp">...<img...></a>
@@ -1375,15 +1501,21 @@ export function pickImagesFromScrape(res: unknown): string[] {
           if (Array.isArray(node)) { for (const it of node) stack.push(it); continue; }
           if (typeof node !== "object") continue;
           const obj = node as Record<string, unknown>;
-          const img = obj.image ?? obj.contentUrl;
-          if (typeof img === "string") push(img);
-          else if (Array.isArray(img)) {
-            for (const it of img) {
-              if (typeof it === "string") push(it);
-              else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+          // Bierzemy image tylko z węzłów Product — inaczej łapiemy inne
+          // produkty widoczne w ItemList tej samej strony.
+          const t = obj["@type"];
+          const isProduct = t === "Product" || (Array.isArray(t) && t.includes("Product"));
+          if (isProduct) {
+            const img = obj.image ?? obj.contentUrl;
+            if (typeof img === "string") push(img);
+            else if (Array.isArray(img)) {
+              for (const it of img) {
+                if (typeof it === "string") push(it);
+                else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+              }
+            } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
+              push((img as { url: string }).url);
             }
-          } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
-            push((img as { url: string }).url);
           }
           for (const v of Object.values(obj)) {
             if (v && (Array.isArray(v) || typeof v === "object")) stack.push(v);
@@ -1411,6 +1543,23 @@ export function pickImagesFromScrape(res: unknown): string[] {
     for (const c of cand) if (typeof c === "string") push(c);
   }
 
+  // Jeśli JSON-LD wystawił zdjęcia produktu — one są priorytetowe. Do listy
+  // dorzucamy tylko og:image (już w `out` przez §7) i odsiewamy resztę.
+  if (jsonLdProductImages.length >= 2) {
+    const primary: string[] = [];
+    const seenP = new Set<string>();
+    for (const raw of jsonLdProductImages) {
+      let t = upgradeToLargeImageUrl(raw.trim());
+      t = upgradeToLargeImageUrl(t);
+      if (!/^https?:\/\//i.test(t) || seenP.has(t)) continue;
+      seenP.add(t);
+      primary.push(t);
+    }
+    // Dorzuć og:image jeżeli jest a nie ma go w Product.image.
+    for (const u of out) if (!seenP.has(u) && /og[-_]?image|social|share/i.test(u)) primary.push(u);
+    const filtered = filterImageUrls(primary).slice(0, 12);
+    if (filtered.length) return filtered;
+  }
   return filterImageUrls(out).slice(0, 12);
 }
 
@@ -1497,7 +1646,10 @@ async function filterScrapedForProduct(
   // Jeżeli markdown ma sekcję "## Description" / "## Opis" — do AI wysyłamy
   // tylko jej zawartość. Wtedy 3500-znakowe okno nie zostaje zjedzone przez
   // politykę wysyłki, recenzje ani "Related products".
-  const focusedMarkdown = extractDescriptionSection(pageMarkdown) ?? pageMarkdown;
+  // Dodatkowo przepuszczamy przez sanitizer — wycina nav-walls, „Nowości",
+  // „Zadzwoń", „Do koszyka" itp. zanim AI zobaczy syf.
+  const focusedMarkdownRaw = extractDescriptionSection(pageMarkdown) ?? pageMarkdown;
+  const focusedMarkdown = sanitizeProductDescription(focusedMarkdownRaw) || focusedMarkdownRaw;
 
   const user = [
     "PRODUKT (z bazy klienta):",
@@ -1524,7 +1676,17 @@ async function filterScrapedForProduct(
     const imageUrls = out.product_image_indexes
       .map((i) => cappedImages[i - 1])
       .filter((u): u is string => typeof u === "string" && u.length > 0);
-    const dedup = filterImageUrls(imageUrls);
+    let dedup = filterImageUrls(imageUrls);
+    // Vision AND-pass: Gemini ocenia miniaturki i wywala te, które nie są
+    // fotografią tego konkretnego produktu (inne kafle z listingu).
+    if (dedup.length) {
+      try {
+        const keepVisual = await visualFilterImages(apiKey, product.nazwa ?? "", dedup);
+        if (keepVisual) dedup = dedup.filter((u) => keepVisual.has(u));
+      } catch (e) {
+        console.warn("visualFilterImages non-fatal:", e);
+      }
+    }
     return {
       is_product_page: out.is_product_page,
       description: sanitizeProductDescription(out.product_description || ""),
@@ -1536,6 +1698,51 @@ async function filterScrapedForProduct(
   } catch (e) {
     console.warn("filterScrapedForProduct failed; keeping raw:", e);
     return { ...fallback, description: sanitizeProductDescription(fallback.description), imageUrls: filterImageUrls(fallback.imageUrls) };
+  }
+}
+
+// Vision filter: pyta Gemini czy każde ze zdjęć przedstawia konkretnie ten
+// produkt. Zwraca Set URL-i do zachowania. Przy błędzie/timeout zwraca null
+// — wtedy nie wycinamy nic dodatkowo poza filtrem tekstowym.
+async function visualFilterImages(
+  apiKey: string,
+  productName: string,
+  imageUrls: string[],
+): Promise<Set<string> | null> {
+  if (!imageUrls.length || !productName) return null;
+  const top = imageUrls.slice(0, 8);
+  const content = [
+    { type: "text", text: [
+      `Produkt: „${productName}".`,
+      "Otrzymujesz zdjęcia jako kandydatów do galerii tego produktu.",
+      "Zwróć JSON {\"keep\":[indeksy 1-based]} — WYŁĄCZNIE zdjęć, które przedstawiają dokładnie ten sam produkt (ten sam wariant/rozmiar/kolor).",
+      "ODRZUĆ: zdjęcia innych produktów widocznych na kaflach Nowości/Polecane/Bestseller, ikony, banery, logo, zdjęcia kategorii, akcesoriów niezwiązanych z produktem.",
+      "Jeśli nie widzisz produktu albo nie masz pewności — nie dodawaj indeksu.",
+    ].join("\n") },
+    ...top.map((url) => ({ type: "image_url", image_url: { url } })),
+  ] as unknown[];
+  try {
+    const call = callGatewayJson(apiKey, "google/gemini-2.5-flash", [
+      { role: "user", content },
+    ]);
+    const timeout = new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error("vision timeout")), 15_000),
+    );
+    const parsed = (await Promise.race([call, timeout])) as { keep?: unknown };
+    const idxs = Array.isArray(parsed.keep)
+      ? parsed.keep.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+      : [];
+    const kept = new Set<string>();
+    for (const i of idxs) {
+      const u = top[i - 1];
+      if (u) kept.add(u);
+    }
+    // Zdjęcia poza top-8 nie były oceniane — zachowujemy je (bezpieczniej).
+    for (let i = 8; i < imageUrls.length; i++) kept.add(imageUrls[i]);
+    return kept;
+  } catch (e) {
+    console.warn("visualFilterImages failed:", e);
+    return null;
   }
 }
 
