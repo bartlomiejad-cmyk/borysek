@@ -451,6 +451,15 @@ function ProductDetail() {
           <Sparkles className="h-4 w-4 mr-2" />
           {regenAll.isPending ? "Generowanie..." : "Generuj z 3 źródeł"}
         </Button>
+        <Button
+          variant="destructive"
+          onClick={() => setDeleteOpen(true)}
+          disabled={deleteMut.isPending}
+          title="Usuń ten produkt z projektu"
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          {deleteMut.isPending ? "Usuwam…" : "Usuń produkt"}
+        </Button>
         </div>
       </div>
 
