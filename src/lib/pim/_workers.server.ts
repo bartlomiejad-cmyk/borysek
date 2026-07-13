@@ -1012,6 +1012,9 @@ type FirecrawlSearchHit = { url?: string; title?: string; description?: string }
  */
 function upgradeToLargeImageUrl(input: string): string {
   let u = input;
+  // Speed-line CDN: /ai/140/... and /ai/400%2F... are resized variants;
+  // the same path under /ai/2000/ is the lightbox / source-size product photo.
+  u = u.replace(/(https?:\/\/static\.speedline\.dk\/ai\/)(?:38|60|70|140|350|400|600|800|1100|1600)(?=\/|%2f)/i, "$12000");
   // WooCommerce / WP: usuń sufiks rozmiaru "-150x150" / "-1024x768" przed rozszerzeniem.
   u = u.replace(/-\d{2,4}x\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // PrestaShop: -home_default / -cart_default / -small_default / -medium_default → -large_default
@@ -1059,6 +1062,8 @@ function upgradeToLargeImageUrl(input: string): string {
  * odczytać go z nazwy pliku / query. Zwracamy null gdy URL nie koduje rozmiaru.
  */
 function inferMinDimensionFromUrl(url: string): number | null {
+  const speedlineAi = /\/ai\/(\d{2,4})(?:\/|%2f)/i.exec(url);
+  if (speedlineAi) return parseInt(speedlineAi[1], 10);
   const wh = /[_\-/](\d{2,4})x(\d{2,4})(?:\.|_|-|\/|$)/i.exec(url);
   if (wh) return Math.min(parseInt(wh[1], 10), parseInt(wh[2], 10));
   const s = /[=_\-/](?:s|w|h)(\d{2,4})(?:[?&\-]|$)/i.exec(url);
@@ -1226,13 +1231,35 @@ export function pickImagesFromScrape(res: unknown): string[] {
       "data-image", "data-full", "data-original", "data-big", "data-hires",
       "data-zoom", "data-zoom-src", "data-lazy-src", "data-lazy",
       "data-flickity-lazyload", "data-flickity-lazyload-src",
+      "data-splide-lazy", "data-splide-lazy-src", "data-glide-lazy",
       "data-thumb-large", "data-photoswipe-src", "data-fancybox-href",
       "data-mfp-src", "data-image-large", "data-image-src", "data-hires-src",
       "data-src",
     ];
     for (const attr of dataAttrs) {
-      const re = new RegExp(`<img\\b[^>]*\\b${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
+      const re = new RegExp(`<[^>]+\\b${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
       for (let m: RegExpExecArray | null; (m = re.exec(html)); ) push(m[1]);
+    }
+
+    // 2b) Galerie JS: np. Speed-line trzyma listę plików w data-gallery-images,
+    // a rozmiar miniatur w data-gallery-size. Zawsze budujemy wariant 2000px.
+    const galleryRe = /<[^>]+\bdata-gallery-images\s*=\s*["']([^"']+)["'][^>]*>/gi;
+    for (let m: RegExpExecArray | null; (m = galleryRe.exec(html)); ) {
+      const tag = m[0];
+      const encoded = m[1]
+        .replace(/&quot;/g, '"')
+        .replace(/&#34;/g, '"')
+        .replace(/&amp;/g, "&");
+      const cdn = /\bdata-gallery-cdn\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] ?? "";
+      try {
+        const parsed = JSON.parse(encoded) as unknown;
+        if (!Array.isArray(parsed)) continue;
+        for (const item of parsed) {
+          if (typeof item !== "string" || !item) continue;
+          const path = item.startsWith("http") ? item : `${cdn.replace(/\/$/, "")}/ai/2000${item.startsWith("/") ? item : `/${item}`}`;
+          push(path);
+        }
+      } catch { /* skip malformed gallery JSON */ }
     }
 
     // 3) srcset (także data-srcset) — bierz największy wariant.
@@ -1295,6 +1322,17 @@ export function pickImagesFromScrape(res: unknown): string[] {
           }
         }
       } catch { /* skip malformed JSON-LD */ }
+    }
+  }
+
+  // 6b) Markdown z Firecrawl często zawiera same miniatury z galerii; po
+  // upgradeToLargeImageUrl potrafią wskazać pełne zdjęcia (np. Speed-line /ai/140 → /ai/2000).
+  const markdown = typeof r.markdown === "string" ? r.markdown : "";
+  if (markdown) {
+    const mdImgRe = /!\[[^\]]*\]\((https?:\/\/[^\s)]+(?:\s[^)]*)?)\)/gi;
+    for (let m: RegExpExecArray | null; (m = mdImgRe.exec(markdown)); ) {
+      const cand = m[1].trim();
+      if (looksLikeProductPath(cand)) push(cand);
     }
   }
 
