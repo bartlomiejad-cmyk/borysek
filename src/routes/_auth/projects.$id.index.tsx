@@ -1166,7 +1166,7 @@ function SettingsCard({
     ean_column?: string;
     name_column?: string;
     id_column?: string;
-    settings?: Record<string, unknown> | null;
+    settings?: unknown;
   };
   onSave: (p: {
     name?: string;
