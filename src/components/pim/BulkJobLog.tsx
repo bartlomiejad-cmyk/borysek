@@ -3,6 +3,19 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Level = "info" | "success" | "warn" | "error";
 
+// Human-readable label per bulk job kind. PIM_RESCRAPE is the adaptive
+// top-up job triggered when matching leaves too few strong sources.
+export const BULK_JOB_KIND_LABELS: Record<string, string> = {
+  GENERATE_GOLDEN: "Generacja złotych rekordów",
+  REGENERATE_MEDIA: "Regeneracja zdjęć",
+  FIRECRAWL_DISCOVERY: "Wyszukiwanie źródeł (Firecrawl)",
+  PHOTO_TOOL_GENERATE: "Generowanie zdjęć",
+  PHOTO_TOOL_EDIT_IMAGE: "Edycja zdjęcia",
+  PIM_VISUALIZATIONS: "Wizualizacje produktowe",
+  PIM_ALLEGRO_DESCRIPTION: "Opisy Allegro",
+  PIM_RESCRAPE: "Doscrapowanie źródeł",
+};
+
 type EventRow = {
   id: string;
   level: Level;
