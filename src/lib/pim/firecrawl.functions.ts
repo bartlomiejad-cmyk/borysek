@@ -178,9 +178,12 @@ export const recleanProductSources = createServerFn({ method: "POST" })
       .eq("project_id", data.projectId);
     const trashUrls = new Set<string>();
     for (const e of ens ?? []) {
-      const scores = (e as { image_scores?: Record<string, { is_banner_or_trash?: boolean }> } | null)?.image_scores ?? {};
+      const scores = (e as { image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }> } | null)?.image_scores ?? {};
       for (const [u, s] of Object.entries(scores)) {
-        if (s && s.is_banner_or_trash === true) trashUrls.add(u);
+        if (!s) continue;
+        if (s.manual_keep === true) continue; // user override — never drop
+        if (s.is_banner_or_trash === true) trashUrls.add(u);
+        else if (s.identity === "different") trashUrls.add(u);
       }
     }
     let scanned = 0;
