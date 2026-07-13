@@ -803,13 +803,6 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const generateAllegroDescription = createServerFn({ method: "POST" })
-  // Placeholder anchor; the Vision suggestion function is inserted above.
-  // (kept identity) — no change
-  .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ productId: z.string().uuid() }).parse(i))
-  .handler(async ({ data, context }) => {
-    return { html: "" as string, __unused: data.productId, __ctx: !!context };
-  }) as unknown as typeof generateAllegroDescription;
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({ productId: z.string().uuid() }).parse(i))
   .handler(async ({ data, context }) => {
