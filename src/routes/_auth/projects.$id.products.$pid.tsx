@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
-import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages } from "@/lib/pim/ai.functions";
+import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
@@ -61,6 +61,7 @@ function ProductDetail() {
   const analyzeFn = useServerFn(analyzeProductImages);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const regenFn = useServerFn(regenerateMainImage);
+  const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
@@ -301,11 +302,28 @@ function ProductDetail() {
   });
 
   const regenMut = useMutation({
-    mutationFn: (vars: { enrichmentId: string; imageUrl: string }) =>
+    mutationFn: (vars: { enrichmentId: string; imageUrl: string; customStyle?: string; customRequirements?: string }) =>
       regenFn({ data: vars }),
     onSuccess: () => { toast.success("Zdjęcie zregenerowane"); invalidate(); },
     onError: (e) => toast.error(friendlyError(e, "Regeneracja nie powiodła się")),
   });
+
+  const [regenStyle, setRegenStyle] = useState("");
+  const [regenReq, setRegenReq] = useState("");
+  const [visionBusy, setVisionBusy] = useState(false);
+  const analyzeForThumb = async () => {
+    setVisionBusy(true);
+    try {
+      const out = await analyzeForPromptFn({ data: { productId: pid, mode: "thumbnail" } });
+      setRegenStyle(out.style);
+      setRegenReq(out.requirements);
+      toast.success(`AI przeanalizowała ${out.analyzed} zdjęcie/zdjęć`);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się przeanalizować zdjęć"));
+    } finally {
+      setVisionBusy(false);
+    }
+  };
 
   const clearRegenMut = useMutation({
     mutationFn: (enrichmentId: string) => clearRegenFn({ data: { enrichmentId } }),
@@ -502,7 +520,12 @@ function ProductDetail() {
                     disabled={!enrichment || !mainUrl || regenMut.isPending}
                     onClick={() => {
                       if (!enrichment || !mainUrl) return;
-                      regenMut.mutate({ enrichmentId: enrichment.id, imageUrl: mainUrl });
+                      regenMut.mutate({
+                        enrichmentId: enrichment.id,
+                        imageUrl: mainUrl,
+                        customStyle: regenStyle.trim() || undefined,
+                        customRequirements: regenReq.trim() || undefined,
+                      });
                     }}
                   >
                     {regenMut.isPending ? (
@@ -513,6 +536,37 @@ function ProductDetail() {
                     {regenMut.isPending ? "Generuję…" : regeneratedUrl ? "Regeneruj ponownie" : "Regeneruj"}
                   </Button>
                 </div>
+              </div>
+              <div className="rounded-md border border-violet-200 bg-violet-50/40 dark:bg-violet-950/20 p-2 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px]">
+                    <div className="font-medium">Wskazówki wizualne (opcjonalnie)</div>
+                    <div className="text-muted-foreground">AI podpowie na bazie zdjęć źródłowych. Białe tło i proporcje pozostają nadrzędne.</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={analyzeForThumb}
+                    disabled={visionBusy || regenMut.isPending}
+                  >
+                    {visionBusy ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                    Analizuj zdjęcia
+                  </Button>
+                </div>
+                <Textarea
+                  value={regenStyle}
+                  onChange={(e) => setRegenStyle(e.target.value)}
+                  placeholder="Styl / kadr (np. lekki kąt ¾, rozłożone akcesoria, delikatny cień kontaktowy)"
+                  rows={2}
+                  className="text-xs"
+                />
+                <Textarea
+                  value={regenReq}
+                  onChange={(e) => setRegenReq(e.target.value)}
+                  placeholder="Wymagania (np. pokaż etykietę frontem, zachowaj kolor zielony pudełka)"
+                  rows={2}
+                  className="text-xs"
+                />
               </div>
               {regenMut.isPending && (
                 <p className="text-[11px] text-muted-foreground italic">

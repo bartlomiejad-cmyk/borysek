@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Wand2, Sparkles, Loader2 } from "lucide-react";
+import { Wand2, Sparkles, Loader2, ImageIcon } from "lucide-react";
 import { createBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { updateProject } from "@/lib/pim/projects.functions";
-import { suggestVisualizationField } from "@/lib/pim/ai.functions";
+import { suggestVisualizationField, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { friendlyError } from "@/lib/utils";
 
 export type VizTarget = {
@@ -53,6 +53,7 @@ export function GenerateVisualizationsDialog({
   const createJob = useServerFn(createBulkJob);
   const updProject = useServerFn(updateProject);
   const suggestField = useServerFn(suggestVisualizationField);
+  const analyzeImagesFn = useServerFn(analyzeProductImagesForPrompt);
 
   const selectedTargets = useMemo(
     () => allProducts.filter((p) => selectedIds.has(p.id)),
@@ -70,6 +71,7 @@ export function GenerateVisualizationsDialog({
   const [busy, setBusy] = useState(false);
   const [busyStyle, setBusyStyle] = useState(false);
   const [busyReq, setBusyReq] = useState(false);
+  const [busyVision, setBusyVision] = useState(false);
 
   const suggest = async (field: "style" | "requirements") => {
     const setBusyFn = field === "style" ? setBusyStyle : setBusyReq;
@@ -82,6 +84,28 @@ export function GenerateVisualizationsDialog({
       toast.error(friendlyError(e, "Nie udało się wygenerować propozycji"));
     } finally {
       setBusyFn(false);
+    }
+  };
+
+  const analyzeFromImages = async () => {
+    const withMain = selectedTargets.filter(hasMain);
+    const pick = withMain[0] ?? withMainTargets[0];
+    if (!pick) {
+      toast.info("Zaznacz produkt ze zdjęciem, aby AI mogła je przeanalizować");
+      return;
+    }
+    setBusyVision(true);
+    try {
+      const out = await analyzeImagesFn({
+        data: { productId: pick.id, mode: "visualization" },
+      });
+      setStyle(out.style);
+      setReqPl(out.requirements);
+      toast.success(`AI przeanalizowała ${out.analyzed} zdjęcie/zdjęć`);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się przeanalizować zdjęć"));
+    } finally {
+      setBusyVision(false);
     }
   };
 
@@ -155,6 +179,29 @@ export function GenerateVisualizationsDialog({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-4">
+          <div className="flex items-center justify-between gap-2 rounded-md border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-2">
+            <div className="text-xs">
+              <div className="font-medium">Spersonalizuj na podstawie zdjęć</div>
+              <div className="text-muted-foreground">
+                Gemini przegląda zdjęcia pierwszego produktu i wypełnia oba pola.
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={analyzeFromImages}
+              disabled={busyVision || busy}
+            >
+              {busyVision ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <ImageIcon className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Analizuj zdjęcia
+            </Button>
+          </div>
+
           <div className="space-y-2">
             <Label className="text-xs">Zakres</Label>
             <RadioGroup value={scope} onValueChange={(v) => setScope(v as Scope)} className="space-y-2">

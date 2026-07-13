@@ -799,6 +799,149 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
+// Vision-based prompt suggestion: AI (Gemini) analizuje zdjęcia źródłowe
+// produktu i pisze spersonalizowany prompt stylu/sceny + wymagań technicznych
+// pod regenerację miniatury lub wizualizacje.
+// ---------------------------------------------------------------------------
+
+const AnalyzePromptInput = z.object({
+  productId: z.string().uuid(),
+  mode: z.enum(["thumbnail", "visualization"]),
+});
+
+const AnalyzePromptOutput = z.object({
+  style: z.string(),
+  requirements: z.string(),
+});
+
+export const analyzeProductImagesForPrompt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => AnalyzePromptInput.parse(i))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const { data: product, error: pErr } = await supabase
+      .from("source_products")
+      .select("id, nazwa")
+      .eq("id", data.productId)
+      .single();
+    if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+
+    const { data: enrichment } = await supabase
+      .from("enrichments")
+      .select("picked_urls, golden_name, golden_features, pinned_main_url, regenerated_main_image")
+      .eq("source_product_id", product.id)
+      .maybeSingle();
+
+    const en = (enrichment ?? {}) as {
+      picked_urls?: string[] | null;
+      golden_name?: string | null;
+      golden_features?: unknown;
+      pinned_main_url?: string | null;
+      regenerated_main_image?: string | null;
+    };
+
+    const candidates: string[] = [];
+    if (en.pinned_main_url) candidates.push(en.pinned_main_url);
+    if (en.regenerated_main_image && en.regenerated_main_image !== "__imported__") {
+      candidates.push(en.regenerated_main_image);
+    }
+    for (const u of en.picked_urls ?? []) {
+      if (u && u !== "__imported__") candidates.push(u);
+    }
+    const urls = Array.from(new Set(candidates)).slice(0, 4);
+    if (!urls.length) throw new Error("Brak zdjęć produktu do analizy");
+
+    const productName = (en.golden_name ?? product.nazwa ?? "").trim() || "(bez nazwy)";
+    const features = Array.isArray(en.golden_features)
+      ? (en.golden_features as unknown[])
+          .map((f) => {
+            if (typeof f === "string") return f;
+            if (f && typeof f === "object") {
+              const obj = f as { name?: string; value?: string };
+              if (obj.name || obj.value) return `${obj.name ?? ""}: ${obj.value ?? ""}`.trim();
+            }
+            return "";
+          })
+          .filter(Boolean)
+          .slice(0, 8)
+          .join("; ")
+      : "";
+
+    const systemThumbnail = [
+      "Jesteś fotografem produktowym e-commerce.",
+      "Analizujesz załączone zdjęcia jednego produktu i piszesz po polsku spersonalizowany prompt do regeneracji CZYSTEJ MINIATURY na białym tle #FFFFFF.",
+      "Zaobserwuj: dokładny kolor(y) produktu, materiał/fakturę, kształt, orientację, obecność etykiet/logo, proporcje.",
+      'Zwróć wyłącznie JSON o schemacie: {"style":"...", "requirements":"..."}.',
+      "- style (60–180 znaków): krótki opis charakteru miniatury (kąt, kompozycja, oświetlenie).",
+      "- requirements (140–360 znaków): konkretne wymagania oparte na tym co widzisz — wymień kolor(y), zachowanie logo/etykiet, orientację, proporcje 70–75% kadru, tło #FFFFFF.",
+      "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
+    ].join("\n");
+
+    const systemVisualization = [
+      "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
+      "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
+      "Zaobserwuj typ produktu, jego kategorię, materiał, kolor, kontekst użycia.",
+      'Zwróć wyłącznie JSON o schemacie: {"style":"...", "requirements":"..."}.',
+      "- style (80–220 znaków): scena/otoczenie pasujące do tego konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
+      "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+      "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
+    ].join("\n");
+
+    const system = data.mode === "thumbnail" ? systemThumbnail : systemVisualization;
+    const userText =
+      `Nazwa produktu: "${productName}".` +
+      (features ? `\nCechy: ${features}.` : "") +
+      `\nPrzeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON.`;
+
+    const content: Array<
+      | { type: "text"; text: string }
+      | { type: "image_url"; image_url: { url: string } }
+    > = [{ type: "text", text: userText }];
+    for (const u of urls) content.push({ type: "image_url", image_url: { url: u } });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 28_000);
+    let res: Response;
+    try {
+      res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "Lovable-API-Key": apiKey,
+          "X-Lovable-AIG-SDK": "raw",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-pro",
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content },
+          ],
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (res.status === 429) throw new Error("Przekroczono limit zapytań AI — spróbuj za chwilę.");
+    if (res.status === 402) throw new Error("Brak kredytów AI w workspace.");
+    if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const raw = json.choices?.[0]?.message?.content ?? "";
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { throw new Error("Model nie zwrócił poprawnego JSON"); }
+    const out = AnalyzePromptOutput.parse(parsed);
+    return {
+      style: out.style.trim(),
+      requirements: out.requirements.trim(),
+      analyzed: urls.length,
+    };
+  });
+
+// ---------------------------------------------------------------------------
 // Allegro description generation (single product).
 // ---------------------------------------------------------------------------
 
