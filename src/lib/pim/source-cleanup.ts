@@ -4,6 +4,33 @@
  * banery, stopki) niezależnie od AI. Czysty TS — importowalny po obu stronach.
  */
 
+/**
+ * Normalize a producer/brand or hostname token to a canonical lowercase form:
+ * lowercase, strip Polish diacritics, remove spaces / dashes / dots / underscores.
+ * Used to test whether a producer string appears in a source URL hostname.
+ */
+const PL_DIACRITICS: Record<string, string> = {
+  ą: "a", ć: "c", ę: "e", ł: "l", ń: "n", ó: "o", ś: "s", ź: "z", ż: "z",
+};
+
+export function normalizeDomainToken(input: string | null | undefined): string {
+  if (!input) return "";
+  let s = input.toLowerCase();
+  s = s.replace(/[ąćęłńóśźż]/g, (c) => PL_DIACRITICS[c] ?? c);
+  s = s.replace(/[\s\-_.]+/g, "");
+  return s;
+}
+
+/** Extract hostname from a URL, safely. Lowercase, no leading www. */
+export function extractHostname(url: string): string {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h.startsWith("www.") ? h.slice(4) : h;
+  } catch {
+    return "";
+  }
+}
+
 const JUNK_FILENAME_TOKENS: string[] = [
   "blik", "paypal", "visa", "mastercard", "mc-logo", "maestro",
   "przelewy24", "p24", "payu", "bluemedia", "blue-media", "dotpay",

@@ -185,6 +185,7 @@ export type Database = {
           project_id: string
           quality: Json | null
           regenerated_main_image: string | null
+          score_breakdown: Json | null
           source_product_id: string
           status: Database["public"]["Enums"]["enrichment_status"]
           updated_at: string
@@ -215,6 +216,7 @@ export type Database = {
           project_id: string
           quality?: Json | null
           regenerated_main_image?: string | null
+          score_breakdown?: Json | null
           source_product_id: string
           status?: Database["public"]["Enums"]["enrichment_status"]
           updated_at?: string
@@ -245,6 +247,7 @@ export type Database = {
           project_id?: string
           quality?: Json | null
           regenerated_main_image?: string | null
+          score_breakdown?: Json | null
           source_product_id?: string
           status?: Database["public"]["Enums"]["enrichment_status"]
           updated_at?: string
@@ -517,6 +520,7 @@ export type Database = {
           include_extra_images: boolean
           name: string
           name_column: string
+          settings: Json
           strategy: Database["public"]["Enums"]["mapping_strategy"]
           updated_at: string
           user_id: string
@@ -534,6 +538,7 @@ export type Database = {
           include_extra_images?: boolean
           name: string
           name_column?: string
+          settings?: Json
           strategy?: Database["public"]["Enums"]["mapping_strategy"]
           updated_at?: string
           user_id: string
@@ -551,6 +556,7 @@ export type Database = {
           include_extra_images?: boolean
           name?: string
           name_column?: string
+          settings?: Json
           strategy?: Database["public"]["Enums"]["mapping_strategy"]
           updated_at?: string
           user_id?: string
