@@ -1,53 +1,30 @@
-## Problem
+## Cel
+Przy imporcie CSV, jeśli w pliku są kolumny z URL-ami zdjęć (główne + galeria), zapisać te URL-e bezpośrednio przy produktach i oznaczyć produkt jako „ma zdjęcia z importu" — dziś dialog ma już mapowanie tych kolumn, ale worker jedynie ustawia sentinel `__imported__` i wyrzuca same linki.
 
-W projekcie `hurtownia-format` `runFirecrawlDiscovery` zapisuje do `product_sources`:
-- opisy zawierające menu sklepu, „Nowości w ofercie", „Zamów do 14:00", „Zadzwoń!", ceny, „Do koszyka", stopkę,
-- zdjęcia innych produktów (bloki bestsellery / polecane / kategoria).
+## Zmiany
 
-`onlyMainContent: true` w Firecrawl czasem nie odcina tego chrome. Sanitizer i AI-filter dostają cały markdown (do 3500 znaków) oraz wszystkie zdjęcia z HTML — dlatego śmieci przechodzą dalej.
+### 1. `src/lib/pim/parsers.ts`
+- Dodać do `CsvRow` opcjonalne `main_image_url: string | null` i `gallery_urls: string[]`.
+- W `buildCsvRowsFromMapping` wyekstrahować URL-e z kolumn `main_image_column` (pojedynczy URL) i `gallery_column` (split po `,`, `|`, nowej linii, tab; filter `^https?://`). `main_image_url` fallback: pierwszy z galerii, jeśli brak dedykowanej kolumny.
+- `has_images` = wynik z nowej ekstrakcji (ma sens tylko gdy faktycznie znaleziono URL).
 
-## Zakres
+### 2. `src/lib/pim/ingest.functions.ts` — `ingestSourceProducts`
+- Rozszerzyć `sourceProductSchema` o `main_image_url: z.string().nullable().optional()` i `gallery_urls: z.array(z.string()).optional()`.
+- Przy insercie do `source_products` te pola idą tylko przez `raw` (bez zmian w tabeli).
+- Zbudować mapę `naturalKey → { main, gallery }`. Dla wstawionych produktów, gdzie znaleziono URL-e, jednym `update`em na enrichment ustawić:
+  - `pinned_main_url` = `main_image_url` (jeśli jest),
+  - `ai_gallery_urls` = zdeduplikowana lista (main + gallery),
+  - `regenerated_main_image = '__imported__'` (zachować sentinel dla filtra „Ma zdjęcia").
+- Zamiast dotychczasowego `withImages` opartego wyłącznie o `has_images`, użyć nowej mapy URL-i (te same klucze).
 
-Zmiany wyłącznie w:
-- `src/lib/pim/_workers.server.ts`
-- `src/lib/pim/source-cleanup.ts`
+### 3. Bez migracji DB
+Używamy istniejących kolumn `enrichments.pinned_main_url` i `ai_gallery_urls`, więc lista produktów, filtr „Bez zdjęć", karta produktu i podgląd automatycznie zobaczą te obrazy (już czytają te pola).
 
-Bez migracji, bez UI, `runMatching` nie ruszamy (scoring TOP 5 już działa).
+### 4. Weryfikacja
+- Import CSV z kolumnami zdjęć → wiersze na liście pokazują miniatury (pinned + galeria) od razu, badge „ma zdjęcia" aktywne.
+- Import CSV bez kolumn zdjęć → zachowanie bez zmian.
+- Filtr „Bez zdjęć" nadal działa (sentinel `__imported__` obecny gdy są URL-e; brak sentinela = do uzupełnienia).
 
-## Plan
-
-### 1. Izolacja regionu produktu z rawHtml (nowa funkcja `extractProductRegionHtml`)
-
-Wyznaczamy podzbiór HTML, który na pewno dotyczy produktu i tylko na nim pracujemy dalej:
-
-1. JSON-LD `Product` → `name` → najbliższy `<h1>`/`[itemprop=name]` z tą nazwą → przodek pasujący do `main`, `article`, `[itemtype*="Product"]`, `#product`, `.product-page`, `.product-detail`.
-2. Fallback: pierwszy `<main>`/`<article>`; potem pierwszy `[itemtype*="Product"]` / `.product`.
-3. `stripRelatedProductBlocks` rozszerzone o klasy/ID typowe dla PrestaShop/WooCommerce/IdoSell: `newest-products`, `bestsellers`, `products-list`, `products-grid`, `cross-sell`, `upsell`, `promo`, `sidebar`, `footer`, `header`, `nav`, `menu`.
-4. `pickImagesFromScrape` i AI-filter tekstowy pracują na HTML/markdown z tego regionu, nie na całej stronie.
-
-### 2. Twardszy `sanitizeProductDescription`
-
-Nowe wpisy w `DESC_CUT_HEADINGS` i `DESC_BLOCK_PHRASES`:
-- odcięcie od pierwszego wystąpienia: `Nowości w ofercie`, `Bestsellery`, `Polecane produkty`, `Zobacz też`, `Klienci kupili`, `Zamów do`, `Wysyłka dzisiaj`, `Darmowa dostawa`, `Masz pytanie`, `Zadzwoń`, `Czekamy na`, `Godziny otwarcia`,
-- odrzucenie linii `Do koszyka`, `szt.`, kursywnych cen typu `_7,46 zł_`, markdown-linków obudowanych `\\` (listing kafelków),
-- detektor „ściany linków": jeżeli w oknie 8 linii ≥5 to `- [tekst](url)`, cały blok wypada,
-- odrzucenie nagłówków markdown zawierających breadcrumb kategorii (np. `# Worki na śmieci LDPE 35l czarne...`) gdy powtarzają tytuł produktu,
-- jeżeli po sanityzacji zostaje < 30 znaków tekstu, zwracamy `""` (worker zapisze `description = null`).
-
-### 3. Twardsza selekcja zdjęć
-
-- Kandydaty ze `pickImagesFromScrape` wyłącznie z regionu produktu.
-- Jeżeli JSON-LD `Product.image` istnieje — traktujemy je jako jedyne źródło; reszta HTML tylko jako fallback.
-- W `filterScrapedForProduct` dodajemy pass wizualny (`google/gemini-2.5-flash`, multimodal): nazwa produktu + top 8 kandydatów jako `image_url`. Wynik AND-ujemy z tekstowym filtrem. Timeout 15s, przy błędzie/braku klucza — zachowanie obecne.
-
-### 4. Diagnostyka
-
-Logi worker'a dostają: rozmiar markdown przed/po ekstrakcji regionu, długość opisu po sanityzacji, ile zdjęć odrzucił każdy krok (region → tekstowy filtr → wizualny filtr).
-
-## Uruchomienie
-
-Klient klika **Wyszukaj źródła (Firecrawl)** w projekcie `hurtownia-format` — nowe reguły działają w momencie scrape'u, więc istniejące `product_sources` trzeba pobrać ponownie. `runMatching` już poprawnie zdegraduje karty bez tytułu/opisu.
-
-## Pytanie kontrolne
-
-Czy włączyć wizualny AI-filter (Gemini vision) — +1 request na źródło, ~1–2 s każde? Domyślnie proponuję **tak**, bo tekstowy filtr sam nie odróżni szczotki od worka na śmieci widocznego w „Nowościach".
+## Poza zakresem
+- Bez pobierania/rehostowania zdjęć — trzymamy URL-e źródłowe (tak jak dziś przy scrapingu).
+- Bez zmian w `RemapCsvDialog` (uzupełnianie kolumn tekstowych) — dograwanie zdjęć do już istniejących produktów można dodać osobno, jeśli będzie potrzebne.

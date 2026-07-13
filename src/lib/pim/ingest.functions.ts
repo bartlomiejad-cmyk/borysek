@@ -8,6 +8,8 @@ const sourceProductSchema = z.object({
   kod: z.string().nullable(),
   ean: z.string().nullable(),
   has_images: z.boolean().optional(),
+  main_image_url: z.string().nullable().optional(),
+  gallery_urls: z.array(z.string()).optional(),
   raw: z.record(z.unknown()),
 });
 
@@ -42,7 +44,7 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const payload = data.rows.map((r) => {
-      const { has_images: _hi, ...rest } = r;
+      const { has_images: _hi, main_image_url: _mi, gallery_urls: _gu, ...rest } = r;
       return { ...rest, project_id: data.projectId };
     });
     const { error } = await supabase.from("source_products").insert(payload as never);
@@ -74,14 +76,16 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
         kod: string | null;
         ean: string | null;
       }) => r.ext_id || r.ean || r.kod || (r.nazwa ? r.nazwa.toLowerCase() : null);
-      const withImages = new Set<string>();
+      const imagesByKey = new Map<string, { main: string | null; gallery: string[] }>();
       for (const r of data.rows) {
-        if (!r.has_images) continue;
         const k = naturalKey(r);
-        if (k) withImages.add(k);
+        if (!k) continue;
+        const main = r.main_image_url ?? null;
+        const gallery = r.gallery_urls ?? [];
+        if (!main && gallery.length === 0) continue;
+        if (!imagesByKey.has(k)) imagesByKey.set(k, { main, gallery });
       }
-      if (withImages.size) {
-        const idsToMark: string[] = [];
+      if (imagesByKey.size) {
         for (const p of inserted as Array<{
           id: string;
           ext_id: string | null;
@@ -90,13 +94,25 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
           ean: string | null;
         }>) {
           const k = naturalKey(p);
-          if (k && withImages.has(k)) idsToMark.push(p.id);
-        }
-        if (idsToMark.length) {
+          if (!k) continue;
+          const imgs = imagesByKey.get(k);
+          if (!imgs) continue;
+          const combined: string[] = [];
+          const seen = new Set<string>();
+          for (const u of [imgs.main, ...imgs.gallery]) {
+            if (!u || seen.has(u)) continue;
+            seen.add(u);
+            combined.push(u);
+          }
+          const patch: Record<string, unknown> = {
+            regenerated_main_image: "__imported__",
+            ai_gallery_urls: combined,
+          };
+          if (imgs.main) patch.pinned_main_url = imgs.main;
           const { error: mErr } = await supabase
             .from("enrichments")
-            .update({ regenerated_main_image: "__imported__" } as never)
-            .in("source_product_id", idsToMark);
+            .update(patch as never)
+            .eq("source_product_id", p.id);
           if (mErr) throw new Error(mErr.message);
         }
       }
