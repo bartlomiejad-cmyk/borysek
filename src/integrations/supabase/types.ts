@@ -565,6 +565,7 @@ export type Database = {
           id: string
           organic_urls: Json
           project_id: string
+          query_variants: Json | null
           term: string
         }
         Insert: {
@@ -572,6 +573,7 @@ export type Database = {
           id?: string
           organic_urls?: Json
           project_id: string
+          query_variants?: Json | null
           term: string
         }
         Update: {
@@ -579,6 +581,7 @@ export type Database = {
           id?: string
           organic_urls?: Json
           project_id?: string
+          query_variants?: Json | null
           term?: string
         }
         Relationships: [

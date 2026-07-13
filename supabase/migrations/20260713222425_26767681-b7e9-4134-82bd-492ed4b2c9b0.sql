@@ -1,0 +1,1 @@
+ALTER TABLE public.search_results ADD COLUMN IF NOT EXISTS query_variants jsonb DEFAULT NULL;
