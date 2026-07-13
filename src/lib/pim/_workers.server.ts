@@ -1351,24 +1351,38 @@ function extractProductRegionHtml(html: string): string {
  * Wyciąga URL-e zdjęć produktu z galerii/lightboxa i metadanych produktu,
  * następnie normalizuje miniatury do największych znanych wariantów.
  */
-export function pickImagesFromScrape(res: unknown): string[] {
+export type ImageTier = 1 | 2 | 3;
+export type PickedImages = {
+  urls: string[];
+  tiers: Record<string, ImageTier>;
+};
+
+export function pickImagesFromScrape(res: unknown): PickedImages {
   const out: string[] = [];
   const seen = new Set<string>();
-  const push = (raw: unknown) => {
+  const tiers: Record<string, ImageTier> = {};
+  // Highest tier wins if the same URL is discovered by multiple extractors.
+  const push = (raw: unknown, tier: ImageTier) => {
     if (typeof raw !== "string") return;
     // Dwukrotny upgrade — czasem pierwsze przejście odsłania kolejny wzorzec.
     let t = upgradeToLargeImageUrl(raw.trim());
     t = upgradeToLargeImageUrl(t);
     if (!t || !/^https?:\/\//i.test(t)) return;
-    if (seen.has(t)) return;
     const minDim = inferMinDimensionFromUrl(t);
     if (minDim !== null && minDim < 400) return;
+    if (seen.has(t)) {
+      // Promote to a stronger tier if we now see it in a more trusted zone.
+      const prev = tiers[t] ?? 3;
+      if (tier < prev) tiers[t] = tier;
+      return;
+    }
     seen.add(t);
+    tiers[t] = tier;
     out.push(t);
   };
 
   const r = res as Record<string, unknown> | null;
-  if (!r) return out;
+  if (!r) return { urls: out, tiers };
 
   const rawHtml = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
   // 1) usuń całe chrome sklepu (nav/header/footer/aside/script/style)
@@ -1377,6 +1391,9 @@ export function pickImagesFromScrape(res: unknown): string[] {
   const chromeless = rawHtml ? stripChromeElements(rawHtml) : "";
   const noRelated = chromeless ? stripRelatedProductBlocks(chromeless) : "";
   const html = noRelated ? extractProductRegionHtml(noRelated) : "";
+  // Fallback pool for Tier 3: strip related/recommended before we ever look
+  // outside the product region, so cross-sell carousels never bleed in.
+  const outerHtml = noRelated || "";
 
   // JSON-LD Product images (product-scoped) — priorytetowe źródło zdjęć.
   const jsonLdProductImages: string[] = [];
@@ -1414,11 +1431,13 @@ export function pickImagesFromScrape(res: unknown): string[] {
       } catch { /* skip malformed JSON-LD */ }
     }
   }
+  // Tier 1: JSON-LD Product.image — the shop's declared product photos.
+  for (const u of jsonLdProductImages) push(u, 1);
 
   if (html) {
     // 1) Lightbox/zoom: <a href="...jpg|png|webp">...<img...></a>
     const anchorRe = /<a\b[^>]*\bhref\s*=\s*["']([^"']+\.(?:jpe?g|png|webp|avif))(?:\?[^"']*)?["'][^>]*>[\s\S]{0,800}?<img\b/gi;
-    for (let m: RegExpExecArray | null; (m = anchorRe.exec(html)); ) push(m[1]);
+    for (let m: RegExpExecArray | null; (m = anchorRe.exec(html)); ) push(m[1], 2);
 
     // 2) data-* atrybuty na <img> sugerujące "powiększenie".
     const dataAttrs = [
@@ -1433,7 +1452,7 @@ export function pickImagesFromScrape(res: unknown): string[] {
     ];
     for (const attr of dataAttrs) {
       const re = new RegExp(`<[^>]+\\b${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
-      for (let m: RegExpExecArray | null; (m = re.exec(html)); ) push(m[1]);
+      for (let m: RegExpExecArray | null; (m = re.exec(html)); ) push(m[1], 2);
     }
 
     // 2b) Galerie JS: np. Speed-line trzyma listę plików w data-gallery-images,
@@ -1452,7 +1471,7 @@ export function pickImagesFromScrape(res: unknown): string[] {
         for (const item of parsed) {
           if (typeof item !== "string" || !item) continue;
           const path = item.startsWith("http") ? item : `${cdn.replace(/\/$/, "")}/ai/2000${item.startsWith("/") ? item : `/${item}`}`;
-          push(path);
+          push(path, 2);
         }
       } catch { /* skip malformed gallery JSON */ }
     }
@@ -1471,22 +1490,22 @@ export function pickImagesFromScrape(res: unknown): string[] {
         const width = w ? parseInt(w[1], 10) : 0;
         if (width >= bestW) { bestW = width; bestUrl = u; }
       }
-      if (bestUrl && bestW >= 400) push(bestUrl);
-      else if (bestUrl && bestW < 0) push(bestUrl); // brak deklaracji szer. — wpuść
+      if (bestUrl && bestW >= 400) push(bestUrl, 2);
+      else if (bestUrl && bestW < 0) push(bestUrl, 2); // brak deklaracji szer. — wpuść
     }
 
     // 4) <img src=...> tylko jeśli ścieżka wygląda na katalog produktów.
     const imgRe = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi;
     for (let m: RegExpExecArray | null; (m = imgRe.exec(html)); ) {
       const src = m[1];
-      if (looksLikeProductPath(src)) push(src);
+      if (looksLikeProductPath(src)) push(src, 2);
     }
 
     // 5) <link rel="preload" as="image" href="...">
     const preloadRe = /<link\b[^>]*\brel\s*=\s*["']preload["'][^>]*\bas\s*=\s*["']image["'][^>]*\bhref\s*=\s*["']([^"']+)["']/gi;
-    for (let m: RegExpExecArray | null; (m = preloadRe.exec(html)); ) push(m[1]);
+    for (let m: RegExpExecArray | null; (m = preloadRe.exec(html)); ) push(m[1], 2);
     const preloadRe2 = /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["']preload["'][^>]*\bas\s*=\s*["']image["']/gi;
-    for (let m: RegExpExecArray | null; (m = preloadRe2.exec(html)); ) push(m[1]);
+    for (let m: RegExpExecArray | null; (m = preloadRe2.exec(html)); ) push(m[1], 2);
 
     // 6) JSON-LD: <script type="application/ld+json">…</script> — pole "image".
     const jsonLdRe = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -1508,14 +1527,14 @@ export function pickImagesFromScrape(res: unknown): string[] {
           const isProduct = t === "Product" || (Array.isArray(t) && t.includes("Product"));
           if (isProduct) {
             const img = obj.image ?? obj.contentUrl;
-            if (typeof img === "string") push(img);
+            if (typeof img === "string") push(img, 2);
             else if (Array.isArray(img)) {
               for (const it of img) {
-                if (typeof it === "string") push(it);
-                else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+                if (typeof it === "string") push(it, 2);
+                else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url, 2);
               }
             } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
-              push((img as { url: string }).url);
+              push((img as { url: string }).url, 2);
             }
           }
           for (const v of Object.values(obj)) {
@@ -1533,7 +1552,7 @@ export function pickImagesFromScrape(res: unknown): string[] {
     const mdImgRe = /https?:\/\/[^\s"'<>]+?\.(?:jpe?g|png|webp|avif)(?:\?[^\s"'<>]*)?/gi;
     for (let m: RegExpExecArray | null; (m = mdImgRe.exec(markdown)); ) {
       const cand = m[0].trim();
-      if (looksLikeProductPath(cand)) push(cand);
+      if (looksLikeProductPath(cand)) push(cand, 3);
     }
   }
 
@@ -1541,7 +1560,16 @@ export function pickImagesFromScrape(res: unknown): string[] {
   const meta = r.metadata as Record<string, unknown> | undefined;
   if (meta) {
     const cand = [meta.ogImage, meta["og:image"], meta.twitterImage, meta["twitter:image"]];
-    for (const c of cand) if (typeof c === "string") push(c);
+    for (const c of cand) if (typeof c === "string") push(c, 1);
+  }
+  // Outer HTML fallback (Tier 3) — only picks images that survived
+  // stripRelatedProductBlocks so cross-sell carousels are already excluded.
+  if (outerHtml && outerHtml !== html) {
+    const imgRe = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi;
+    for (let m: RegExpExecArray | null; (m = imgRe.exec(outerHtml)); ) {
+      const src = m[1];
+      if (looksLikeProductPath(src)) push(src, 3);
+    }
   }
 
   // Jeśli JSON-LD wystawił zdjęcia produktu — one są priorytetowe. Do listy
@@ -1555,13 +1583,15 @@ export function pickImagesFromScrape(res: unknown): string[] {
       if (!/^https?:\/\//i.test(t) || seenP.has(t)) continue;
       seenP.add(t);
       primary.push(t);
+      tiers[t] = 1;
     }
     // Dorzuć og:image jeżeli jest a nie ma go w Product.image.
     for (const u of out) if (!seenP.has(u) && /og[-_]?image|social|share/i.test(u)) primary.push(u);
     const filtered = filterImageUrls(primary).slice(0, 12);
-    if (filtered.length) return filtered;
+    if (filtered.length) return { urls: filtered, tiers };
   }
-  return filterImageUrls(out).slice(0, 12);
+  const filtered = filterImageUrls(out).slice(0, 12);
+  return { urls: filtered, tiers };
 }
 
 // ---------------------------------------------------------------------------
