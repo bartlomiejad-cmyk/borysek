@@ -343,6 +343,8 @@ function ProductDetail() {
   const includeExtra = (data as { include_extra_images?: boolean }).include_extra_images ?? false;
   const quality = (enrichment as { quality?: { watermark_urls?: string[]; name_mismatch?: boolean; feature_mismatches?: string[]; notes?: string } | null } | null)?.quality ?? null;
   const regeneratedUrl = (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null;
+  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ deduped?: boolean }>;
+  const dedupedCount = scoreBreakdown.filter((s) => s.deduped === true).length;
 
   const renderThumb = (u: string, extra: boolean) => {
     const s = imageScores[u];
