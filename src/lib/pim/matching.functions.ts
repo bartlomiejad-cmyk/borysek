@@ -1,7 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { sanitizeProductDescription, filterImageUrls } from "./source-cleanup";
+import {
+  sanitizeProductDescription,
+  filterImageUrls,
+  normalizeDomainToken,
+  extractHostname,
+} from "./source-cleanup";
 import { llmCleanDescription, type CleaningMeta } from "./llm-cleaner.server";
 
 const LLM_CLEAN_MIN_CHARS = 200;
@@ -17,17 +22,27 @@ type SourceMeta = {
   imagesCount: number;
 };
 
+type ScoreResult = {
+  total: number;
+  producer_boost: boolean;
+  trusted_boost: boolean;
+};
+
 function scoreSource(
   meta: SourceMeta,
-  product: { nazwa: string | null; ean: string | null },
-): number {
+  product: { nazwa: string | null; ean: string | null; producer: string | null },
+  url: string,
+  trustedDomains: string[],
+): ScoreResult {
   const title = (meta.title ?? "").toLowerCase();
   const desc = (meta.description ?? "").toLowerCase();
   const descLen = desc.length;
   const imgs = meta.imagesCount;
 
   // Śmieciowe źródło: brak tytułu, brak sensownego opisu, brak zdjęć.
-  if (!title && descLen < 40 && imgs === 0) return -5;
+  if (!title && descLen < 40 && imgs === 0) {
+    return { total: -5, producer_boost: false, trusted_boost: false };
+  }
 
   let s = 0;
   if (descLen >= 200) s += 3;
@@ -44,7 +59,29 @@ function scoreSource(
   const ean = (product.ean ?? "").trim();
   if (ean && (title.includes(ean) || desc.includes(ean))) s += 2;
 
-  return s;
+  const host = extractHostname(url);
+  const normHost = normalizeDomainToken(host);
+  const normProducer = normalizeDomainToken(product.producer);
+  let producer_boost = false;
+  if (normProducer && normProducer.length >= 3 && normHost.includes(normProducer)) {
+    s += 5;
+    producer_boost = true;
+  }
+
+  let trusted_boost = false;
+  if (host && trustedDomains.length) {
+    for (const td of trustedDomains) {
+      const t = td.trim().toLowerCase().replace(/^www\./, "");
+      if (!t) continue;
+      if (host === t || host.endsWith("." + t)) {
+        s += 4;
+        trusted_boost = true;
+        break;
+      }
+    }
+  }
+
+  return { total: s, producer_boost, trusted_boost };
 }
 
 /**
