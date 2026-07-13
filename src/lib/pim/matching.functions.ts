@@ -319,7 +319,7 @@ export const runMatching = createServerFn({ method: "POST" })
       match_type: MatchType;
       matched_term: string | null;
       picked_urls: string[];
-      score_breakdown?: Array<{ url: string; total: number; producer_boost: boolean; trusted_boost: boolean }>;
+      score_breakdown?: BreakdownEntry[];
     }> = [];
 
     for (const p of products) {
@@ -371,7 +371,20 @@ export const runMatching = createServerFn({ method: "POST" })
       );
       const srcMap = new Map<string, { title: string | null; description: string | null }>();
       const metaMap = new Map<string, SourceMeta>();
+      const confidenceMap = new Map<string, number | null>();
+      const descLenMap = new Map<string, number>();
       const productById = new Map(products.map((p) => [p.id, p]));
+      // Load pinned_main_url per product so we can skip clustering on manually-pinned products.
+      const { data: pinRows } = await supabase
+        .from("enrichments")
+        .select("source_product_id, pinned_main_url")
+        .eq("project_id", data.projectId)
+        .in("source_product_id", updates.map((u) => u.source_product_id));
+      const pinnedByProduct = new Map<string, string | null>();
+      for (const r of pinRows ?? []) {
+        const rr = r as { source_product_id: string; pinned_main_url: string | null };
+        pinnedByProduct.set(rr.source_product_id, rr.pinned_main_url);
+      }
       const urlToProduct = new Map<string, { nazwa: string | null; ean: string | null }>();
       for (const u of updates) {
         const p = productById.get(u.source_product_id);
@@ -437,6 +450,8 @@ export const runMatching = createServerFn({ method: "POST" })
             description: descClean || null,
             imagesCount: mainClean.length + extraClean.length,
           });
+          confidenceMap.set(rr.url, cleaningMeta.confidence ?? null);
+          descLenMap.set(rr.url, (descClean ?? "").length);
         }
       }
       let validated = 0;
@@ -446,6 +461,8 @@ export const runMatching = createServerFn({ method: "POST" })
         if (!prod || !prod.nazwa) continue;
 
         let kept = u.picked_urls;
+        let clustersByUrl = new Map<string, string>();
+        const skipClustering = !!pinnedByProduct.get(u.source_product_id);
         if (apiKey) {
           const sources = u.picked_urls
             .map((url) => ({
@@ -455,8 +472,9 @@ export const runMatching = createServerFn({ method: "POST" })
             }))
             .filter((s) => s.title || s.description);
           if (sources.length) {
-            const keep = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
-            kept = u.picked_urls.filter((url) => keep.has(url));
+            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
+            kept = u.picked_urls.filter((url) => val.keep.has(url));
+            if (!skipClustering && val.ok) clustersByUrl = val.clustersByUrl;
             validated++;
           }
         }
@@ -478,17 +496,39 @@ export const runMatching = createServerFn({ method: "POST" })
           );
           return { url, ...r };
         });
-        const rankedFull = scored
-          .filter((x) => x.total > 0)
+        const positive = scored.filter((x) => x.total > 0);
+        const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+        const dedup = applyClusterDedup(
+          positive.map((x) => x.url),
+          scoreByUrl,
+          clustersByUrl,
+          confidenceMap,
+          descLenMap,
+        );
+        const rankedFull = positive
+          .filter((x) => dedup.keptUrls.has(x.url))
           .sort((a, b) => b.total - a.total)
           .slice(0, TOP_SOURCES_PER_PRODUCT);
         const ranked = rankedFull.map((x) => x.url);
-        u.score_breakdown = rankedFull.map((x) => ({
+        const winners: BreakdownEntry[] = rankedFull.map((x) => ({
           url: x.url,
           total: x.total,
           producer_boost: x.producer_boost,
           trusted_boost: x.trusted_boost,
+          variant_key: dedup.keyByUrl.get(x.url) ?? null,
+          deduped: false,
         }));
+        const droppedByDedup: BreakdownEntry[] = positive
+          .filter((x) => dedup.deduped.has(x.url))
+          .map((x) => ({
+            url: x.url,
+            total: x.total,
+            producer_boost: x.producer_boost,
+            trusted_boost: x.trusted_boost,
+            variant_key: dedup.keyByUrl.get(x.url) ?? null,
+            deduped: true,
+          }));
+        u.score_breakdown = [...winners, ...droppedByDedup];
 
         const wasMatched = u.picked_urls.length > 0;
         if (ranked.length !== u.picked_urls.length) {
