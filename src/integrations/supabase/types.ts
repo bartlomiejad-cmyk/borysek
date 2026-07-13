@@ -104,6 +104,60 @@ export type Database = {
         }
         Relationships: []
       }
+      client_feedback: {
+        Row: {
+          author_name: string | null
+          body: string
+          created_at: string
+          id: string
+          kind: string
+          product_id: string | null
+          project_id: string
+          resolved: boolean
+          share_token: string | null
+          updated_at: string
+        }
+        Insert: {
+          author_name?: string | null
+          body: string
+          created_at?: string
+          id?: string
+          kind: string
+          product_id?: string | null
+          project_id: string
+          resolved?: boolean
+          share_token?: string | null
+          updated_at?: string
+        }
+        Update: {
+          author_name?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          product_id?: string | null
+          project_id?: string
+          resolved?: boolean
+          share_token?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_feedback_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "source_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_feedback_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       enrichments: {
         Row: {
           ai_gallery_urls: Json
@@ -396,6 +450,53 @@ export type Database = {
             foreignKeyName: "product_sources_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_shares: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          is_active: boolean
+          password_hash: string
+          password_updated_at: string
+          project_id: string
+          salt: string
+          token: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id?: string
+          is_active?: boolean
+          password_hash: string
+          password_updated_at?: string
+          project_id: string
+          salt: string
+          token: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          is_active?: boolean
+          password_hash?: string
+          password_updated_at?: string
+          project_id?: string
+          salt?: string
+          token?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_shares_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
             referencedRelation: "projects"
             referencedColumns: ["id"]
           },

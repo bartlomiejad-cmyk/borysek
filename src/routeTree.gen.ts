@@ -12,10 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
 import { Route as AuthPhotoIndexRouteImport } from './routes/_auth/photo.index'
 import { Route as AuthPhotoIdRouteImport } from './routes/_auth/photo.$id'
 import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects.$id.index'
+import { Route as ShareTokenPPidRouteImport } from './routes/share.$token.p.$pid'
 import { Route as ApiPublicHooksProcessBulkJobsRouteImport } from './routes/api/public/hooks/process-bulk-jobs'
 import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/projects.$id.verify'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
@@ -33,6 +35,11 @@ const AuthRoute = AuthRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthProjectsIndexRoute = AuthProjectsIndexRouteImport.update({
@@ -54,6 +61,11 @@ const AuthProjectsIdIndexRoute = AuthProjectsIdIndexRouteImport.update({
   id: '/projects/$id/',
   path: '/projects/$id/',
   getParentRoute: () => AuthRoute,
+} as any)
+const ShareTokenPPidRoute = ShareTokenPPidRouteImport.update({
+  id: '/p/$pid',
+  path: '/p/$pid',
+  getParentRoute: () => ShareTokenRoute,
 } as any)
 const ApiPublicHooksProcessBulkJobsRoute =
   ApiPublicHooksProcessBulkJobsRouteImport.update({
@@ -82,11 +94,13 @@ const AuthProjectsIdProductsPidPreviewRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/share/$token': typeof ShareTokenRouteWithChildren
   '/photo/$id': typeof AuthPhotoIdRoute
   '/photo/': typeof AuthPhotoIndexRoute
   '/projects/': typeof AuthProjectsIndexRoute
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
+  '/share/$token/p/$pid': typeof ShareTokenPPidRoute
   '/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
   '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
@@ -94,11 +108,13 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/share/$token': typeof ShareTokenRouteWithChildren
   '/photo/$id': typeof AuthPhotoIdRoute
   '/photo': typeof AuthPhotoIndexRoute
   '/projects': typeof AuthProjectsIndexRoute
   '/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
+  '/share/$token/p/$pid': typeof ShareTokenPPidRoute
   '/projects/$id': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
   '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
@@ -108,11 +124,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
+  '/share/$token': typeof ShareTokenRouteWithChildren
   '/_auth/photo/$id': typeof AuthPhotoIdRoute
   '/_auth/photo/': typeof AuthPhotoIndexRoute
   '/_auth/projects/': typeof AuthProjectsIndexRoute
   '/_auth/projects/$id/verify': typeof AuthProjectsIdVerifyRoute
   '/api/public/hooks/process-bulk-jobs': typeof ApiPublicHooksProcessBulkJobsRoute
+  '/share/$token/p/$pid': typeof ShareTokenPPidRoute
   '/_auth/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
   '/_auth/projects/$id/products/$pid_/preview': typeof AuthProjectsIdProductsPidPreviewRoute
@@ -122,11 +140,13 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/share/$token'
     | '/photo/$id'
     | '/photo/'
     | '/projects/'
     | '/projects/$id/verify'
     | '/api/public/hooks/process-bulk-jobs'
+    | '/share/$token/p/$pid'
     | '/projects/$id/'
     | '/projects/$id/products/$pid'
     | '/projects/$id/products/$pid/preview'
@@ -134,11 +154,13 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/share/$token'
     | '/photo/$id'
     | '/photo'
     | '/projects'
     | '/projects/$id/verify'
     | '/api/public/hooks/process-bulk-jobs'
+    | '/share/$token/p/$pid'
     | '/projects/$id'
     | '/projects/$id/products/$pid'
     | '/projects/$id/products/$pid/preview'
@@ -147,11 +169,13 @@ export interface FileRouteTypes {
     | '/'
     | '/_auth'
     | '/login'
+    | '/share/$token'
     | '/_auth/photo/$id'
     | '/_auth/photo/'
     | '/_auth/projects/'
     | '/_auth/projects/$id/verify'
     | '/api/public/hooks/process-bulk-jobs'
+    | '/share/$token/p/$pid'
     | '/_auth/projects/$id/'
     | '/_auth/projects/$id/products/$pid'
     | '/_auth/projects/$id/products/$pid_/preview'
@@ -161,6 +185,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ShareTokenRoute: typeof ShareTokenRouteWithChildren
   ApiPublicHooksProcessBulkJobsRoute: typeof ApiPublicHooksProcessBulkJobsRoute
 }
 
@@ -185,6 +210,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth/projects/': {
@@ -214,6 +246,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/projects/$id/'
       preLoaderRoute: typeof AuthProjectsIdIndexRouteImport
       parentRoute: typeof AuthRoute
+    }
+    '/share/$token/p/$pid': {
+      id: '/share/$token/p/$pid'
+      path: '/p/$pid'
+      fullPath: '/share/$token/p/$pid'
+      preLoaderRoute: typeof ShareTokenPPidRouteImport
+      parentRoute: typeof ShareTokenRoute
     }
     '/api/public/hooks/process-bulk-jobs': {
       id: '/api/public/hooks/process-bulk-jobs'
@@ -268,22 +307,25 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface ShareTokenRouteChildren {
+  ShareTokenPPidRoute: typeof ShareTokenPPidRoute
+}
+
+const ShareTokenRouteChildren: ShareTokenRouteChildren = {
+  ShareTokenPPidRoute: ShareTokenPPidRoute,
+}
+
+const ShareTokenRouteWithChildren = ShareTokenRoute._addFileChildren(
+  ShareTokenRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRouteWithChildren,
   LoginRoute: LoginRoute,
+  ShareTokenRoute: ShareTokenRouteWithChildren,
   ApiPublicHooksProcessBulkJobsRoute: ApiPublicHooksProcessBulkJobsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

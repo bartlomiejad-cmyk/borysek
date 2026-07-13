@@ -37,6 +37,7 @@ import { deleteProducts } from "@/lib/pim/products.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
+import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -100,6 +101,7 @@ import {
   RefreshCw,
   ImagePlus,
   Wand2,
+  Share2,
 } from "lucide-react";
 
 const searchSchema = z.object({
@@ -165,6 +167,7 @@ function ProjectPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
@@ -497,6 +500,9 @@ function ProjectPage() {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
+          </Button>
+          <Button variant="outline" onClick={() => setShareOpen(true)}>
+            <Share2 className="h-4 w-4 mr-2" /> Udostępnij klientowi
           </Button>
           <Button
             variant="outline"
@@ -1060,6 +1066,7 @@ function ProjectPage() {
             ?.visualization_requirements_pl ?? null
         }
       />
+      <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(v) => {
