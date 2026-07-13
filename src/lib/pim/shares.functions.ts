@@ -294,14 +294,19 @@ export const listShareProducts = createServerFn({ method: "POST" })
       fbMap.set(f.product_id, cur);
     }
 
-    const out = (products ?? []).map((p) => {
+    const outRaw = (products ?? []).map((p) => {
       const row = p as { id: string };
       const fbc = fbMap.get(row.id) ?? { comments: 0, fixes: 0 };
       return { ...(p as Record<string, unknown>), feedback: fbc };
     });
-    return {
+    const payload = {
       projectName: (proj as { name?: string } | null)?.name ?? "Projekt",
-      products: out as Array<Record<string, unknown>>,
+      products: outRaw,
+    };
+    // Round-trip przez JSON gwarantuje serializowalność (TSS strict).
+    return JSON.parse(JSON.stringify(payload)) as {
+      projectName: string;
+      products: SharePublicProduct[];
     };
   });
 
