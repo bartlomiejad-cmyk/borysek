@@ -980,12 +980,17 @@ export async function runRegenerateMedia(
     const mainUrl = mainResp.images?.[0]?.url;
     if (!mainUrl) throw new Error("FAL nie zwróciło głównego zdjęcia");
 
-    const mainBytes = await fetchBytes(mainUrl);
-    const mainPath = `${enrichment.id}.jpg`;
-    await supabaseAdmin.storage.from("regenerated-images").remove([`${enrichment.id}.webp`, `${enrichment.id}.png`]).catch(() => undefined);
+    // Deterministic pure-white background: strip whatever tint the model left
+    // and composite the product over flat #FFFFFF before uploading.
+    const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY);
+    const mainPath = `${enrichment.id}.png`;
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([`${enrichment.id}.webp`, `${enrichment.id}.jpg`])
+      .catch(() => undefined);
     const { error: upErr } = await supabaseAdmin.storage
       .from("regenerated-images")
-      .upload(mainPath, mainBytes, { contentType: "image/jpeg", upsert: true });
+      .upload(mainPath, mainBytes, { contentType: "image/png", upsert: true });
     if (upErr) throw new Error(`Upload main: ${upErr.message}`);
     const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(mainPath);
     const mainPublic = `${pub.publicUrl}?v=${Date.now()}`;
