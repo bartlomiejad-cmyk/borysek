@@ -1,7 +1,8 @@
 import { randomBytes, pbkdf2Sync, createHmac, timingSafeEqual } from "node:crypto";
 
 export function hashPassword(password: string, salt: string): string {
-  return pbkdf2Sync(password, salt, 120_000, 32, "sha256").toString("hex");
+  // Cloudflare Workers PBKDF2 tops out at 100_000 iterations.
+  return pbkdf2Sync(password, salt, 100_000, 32, "sha256").toString("hex");
 }
 
 export function genToken(): string {
