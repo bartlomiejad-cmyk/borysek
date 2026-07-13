@@ -140,6 +140,7 @@ function ProjectPage() {
   const cancelJobFn = useServerFn(cancelBulkJob);
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
   const recleanFn = useServerFn(recleanProductSources);
+  const deleteProductsFn = useServerFn(deleteProducts);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -164,6 +165,52 @@ function ProjectPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: "one"; id: string; name: string }
+    | { kind: "bulk"; ids: string[]; names: string[] }
+    | null
+  >(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const runDelete = async () => {
+    if (!deleteTarget) return;
+    const ids =
+      deleteTarget.kind === "one" ? [deleteTarget.id] : deleteTarget.ids;
+    if (!ids.length) return;
+    setDeleting(true);
+    const t = toast.loading(
+      ids.length === 1 ? "Usuwam produkt…" : `Usuwam ${ids.length} produktów…`,
+    );
+    try {
+      // Chunk to stay under the 500-per-call server limit.
+      let total = 0;
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        const res = await deleteProductsFn({
+          data: { projectId: id, productIds: chunk },
+        });
+        total += res.deleted;
+      }
+      toast.success(
+        total === 1
+          ? "Produkt usunięty"
+          : `Usunięto ${total} produktów`,
+        { id: t },
+      );
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const pid of ids) next.delete(pid);
+        return next;
+      });
+      setDeleteTarget(null);
+      qc.invalidateQueries({ queryKey: ["project", id] });
+      refetchProducts();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się usunąć"), { id: t });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
