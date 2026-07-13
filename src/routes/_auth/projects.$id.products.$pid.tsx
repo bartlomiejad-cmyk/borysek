@@ -65,6 +65,20 @@ function ProductDetail() {
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
+  const deleteProductsFn = useServerFn(deleteProducts);
+  const navigate = useNavigate();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const deleteMut = useMutation({
+    mutationFn: () =>
+      deleteProductsFn({ data: { projectId: id, productIds: [pid] } }),
+    onSuccess: () => {
+      toast.success("Produkt usunięty");
+      navigate({ to: "/projects/$id", params: { id } });
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Nie udało się usunąć");
+    },
+  });
   const reclean = useMutation({
     mutationFn: () => recleanFn({ data: { projectId: id } }),
     onSuccess: (res) => {
