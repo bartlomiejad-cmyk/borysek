@@ -166,16 +166,20 @@ export const runMatching = createServerFn({ method: "POST" })
 
     const { data: project, error: pErr } = await supabase
       .from("projects")
-      .select("strategy")
+      .select("strategy, settings")
       .eq("id", data.projectId)
       .single();
     if (pErr || !project) throw new Error(pErr?.message ?? "Project not found");
     const strategy = project.strategy as "EAN" | "NAZWA" | "HYBRID";
+    const rawSettings = ((project as { settings?: unknown }).settings ?? {}) as Record<string, unknown>;
+    const trustedDomains = Array.isArray(rawSettings.trusted_domains)
+      ? (rawSettings.trusted_domains as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      : [];
 
     const [{ data: products }, { data: searches }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, nazwa, ean")
+        .select("id, nazwa, ean, raw")
         .eq("project_id", data.projectId),
       supabase
         .from("search_results")
@@ -183,6 +187,22 @@ export const runMatching = createServerFn({ method: "POST" })
         .eq("project_id", data.projectId),
     ]);
     if (!products || !searches) return { matched: 0 };
+
+    const extractProducer = (raw: unknown): string | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const r = raw as Record<string, unknown>;
+      const ie = r.imported_extract;
+      if (ie && typeof ie === "object") {
+        const p = (ie as Record<string, unknown>).producent;
+        if (typeof p === "string" && p.trim()) return p.trim();
+      }
+      const direct = r.producent ?? r.producer ?? r.brand ?? r.marka;
+      if (typeof direct === "string" && direct.trim()) return direct.trim();
+      return null;
+    };
+    const producerById = new Map<string, string | null>(
+      products.map((p) => [p.id, extractProducer((p as { raw?: unknown }).raw)]),
+    );
 
     const termMap = new Map<string, string[]>();
     for (const s of searches) {
@@ -203,6 +223,7 @@ export const runMatching = createServerFn({ method: "POST" })
       match_type: MatchType;
       matched_term: string | null;
       picked_urls: string[];
+      score_breakdown?: Array<{ url: string; total: number; producer_boost: boolean; trusted_boost: boolean }>;
     }> = [];
 
     for (const p of products) {
@@ -346,19 +367,32 @@ export const runMatching = createServerFn({ method: "POST" })
 
         // Ranking po jakości danych i cap TOP N — źródła bez tytułu/opisu/zdjęć
         // wypadają, nawet jeśli AI je zaakceptowało.
-        const ranked = kept
-          .map((url) => {
-            const meta = metaMap.get(url) ?? {
-              title: null,
-              description: null,
-              imagesCount: 0,
-            };
-            return { url, score: scoreSource(meta, { nazwa: prod.nazwa, ean: prod.ean ?? null }) };
-          })
-          .filter((x) => x.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, TOP_SOURCES_PER_PRODUCT)
-          .map((x) => x.url);
+        const producer = producerById.get(u.source_product_id) ?? null;
+        const scored = kept.map((url) => {
+          const meta = metaMap.get(url) ?? {
+            title: null,
+            description: null,
+            imagesCount: 0,
+          };
+          const r = scoreSource(
+            meta,
+            { nazwa: prod.nazwa, ean: prod.ean ?? null, producer },
+            url,
+            trustedDomains,
+          );
+          return { url, ...r };
+        });
+        const rankedFull = scored
+          .filter((x) => x.total > 0)
+          .sort((a, b) => b.total - a.total)
+          .slice(0, TOP_SOURCES_PER_PRODUCT);
+        const ranked = rankedFull.map((x) => x.url);
+        u.score_breakdown = rankedFull.map((x) => ({
+          url: x.url,
+          total: x.total,
+          producer_boost: x.producer_boost,
+          trusted_boost: x.trusted_boost,
+        }));
 
         const wasMatched = u.picked_urls.length > 0;
         if (ranked.length !== u.picked_urls.length) {
