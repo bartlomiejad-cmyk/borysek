@@ -1716,7 +1716,7 @@ async function visualFilterImages(
       `Produkt: „${productName}".`,
       "Otrzymujesz zdjęcia jako kandydatów do galerii tego produktu.",
       "Zwróć JSON {\"keep\":[indeksy 1-based]} — WYŁĄCZNIE zdjęć, które przedstawiają dokładnie ten sam produkt (ten sam wariant/rozmiar/kolor).",
-      "ODRZUĆ: zdjęcia innych produktów widocznych na kaflach „Nowości/Polecane/Bestseller", ikony, banery, logo, zdjęcia kategorii, akcesoriów niezwiązanych z produktem.",
+      "ODRZUĆ: zdjęcia innych produktów widocznych na kaflach Nowości/Polecane/Bestseller, ikony, banery, logo, zdjęcia kategorii, akcesoriów niezwiązanych z produktem.",
       "Jeśli nie widzisz produktu albo nie masz pewności — nie dodawaj indeksu.",
     ].join("\n") },
     ...top.map((url) => ({ type: "image_url", image_url: { url } })),
