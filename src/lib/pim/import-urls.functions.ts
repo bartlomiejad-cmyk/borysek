@@ -365,7 +365,9 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           const { meta, rawMarkdown, rawHtml, h1Title } = inspected;
           const pageTitle = inspected.pageTitle || null;
 
-          const candidateImages = pickImagesFromScrape(scrape);
+          const picked = pickImagesFromScrape(scrape);
+          const candidateImages = picked.urls;
+          const imageTiers = picked.tiers;
           const jsonLd = parseJsonLdProducts(rawHtml);
           const hints = jsonLdHints(jsonLd);
 
@@ -533,6 +535,7 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           // is stashed in source_products.raw so it can be inspected later.
           void description;
           void imageUrls;
+          void imageTiers;
           return { url, ok: true, sourceProductId, name: nazwa };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);

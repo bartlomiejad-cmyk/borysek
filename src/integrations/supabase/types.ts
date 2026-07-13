@@ -424,6 +424,7 @@ export type Database = {
           description: string | null
           extra_images: Json
           id: string
+          image_meta: Json | null
           images: Json
           project_id: string
           raw: Json
@@ -436,6 +437,7 @@ export type Database = {
           description?: string | null
           extra_images?: Json
           id?: string
+          image_meta?: Json | null
           images?: Json
           project_id: string
           raw?: Json
@@ -448,6 +450,7 @@ export type Database = {
           description?: string | null
           extra_images?: Json
           id?: string
+          image_meta?: Json | null
           images?: Json
           project_id?: string
           raw?: Json

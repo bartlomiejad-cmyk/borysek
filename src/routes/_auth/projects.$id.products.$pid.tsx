@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { getProductDetail, updateGoldenRecord } from "@/lib/pim/queries.functions";
+import { getProductDetail, updateGoldenRecord, setImageManualKeep } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
@@ -37,7 +37,14 @@ export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
 });
 
-type ImgScore = { is_central: number; is_clean: number; has_packaging?: number; is_banner_or_trash: boolean };
+type ImgScore = {
+  is_central: number;
+  is_clean: number;
+  has_packaging?: number;
+  is_banner_or_trash: boolean;
+  identity?: "same" | "different" | "unsure";
+  manual_keep?: boolean;
+};
 type ImgMeta = { w: number; h: number };
 
 function scoreToneClass(n: number): string {
@@ -59,6 +66,7 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
@@ -655,6 +663,42 @@ function ProductDetail() {
                   </div>
                 </details>
               )}
+              {(() => {
+                const rejected = (((data as { rejected_identity_images?: string[] } | undefined)?.rejected_identity_images) ?? []) as string[];
+                if (!rejected.length) return null;
+                return (
+                  <details className="pt-1">
+                    <summary className="text-[11px] text-amber-700 dark:text-amber-400 cursor-pointer hover:text-foreground">
+                      Odrzucone (inny produkt) — {rejected.length}
+                    </summary>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      AI stwierdziła, że te zdjęcia pokazują inny produkt niż aktualny. Kliknij, aby przywrócić.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 opacity-70">
+                      {rejected.map((u) => (
+                        <div key={u} className="relative group rounded border border-amber-400/40 p-0.5">
+                          <img src={u} alt="" className="h-24 w-24 rounded object-cover grayscale" />
+                          <button
+                            onClick={async () => {
+                              try {
+                                await restoreIdentityFn({ data: { productId: pid, url: u, keep: true } });
+                                toast.success("Przywrócono zdjęcie");
+                                invalidate();
+                              } catch (e) {
+                                toast.error(friendlyError(e, "Nie udało się przywrócić"));
+                              }
+                            }}
+                            className="absolute top-0 right-0 bg-background border rounded p-0.5 opacity-0 group-hover:opacity-100 transition"
+                            title="Przywróć (zachowaj mimo weryfikacji AI)"
+                          >
+                            <Undo2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })()}
             </div>
 
             {/* Wizualizacje AI (lifestyle) */}

@@ -137,10 +137,16 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const picked = ((enrichment?.picked_urls as string[] | null) ?? []);
     const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
     const meta = ((enrichment as unknown as { image_meta?: ImageMeta } | null)?.image_meta ?? {}) as ImageMeta;
-    const scoresEarly = ((enrichment as unknown as { image_scores?: Record<string, { is_banner_or_trash?: boolean }> } | null)?.image_scores ?? {}) as Record<string, { is_banner_or_trash?: boolean }>;
+    const scoresEarly = ((enrichment as unknown as { image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }> } | null)?.image_scores ?? {}) as Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }>;
     const trash = new Set<string>(
       Object.entries(scoresEarly)
-        .filter(([, s]) => s && s.is_banner_or_trash === true)
+        .filter(([, s]) => {
+          if (!s) return false;
+          if (s.manual_keep === true) return false;
+          if (s.is_banner_or_trash === true) return true;
+          if (s.identity === "different") return true;
+          return false;
+        })
         .map(([u]) => u),
     );
     let sources: Array<{
@@ -197,7 +203,10 @@ export const getProductDetail = createServerFn({ method: "GET" })
         };
       });
     }
-    const image_scores = ((enrichment as unknown as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; scored_at?: string }> } | null)?.image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; scored_at?: string }>;
+    const image_scores = ((enrichment as unknown as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; identity?: "same" | "different" | "unsure"; manual_keep?: boolean; scored_at?: string }> } | null)?.image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; identity?: "same" | "different" | "unsure"; manual_keep?: boolean; scored_at?: string }>;
+    const rejected_identity_images = Object.entries(image_scores)
+      .filter(([, s]) => s?.identity === "different" && s?.manual_keep !== true)
+      .map(([u]) => u);
     return {
       product,
       enrichment,
@@ -206,6 +215,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       include_extra_images: includeExtra,
       image_meta: meta,
       image_scores,
+      rejected_identity_images,
       pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
     };
   });
@@ -249,4 +259,42 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+/**
+ * Manually override an image identity verdict from the product editor:
+ * setting `keep: true` flips `image_scores[url].manual_keep = true`, which
+ * wins over any AI-set `is_banner_or_trash` / `identity: 'different'`.
+ * Setting `keep: false` clears the override.
+ */
+export const setImageManualKeep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      productId: z.string().uuid(),
+      url: z.string().url(),
+      keep: z.boolean(),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: enr, error } = await supabase
+      .from("enrichments")
+      .select("id, image_scores")
+      .eq("source_product_id", data.productId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!enr) throw new Error("Enrichment not found");
+    const scores = (((enr as unknown as { image_scores?: Record<string, Record<string, unknown>> }).image_scores) ?? {}) as Record<string, Record<string, unknown>>;
+    const prev = scores[data.url] ?? {};
+    const next = { ...prev };
+    if (data.keep) next.manual_keep = true;
+    else delete next.manual_keep;
+    scores[data.url] = next;
+    const { error: upErr } = await supabase
+      .from("enrichments")
+      .update({ image_scores: scores as never } as never)
+      .eq("id", (enr as unknown as { id: string }).id);
+    if (upErr) throw new Error(upErr.message);
+    return { ok: true, manual_keep: data.keep };
   });
