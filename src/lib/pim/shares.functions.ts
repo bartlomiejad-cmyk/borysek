@@ -373,3 +373,43 @@ export const submitShareFeedback = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return row as { id: string; created_at: string };
   });
+
+export const getShareProduct = createServerFn({ method: "POST" })
+  .inputValidator((i) =>
+    z.object({
+      token: z.string(),
+      session: z.string(),
+      productId: z.string().uuid(),
+    }).parse(i),
+  )
+  .handler(async ({ data }) => {
+    const share = await requirePublicSession(data.token, data.session);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: p, error } = await supabaseAdmin
+      .from("source_products")
+      .select(`
+        id,
+        nazwa,
+        kod,
+        ean,
+        enrichment:enrichments (
+          golden_name,
+          golden_description,
+          golden_features,
+          golden_slug,
+          golden_meta_description,
+          picked_urls,
+          regenerated_main_image,
+          pinned_main_url,
+          ai_gallery_urls,
+          hidden_images,
+          status
+        )
+      `)
+      .eq("id", data.productId)
+      .eq("project_id", share.project_id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!p) throw new Error("Nie znaleziono produktu");
+    return JSON.parse(JSON.stringify(p)) as SharePublicProduct;
+  });
