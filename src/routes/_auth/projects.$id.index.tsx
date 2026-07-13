@@ -33,6 +33,7 @@ import {
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import { deleteProducts } from "@/lib/pim/products.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
@@ -67,6 +68,16 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
