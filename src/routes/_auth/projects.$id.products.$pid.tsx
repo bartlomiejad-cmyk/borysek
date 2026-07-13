@@ -37,7 +37,14 @@ export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
   component: ProductDetail,
 });
 
-type ImgScore = { is_central: number; is_clean: number; has_packaging?: number; is_banner_or_trash: boolean };
+type ImgScore = {
+  is_central: number;
+  is_clean: number;
+  has_packaging?: number;
+  is_banner_or_trash: boolean;
+  identity?: "same" | "different" | "unsure";
+  manual_keep?: boolean;
+};
 type ImgMeta = { w: number; h: number };
 
 function scoreToneClass(n: number): string {
