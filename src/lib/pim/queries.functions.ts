@@ -142,11 +142,16 @@ export const getProductDetail = createServerFn({ method: "GET" })
       description: string | null;
       images: string[];
       extra_images: string[];
+      cleaning_meta: {
+        cleaned_by: "llm" | "regex";
+        confidence: number | null;
+        removed_sections: string[];
+      } | null;
     }> = [];
     if (picked.length) {
       const { data: srcs, error: srcErr } = await supabase
         .from("product_sources")
-        .select("url, title, description, images, extra_images")
+        .select("url, title, description, images, extra_images, cleaning_meta")
         .eq("project_id", data.projectId)
         .in("url", picked);
       if (srcErr) console.error("product_sources fetch failed:", srcErr.message);
@@ -172,12 +177,16 @@ export const getProductDetail = createServerFn({ method: "GET" })
         const extra = Array.isArray((s as { extra_images?: unknown } | undefined)?.extra_images)
           ? ((s as { extra_images: string[] }).extra_images)
           : [];
+        const cleaning_meta = ((s as { cleaning_meta?: unknown } | undefined)?.cleaning_meta ?? null) as
+          | { cleaned_by: "llm" | "regex"; confidence: number | null; removed_sections: string[] }
+          | null;
         return {
           url: u,
           title: s?.title ?? null,
           description: s?.description ?? null,
           images: main.filter((img) => allowedMain.has(img)),
           extra_images: includeExtra ? extra.filter((img) => allowedExtra.has(img)) : [],
+          cleaning_meta,
         };
       });
     }
