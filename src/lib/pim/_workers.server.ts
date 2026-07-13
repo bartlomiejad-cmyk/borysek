@@ -1370,7 +1370,49 @@ export function pickImagesFromScrape(res: unknown): string[] {
   if (!r) return out;
 
   const rawHtml = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
-  const html = rawHtml ? stripRelatedProductBlocks(rawHtml) : "";
+  // 1) usuń całe chrome sklepu (nav/header/footer/aside/script/style)
+  // 2) usuń bloki "polecane / bestsellery / newest"
+  // 3) zawęź do regionu produktu (Product itemtype / main / article)
+  const chromeless = rawHtml ? stripChromeElements(rawHtml) : "";
+  const noRelated = chromeless ? stripRelatedProductBlocks(chromeless) : "";
+  const html = noRelated ? extractProductRegionHtml(noRelated) : "";
+
+  // JSON-LD Product images (product-scoped) — priorytetowe źródło zdjęć.
+  const jsonLdProductImages: string[] = [];
+  if (rawHtml) {
+    const jsonLdRe = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    for (let m: RegExpExecArray | null; (m = jsonLdRe.exec(rawHtml)); ) {
+      const body = m[1].trim();
+      if (!body) continue;
+      try {
+        const parsed = JSON.parse(body);
+        const stack: unknown[] = [parsed];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node) continue;
+          if (Array.isArray(node)) { for (const it of node) stack.push(it); continue; }
+          if (typeof node !== "object") continue;
+          const obj = node as Record<string, unknown>;
+          const t = obj["@type"];
+          const isProduct = t === "Product" || (Array.isArray(t) && t.includes("Product"));
+          if (isProduct) {
+            const img = obj.image ?? obj.contentUrl;
+            const collect = (v: unknown) => {
+              if (typeof v === "string") jsonLdProductImages.push(v);
+              else if (v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string") {
+                jsonLdProductImages.push((v as { url: string }).url);
+              }
+            };
+            if (Array.isArray(img)) img.forEach(collect);
+            else collect(img);
+          }
+          for (const v of Object.values(obj)) {
+            if (v && (Array.isArray(v) || typeof v === "object")) stack.push(v);
+          }
+        }
+      } catch { /* skip malformed JSON-LD */ }
+    }
+  }
 
   if (html) {
     // 1) Lightbox/zoom: <a href="...jpg|png|webp">...<img...></a>
@@ -1459,15 +1501,21 @@ export function pickImagesFromScrape(res: unknown): string[] {
           if (Array.isArray(node)) { for (const it of node) stack.push(it); continue; }
           if (typeof node !== "object") continue;
           const obj = node as Record<string, unknown>;
-          const img = obj.image ?? obj.contentUrl;
-          if (typeof img === "string") push(img);
-          else if (Array.isArray(img)) {
-            for (const it of img) {
-              if (typeof it === "string") push(it);
-              else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+          // Bierzemy image tylko z węzłów Product — inaczej łapiemy inne
+          // produkty widoczne w ItemList tej samej strony.
+          const t = obj["@type"];
+          const isProduct = t === "Product" || (Array.isArray(t) && t.includes("Product"));
+          if (isProduct) {
+            const img = obj.image ?? obj.contentUrl;
+            if (typeof img === "string") push(img);
+            else if (Array.isArray(img)) {
+              for (const it of img) {
+                if (typeof it === "string") push(it);
+                else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+              }
+            } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
+              push((img as { url: string }).url);
             }
-          } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
-            push((img as { url: string }).url);
           }
           for (const v of Object.values(obj)) {
             if (v && (Array.isArray(v) || typeof v === "object")) stack.push(v);
@@ -1495,6 +1543,23 @@ export function pickImagesFromScrape(res: unknown): string[] {
     for (const c of cand) if (typeof c === "string") push(c);
   }
 
+  // Jeśli JSON-LD wystawił zdjęcia produktu — one są priorytetowe. Do listy
+  // dorzucamy tylko og:image (już w `out` przez §7) i odsiewamy resztę.
+  if (jsonLdProductImages.length >= 2) {
+    const primary: string[] = [];
+    const seenP = new Set<string>();
+    for (const raw of jsonLdProductImages) {
+      let t = upgradeToLargeImageUrl(raw.trim());
+      t = upgradeToLargeImageUrl(t);
+      if (!/^https?:\/\//i.test(t) || seenP.has(t)) continue;
+      seenP.add(t);
+      primary.push(t);
+    }
+    // Dorzuć og:image jeżeli jest a nie ma go w Product.image.
+    for (const u of out) if (!seenP.has(u) && /og[-_]?image|social|share/i.test(u)) primary.push(u);
+    const filtered = filterImageUrls(primary).slice(0, 12);
+    if (filtered.length) return filtered;
+  }
   return filterImageUrls(out).slice(0, 12);
 }
 
