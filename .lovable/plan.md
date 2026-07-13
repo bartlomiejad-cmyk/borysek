@@ -1,37 +1,47 @@
-## Problem
+## Cel
+Zwiększyć skuteczność importu z linków dla stron chronionych anty-botem (reCAPTCHA, Cloudflare, Datadome), tak jak mieloch.pl, przez wymuszenie renderowania w przeglądarce po stronie Firecrawl zamiast prostego pobrania HTML.
 
-Import URL zaciągnął produkt o nazwie „reCAPTCHA". Firecrawl scrape zwrócił stronę zabezpieczeń antybotową (reCAPTCHA/Cloudflare/„Just a moment…"), a fallback `extractH1` wziął pierwszy `<h1>` z takiej strony jako nazwę produktu.
+## Diagnoza
+Obecnie `src/lib/pim/import-urls.functions.ts` woła Firecrawl w trybie zwykłego scrape'a. Strony za challenge'em (Cloudflare/reCAPTCHA) zwracają wtedy stronę interstitial zamiast produktu — stąd fallback łapał `reCAPTCHA` jako `<h1>`.
 
-## Rozwiązanie — `src/lib/pim/import-urls.functions.ts`
+Firecrawl v2 udostępnia mechanizmy, które w większości przypadków rozwiązują problem bez uciekania się do szarej strefy:
+- `formats: ['markdown','html']` + `onlyMainContent: true` (już mamy)
+- `waitFor` — czekanie aż JS zdąży się wykonać po challenge'u
+- `mobile: true` / rotacja User-Agenta — mniej stron wymaga wtedy challenge'u
+- `location: { country, languages }` — geo dopasowane do sklepu (PL)
+- `proxy: 'stealth'` (nowość v2) — rezydencjalne proxy + stealth browser, dedykowane do stron z anty-botem
+- `actions: [{ type: 'wait', milliseconds }, { type: 'screenshot' }]` — pozwala poczekać na Cloudflare turnstile i zweryfikować
 
-### 1. Wykrywanie stron-blokad przed jakąkolwiek ekstrakcją
-Dodaj helper `looksLikeChallengePage(rawHtml, markdown, title)` który zwraca `true`, gdy w HTML/markdown/title pojawia się dowolny z markerów:
-- `recaptcha`, `g-recaptcha`, `hcaptcha`, `cf-challenge`, `cf-browser-verification`, `cloudflare`
-- `just a moment`, `checking your browser`, `attention required`, `access denied`, `403 forbidden`, `robot check`
+## Zakres zmian
 
-Jeżeli trafienie → zwróć od razu `{ url, ok: false, error: "Strona zablokowana przez zabezpieczenia antybotowe (reCAPTCHA/Cloudflare). Spróbuj innego linku lub uruchom import ponownie." }`.
+### 1. `src/lib/pim/import-urls.functions.ts`
+- Pierwsza próba scrape'a bez zmian (tanio).
+- Jeśli wynik przechodzi przez `looksLikeChallengePage` LUB `isJunkName` LUB brak treści produktowej → automatyczny retry z „trybem stealth":
+  - `proxy: 'stealth'`
+  - `waitFor: 4000`
+  - `location: { country: 'PL', languages: ['pl'] }`
+  - `mobile: true` (rotacyjnie na drugiej próbie)
+- Dopiero po drugiej nieudanej próbie zwracamy błąd „Nie udało się przejść przez zabezpieczenie anty-botowe strony" z sugestią wklejenia treści ręcznie.
+- Loguj do konsoli serwera (`console.warn`) info, że włączono stealth — do diagnostyki bez ujawniania kluczy.
 
-### 2. Blocklist na wynikową nazwę (belt-and-suspenders)
-Nawet gdy challenge nie zostanie wykryty przez markery, po wybraniu `rawNazwa` zwaliduj:
-```
-const JUNK_NAMES = ["recaptcha", "captcha", "cloudflare", "just a moment",
-  "attention required", "access denied", "403 forbidden", "not found",
-  "robot check", "verify you are human"];
-```
-Jeżeli znormalizowana `rawNazwa` (lowercase, trim) zawiera któryś marker lub jest krótsza niż 3 znaki → traktuj jako brak nazwy i zwróć czytelny błąd.
+### 2. UI — `src/components/pim/ImportUrlsDialog.tsx`
+- Dodaj opcjonalny checkbox **„Tryb stealth (wolniejszy, dla stron z Cloudflare/reCAPTCHA)"**, który wymusza od razu drugą ścieżkę i zwiększa timeout klienta.
+- Komunikat błędu z serwera pokazany 1:1 w dialogu (już jest, ale wzbogacony o podpowiedź).
 
-### 3. Wybór lepszego `<h1>` gdy jest ich kilka
-Zmień `extractH1` na `extractProductH1(rawHtml)`:
-- Zbierz WSZYSTKIE `<h1>` z HTML.
-- Preferuj ten z klasą zawierającą `product`, `product-name`, `product-title`, `item-title` (case-insensitive) — mieloch.pl używa `<h1 class="product-name">`.
-- W przeciwnym razie zwróć pierwszy `<h1>` który nie pasuje do `JUNK_NAMES`.
+### 3. Fallback ręczny (opcjonalny, do decyzji)
+Gdy nawet stealth zawiedzie — pole tekstowe w dialogu do wklejenia HTML/tekstu produktu, który idzie do tej samej pipeline'y AI extract co dziś. To eliminuje twarde blokady bez łamania regulaminów sklepów.
 
-To samo zastosuj do `extractHtmlTitle` — po strip odrzuć wynik pasujący do JUNK_NAMES.
+## Czego świadomie NIE robimy
+- Nie omijamy CAPTCHA przez zewnętrzne solvery (2Captcha itp.) — narusza to regulaminy większości sklepów i jest kruche.
+- Nie stawiamy własnego headless-browsera w Workerze — nie zmieści się w limitach runtime'u (patrz `server-runtime`).
+- Nie zmieniamy nagłówków HTTP „na siłę" po naszej stronie — Firecrawl robi to lepiej i legalnie w swojej infrastrukturze.
 
-### 4. Bez zmian w schemacie/DB/UI
-Zmiana wyłącznie w `src/lib/pim/import-urls.functions.ts`. UI dialogu pokaże czytelny komunikat błędu z pkt. 1/2, użytkownik zobaczy dlaczego link został odrzucony.
+## Detale techniczne
+- Firecrawl v2 `scrape` przyjmuje `proxy: 'basic' | 'stealth' | 'auto'`. Stealth kosztuje więcej kredytów per request, więc używamy go tylko jako fallback.
+- Kolejność prób: `basic` (domyślne) → `stealth + waitFor 4s + PL geo` → błąd.
+- `import-urls.functions.ts` już centralizuje wywołanie Firecrawl — zmiana lokalna, bez ruszania `_workers.server.ts` i głównego Discovery.
 
-## Uwagi
-
-- Rekord „reCAPTCHA" widoczny w projekcie mieloch.pl trzeba usunąć ręcznie z listy produktów po wdrożeniu — poprawka nie robi żadnej retroaktywnej wstecznej korekty w bazie.
-- Nie próbujemy obchodzić reCAPTCHA — po prostu rzetelnie zgłaszamy błąd zamiast tworzyć „śmieciowy" produkt.
+## Test manualny (po wdrożeniu)
+1. Import `https://mieloch.pl/wydech-yasuni-carrera-16-aluminium-red-gilera-piaggio` → powinien wpaść w stealth i wrócić z nazwą „Wydech Yasuni Carrera 16 …".
+2. Import losowej strony bez ochrony → dalej idzie tanią ścieżką (1 kredyt).
+3. Strona z twardym CAPTCHA → czytelny błąd + podpowiedź o ręcznym wklejeniu.
