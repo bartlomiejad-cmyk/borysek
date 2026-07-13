@@ -256,3 +256,41 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+/**
+ * Manually override an image identity verdict from the product editor:
+ * setting `keep: true` flips `image_scores[url].manual_keep = true`, which
+ * wins over any AI-set `is_banner_or_trash` / `identity: 'different'`.
+ * Setting `keep: false` clears the override.
+ */
+export const setImageManualKeep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      productId: z.string().uuid(),
+      url: z.string().url(),
+      keep: z.boolean(),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: enr, error } = await supabase
+      .from("enrichments")
+      .select("id, image_scores")
+      .eq("source_product_id", data.productId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!enr) throw new Error("Enrichment not found");
+    const scores = (((enr as unknown as { image_scores?: Record<string, Record<string, unknown>> }).image_scores) ?? {}) as Record<string, Record<string, unknown>>;
+    const prev = scores[data.url] ?? {};
+    const next = { ...prev };
+    if (data.keep) next.manual_keep = true;
+    else delete next.manual_keep;
+    scores[data.url] = next;
+    const { error: upErr } = await supabase
+      .from("enrichments")
+      .update({ image_scores: scores as never } as never)
+      .eq("id", (enr as unknown as { id: string }).id);
+    if (upErr) throw new Error(upErr.message);
+    return { ok: true, manual_keep: data.keep };
+  });
