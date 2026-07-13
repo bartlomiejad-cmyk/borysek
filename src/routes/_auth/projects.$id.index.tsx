@@ -101,6 +101,7 @@ import {
   RefreshCw,
   ImagePlus,
   Wand2,
+  Share2,
 } from "lucide-react";
 
 const searchSchema = z.object({
