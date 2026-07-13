@@ -1194,9 +1194,8 @@ function stripRelatedProductBlocks(html: string): string {
 }
 
 /**
- * Wyciąga URL-e zdjęć produktu wyłącznie z galerii (lightbox/zoom).
- * Pomijamy `metadata.ogImage` i markdown `![](...)` (to zwykle banery
- * udostępnień, polecane produkty albo logo brandu).
+ * Wyciąga URL-e zdjęć produktu z galerii/lightboxa i metadanych produktu,
+ * następnie normalizuje miniatury do największych znanych wariantów.
  */
 export function pickImagesFromScrape(res: unknown): string[] {
   const out: string[] = [];
@@ -1329,9 +1328,9 @@ export function pickImagesFromScrape(res: unknown): string[] {
   // upgradeToLargeImageUrl potrafią wskazać pełne zdjęcia (np. Speed-line /ai/140 → /ai/2000).
   const markdown = typeof r.markdown === "string" ? r.markdown : "";
   if (markdown) {
-    const mdImgRe = /!\[[^\]]*\]\((https?:\/\/[^\s)]+(?:\s[^)]*)?)\)/gi;
+    const mdImgRe = /https?:\/\/[^\s"'<>]+?\.(?:jpe?g|png|webp|avif)(?:\?[^\s"'<>]*)?/gi;
     for (let m: RegExpExecArray | null; (m = mdImgRe.exec(markdown)); ) {
-      const cand = m[1].trim();
+      const cand = m[0].trim();
       if (looksLikeProductPath(cand)) push(cand);
     }
   }
