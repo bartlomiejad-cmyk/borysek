@@ -1066,6 +1066,7 @@ function ProjectPage() {
             ?.visualization_requirements_pl ?? null
         }
       />
+      <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(v) => {
