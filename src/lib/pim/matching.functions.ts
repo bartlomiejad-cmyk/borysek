@@ -422,5 +422,218 @@ export const runMatching = createServerFn({ method: "POST" })
         .upsert(updates as never, { onConflict: "source_product_id" });
       if (error) throw new Error(error.message);
     }
+
+    // ---------------------------------------------------------------------
+    // Adaptive rescrape trigger. Collect products with fewer than
+    // MIN_STRONG_SOURCES strong sources AND rescrape_rounds < MAX_RESCRAPE_ROUNDS,
+    // then enqueue a PIM_RESCRAPE bulk job in the background.
+    // ---------------------------------------------------------------------
+    try {
+      const productIdsToRescrape: string[] = [];
+      const { data: existingEnrich } = await supabase
+        .from("enrichments")
+        .select("source_product_id, rescrape_rounds")
+        .eq("project_id", data.projectId)
+        .in(
+          "source_product_id",
+          updates.map((u) => u.source_product_id),
+        );
+      const roundsById = new Map<string, number>();
+      for (const r of existingEnrich ?? []) {
+        const rr = r as { source_product_id: string; rescrape_rounds: number | null };
+        roundsById.set(rr.source_product_id, rr.rescrape_rounds ?? 0);
+      }
+      for (const u of updates) {
+        const strong = (u.score_breakdown ?? []).filter(
+          (s) => s.total >= SOURCE_SCORE_THRESHOLD,
+        ).length;
+        const rounds = roundsById.get(u.source_product_id) ?? 0;
+        if (strong < MIN_STRONG_SOURCES && rounds < MAX_RESCRAPE_ROUNDS && u.picked_urls.length < TOP_SOURCES_PER_PRODUCT) {
+          productIdsToRescrape.push(u.source_product_id);
+        }
+      }
+      if (productIdsToRescrape.length) {
+        const { userId } = context;
+        const { error: jobErr } = await supabase
+          .from("bulk_jobs" as never)
+          .insert({
+            project_id: data.projectId,
+            user_id: userId,
+            kind: "PIM_RESCRAPE",
+            items: productIdsToRescrape as never,
+            total: productIdsToRescrape.length,
+          } as never);
+        if (jobErr) {
+          console.warn("[runMatching] failed to enqueue PIM_RESCRAPE job:", jobErr.message);
+        } else {
+          // Fire-and-forget kick to worker (same pattern as bulk-jobs.functions.ts).
+          try {
+            const base =
+              process.env.PUBLIC_APP_URL ||
+              "https://project--a56746f2-6fdf-47b1-8095-043a41af98fd.lovable.app";
+            const apikeySb = process.env.SUPABASE_PUBLISHABLE_KEY;
+            if (apikeySb) {
+              void fetch(`${base}/api/public/hooks/process-bulk-jobs`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: apikeySb },
+                body: "{}",
+              }).catch(() => {});
+            }
+          } catch {
+            /* cron will catch up */
+          }
+          console.log(`[runMatching] enqueued rescrape for ${productIdsToRescrape.length} products`);
+        }
+      }
+    } catch (e) {
+      console.warn("[runMatching] rescrape trigger failed (non-fatal):", e);
+    }
+
     return { matched, total: products.length };
   });
+
+// ---------------------------------------------------------------------------
+// Single-product rescorer used by the PIM_RESCRAPE worker. Loads the current
+// enrichment.picked_urls (union of matched URLs), fetches product_sources,
+// applies AI validation (best-effort) and the same scoring/cap as runMatching,
+// then persists new picked_urls + score_breakdown.
+// ---------------------------------------------------------------------------
+export async function scoreAndCapForProduct(
+  projectId: string,
+  productId: string,
+  apiKey: string | undefined,
+): Promise<{ count: number; strong: number }> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+  const { data: project } = await supabaseAdmin
+    .from("projects")
+    .select("settings, strategy")
+    .eq("id", projectId)
+    .single();
+  const rawSettings = ((project as { settings?: unknown } | null)?.settings ?? {}) as Record<string, unknown>;
+  const trustedDomains = Array.isArray(rawSettings.trusted_domains)
+    ? (rawSettings.trusted_domains as unknown[]).filter(
+        (s): s is string => typeof s === "string" && s.trim().length > 0,
+      )
+    : [];
+
+  const { data: productRow } = await supabaseAdmin
+    .from("source_products")
+    .select("id, nazwa, ean, raw")
+    .eq("id", productId)
+    .single();
+  if (!productRow) return { count: 0, strong: 0 };
+  const rawObj = ((productRow as { raw?: unknown }).raw ?? {}) as Record<string, unknown>;
+  const ie = (rawObj.imported_extract ?? {}) as Record<string, unknown>;
+  const producer =
+    (typeof ie.producent === "string" && ie.producent.trim()) ||
+    (typeof rawObj.producent === "string" && (rawObj.producent as string).trim()) ||
+    null;
+
+  // Enrichment currently keeps the "matched" URL list. We need to union it
+  // with newly scraped URLs. Newly scraped URLs live in product_sources but
+  // may not be in enrichment.picked_urls yet — pull both and rescore all.
+  const { data: enRow } = await supabaseAdmin
+    .from("enrichments")
+    .select("id, picked_urls, matched_term")
+    .eq("source_product_id", productId)
+    .maybeSingle();
+  if (!enRow) return { count: 0, strong: 0 };
+  const currentPicked = (enRow.picked_urls as string[] | null) ?? [];
+
+  // Also pull ALL product_sources for the term(s) — union with existing picks.
+  const { data: allSrcs } = await supabaseAdmin
+    .from("product_sources")
+    .select("id, url, title, description, images, extra_images")
+    .eq("project_id", projectId);
+  const bySrcUrl = new Map<string, { title: string | null; description: string | null; imagesCount: number }>();
+  for (const s of allSrcs ?? []) {
+    const rr = s as {
+      url: string;
+      title: string | null;
+      description: string | null;
+      images: unknown;
+      extra_images: unknown;
+    };
+    const main = Array.isArray(rr.images) ? (rr.images as string[]) : [];
+    const extra = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
+    bySrcUrl.set(rr.url, {
+      title: rr.title ?? null,
+      description: rr.description ?? null,
+      imagesCount: main.length + extra.length,
+    });
+  }
+
+  // Candidate URLs = union of previously picked + everything freshly scraped
+  // that references this product's search terms is impractical to detect per
+  // URL, so we score against currentPicked ∪ any freshly upserted URL that
+  // exists in bySrcUrl but not yet in currentPicked AND appeared in the
+  // search_results for this product's terms.
+  const nazwa = (productRow.nazwa ?? "").trim();
+  const terms: string[] = [];
+  if (nazwa) terms.push(nazwa.toLowerCase());
+  if (productRow.ean) terms.push((productRow.ean ?? "").trim().toLowerCase());
+  if (nazwa && productRow.ean) terms.push(`${nazwa} ${productRow.ean}`.toLowerCase());
+  const { data: srchRows } = await supabaseAdmin
+    .from("search_results")
+    .select("term, organic_urls")
+    .eq("project_id", projectId);
+  const termUrlSet = new Set<string>();
+  for (const r of srchRows ?? []) {
+    const rr = r as { term: string; organic_urls: unknown };
+    if (!terms.includes(rr.term.trim().toLowerCase())) continue;
+    if (Array.isArray(rr.organic_urls)) {
+      for (const u of rr.organic_urls as unknown[]) if (typeof u === "string") termUrlSet.add(u);
+    }
+  }
+  const candidates = Array.from(new Set([...currentPicked, ...Array.from(termUrlSet)]));
+
+  // AI validation (best-effort).
+  let kept = candidates;
+  if (apiKey && nazwa) {
+    const sources = candidates
+      .map((url) => {
+        const m = bySrcUrl.get(url);
+        return { url, title: m?.title ?? null, description: m?.description ?? null };
+      })
+      .filter((s) => s.title || s.description);
+    if (sources.length) {
+      const keep = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources);
+      kept = candidates.filter((url) => keep.has(url));
+    }
+  }
+
+  const scored = kept.map((url) => {
+    const meta = bySrcUrl.get(url) ?? { title: null, description: null, imagesCount: 0 };
+    const r = scoreSource(
+      meta,
+      { nazwa: productRow.nazwa, ean: productRow.ean ?? null, producer },
+      url,
+      trustedDomains,
+    );
+    return { url, ...r };
+  });
+  const rankedFull = scored
+    .filter((x) => x.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, TOP_SOURCES_PER_PRODUCT);
+  const ranked = rankedFull.map((x) => x.url);
+  const breakdown = rankedFull.map((x) => ({
+    url: x.url,
+    total: x.total,
+    producer_boost: x.producer_boost,
+    trusted_boost: x.trusted_boost,
+  }));
+
+  await supabaseAdmin
+    .from("enrichments")
+    .update({
+      picked_urls: ranked as never,
+      score_breakdown: breakdown as never,
+      status: ranked.length ? "MATCHED" : "PENDING",
+    } as never)
+    .eq("id", enRow.id);
+
+  const strong = breakdown.filter((b) => b.total >= SOURCE_SCORE_THRESHOLD).length;
+  return { count: ranked.length, strong };
+}
