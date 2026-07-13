@@ -1016,15 +1016,39 @@ function upgradeToLargeImageUrl(input: string): string {
   u = u.replace(/-\d{2,4}x\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // PrestaShop: -home_default / -cart_default / -small_default / -medium_default → -large_default
   u = u.replace(/-(?:home|cart|small|medium|thickbox|category|product)_default\./i, "-large_default.");
+  // PrestaShop bez _default: -small / -cart / -home / -thickbox przed rozszerzeniem.
+  u = u.replace(/-(?:home|cart|small|medium|thickbox|category)(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // Shopify CDN: _small / _compact / _medium / _large / _grande / _100x / _240x → _2048x.
   u = u.replace(/_(?:pico|icon|thumb|small|compact|medium|large|grande)(\.|@)/i, "_2048x$1");
   u = u.replace(/_\d{1,4}x(?:\d{1,4})?(\.(?:jpe?g|png|webp|avif))/i, "_2048x$1");
+  // Ogólny sufiks rozmiaru przed rozszerzeniem: -thumb / -thumbnail / -mini / -tiny / -xs / -preview / -small.
+  u = u.replace(/[-_](?:thumb(?:nail)?|mini|tiny|xs|xxs|preview|small)(\.(?:jpe?g|png|webp|avif))/i, "$1");
+  // IdoSell v2: nazwapliku-1_360.jpg / _100.jpg → nazwapliku-1.jpg.
+  u = u.replace(/(-\d+)_\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1$2");
+  u = u.replace(/_\d{2,4}(\.(?:jpe?g|png|webp|avif))/i, "$1");
   // Magento: /cache/<hash>/small_image/<W>x<H>/ lub /thumbnail/ — wytnij cały segment /cache/.../  i typ rozmiaru.
   u = u.replace(/\/cache\/[a-f0-9]+\/(?:small_image|thumbnail|image)\/\d+x\d+\//i, "/");
   u = u.replace(/\/cache\/[a-f0-9]+\//i, "/");
   // IdoSell / Shoper: /small/ /s/ /m/ /thumb/ → /source/ lub /big/.
   u = u.replace(/\/(?:small|thumb|thumbs|thumbnails|mini)\//i, "/source/");
   u = u.replace(/\/(s|m)\/(\d)/i, "/source/$2");
+  // Ogólne segmenty rozmiaru w ścieżce → usuń.
+  u = u.replace(/\/(?:thumbnail|thumbnails|thumbs|tiny|preview|resized|scaled|xs|xxs|mini|miniatures|miniatury|w\d{2,4}|h\d{2,4})\//gi, "/");
+  // Cloudinary: /upload/w_200,h_200,c_fill/ → /upload/.
+  u = u.replace(/\/upload\/(?:[a-z]_[^/,]+,?)+\//i, "/upload/");
+  // Query-size params: w/width/h/height/size/maxw/maxh/imwidth/imheight — usuń.
+  try {
+    const parsed = new URL(u);
+    const drop = ["w", "width", "h", "height", "size", "maxw", "maxh", "imwidth", "imheight", "fit", "resize"];
+    let mutated = false;
+    for (const k of drop) {
+      if (parsed.searchParams.has(k)) {
+        parsed.searchParams.delete(k);
+        mutated = true;
+      }
+    }
+    if (mutated) u = parsed.toString();
+  } catch { /* keep u */ }
   // Google CDN size hint: =s100 / =w200-h200 → =s2048.
   u = u.replace(/=(?:s|w|h)\d{1,4}(-(?:w|h|s)\d{1,4})*([?&]|$)/i, "=s2048$2");
   return u;
