@@ -22,7 +22,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -98,6 +98,13 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
           feature_mismatches?: string[];
           notes?: string;
         },
+        score_breakdown: (((e as { score_breakdown?: unknown } | undefined)?.score_breakdown) ?? []) as Array<{
+          url: string;
+          total: number;
+          producer_boost: boolean;
+          trusted_boost: boolean;
+        }>,
+        rescrape_rounds: (((e as { rescrape_rounds?: number } | undefined)?.rescrape_rounds) ?? 0) as number,
       };
     });
   });
