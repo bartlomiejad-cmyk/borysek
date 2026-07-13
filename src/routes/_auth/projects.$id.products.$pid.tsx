@@ -1026,6 +1026,46 @@ function ProductDetail() {
           })}
         </div>
       </div>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(v) => {
+          if (!deleteMut.isPending) setDeleteOpen(v);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunąć produkt?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Ta operacja jest nieodwracalna. Usunięte zostaną także złoty
+                  rekord, wizualizacje AI i dopasowania tego produktu. Źródła
+                  (product_sources) i wyniki wyszukiwań pozostają
+                  nienaruszone.
+                </p>
+                <p className="text-foreground font-medium line-clamp-2">
+                  „{product.nazwa}"
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMut.isPending}>
+              Anuluj
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                deleteMut.mutate();
+              }}
+              disabled={deleteMut.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMut.isPending ? "Usuwam…" : "Usuń"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }
