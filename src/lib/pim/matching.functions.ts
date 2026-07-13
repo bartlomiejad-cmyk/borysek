@@ -6,6 +6,43 @@ import { sanitizeProductDescription, filterImageUrls } from "./source-cleanup";
 type MatchType = "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH";
 
 const VALIDATION_MODEL = "google/gemini-2.5-flash-lite";
+const TOP_SOURCES_PER_PRODUCT = 5;
+
+type SourceMeta = {
+  title: string | null;
+  description: string | null;
+  imagesCount: number;
+};
+
+function scoreSource(
+  meta: SourceMeta,
+  product: { nazwa: string | null; ean: string | null },
+): number {
+  const title = (meta.title ?? "").toLowerCase();
+  const desc = (meta.description ?? "").toLowerCase();
+  const descLen = desc.length;
+  const imgs = meta.imagesCount;
+
+  // Śmieciowe źródło: brak tytułu, brak sensownego opisu, brak zdjęć.
+  if (!title && descLen < 40 && imgs === 0) return -5;
+
+  let s = 0;
+  if (descLen >= 200) s += 3;
+  else if (descLen >= 40) s += 1;
+
+  const nazwa = (product.nazwa ?? "").toLowerCase();
+  const tokens = nazwa
+    .split(/[\s,\-_/]+/)
+    .filter((t) => t.length >= 3);
+  if (title && tokens.some((t) => title.includes(t))) s += 2;
+
+  s += Math.min(imgs, 3);
+
+  const ean = (product.ean ?? "").trim();
+  if (ean && (title.includes(ean) || desc.includes(ean))) s += 2;
+
+  return s;
+}
 
 /**
  * Ask the AI to decide which source URLs actually describe the same product
@@ -176,6 +213,7 @@ export const runMatching = createServerFn({ method: "POST" })
         new Set(updates.flatMap((u) => u.picked_urls)),
       );
       const srcMap = new Map<string, { title: string | null; description: string | null }>();
+      const metaMap = new Map<string, SourceMeta>();
       const CHUNK = 200;
       for (let i = 0; i < allUrls.length; i += CHUNK) {
         const chunk = allUrls.slice(i, i + CHUNK);
@@ -215,6 +253,11 @@ export const runMatching = createServerFn({ method: "POST" })
             title: rr.title ?? null,
             description: descClean || null,
           });
+          metaMap.set(rr.url, {
+            title: rr.title ?? null,
+            description: descClean || null,
+            imagesCount: mainClean.length + extraClean.length,
+          });
         }
       }
       const productById = new Map(products.map((p) => [p.id, p]));
@@ -234,13 +277,31 @@ export const runMatching = createServerFn({ method: "POST" })
         if (!sources.length) continue;
         const keep = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
         const kept = u.picked_urls.filter((url) => keep.has(url));
-        if (kept.length !== u.picked_urls.length) {
-          u.picked_urls = kept;
-          if (!kept.length) {
+
+        // Ranking po jakości danych i cap TOP N — źródła bez tytułu/opisu/zdjęć
+        // wypadają, nawet jeśli AI je zaakceptowało.
+        const ranked = kept
+          .map((url) => {
+            const meta = metaMap.get(url) ?? {
+              title: null,
+              description: null,
+              imagesCount: 0,
+            };
+            return { url, score: scoreSource(meta, { nazwa: prod.nazwa, ean: prod.ean ?? null }) };
+          })
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, TOP_SOURCES_PER_PRODUCT)
+          .map((x) => x.url);
+
+        const wasMatched = u.picked_urls.length > 0;
+        if (ranked.length !== u.picked_urls.length) {
+          u.picked_urls = ranked;
+          if (!ranked.length) {
             u.status = "PENDING";
             u.match_type = "NO_MATCH";
             u.matched_term = null;
-            matched--;
+            if (wasMatched) matched--;
           }
         }
         validated++;
