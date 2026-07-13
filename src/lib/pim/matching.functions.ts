@@ -16,6 +16,13 @@ type MatchType = "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH";
 const VALIDATION_MODEL = "google/gemini-2.5-flash-lite";
 const TOP_SOURCES_PER_PRODUCT = 5;
 
+// Minimum score a source needs to count as "strong evidence" for the product.
+// A source with a 200+ char description AND one matching signal (title/EAN/img)
+// clears this bar. Used by the adaptive rescrape trigger.
+export const SOURCE_SCORE_THRESHOLD = 4;
+export const MIN_STRONG_SOURCES = 3;
+export const MAX_RESCRAPE_ROUNDS = 2;
+
 type SourceMeta = {
   title: string | null;
   description: string | null;
