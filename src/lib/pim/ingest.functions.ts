@@ -8,6 +8,8 @@ const sourceProductSchema = z.object({
   kod: z.string().nullable(),
   ean: z.string().nullable(),
   has_images: z.boolean().optional(),
+  main_image_url: z.string().nullable().optional(),
+  gallery_urls: z.array(z.string()).optional(),
   raw: z.record(z.unknown()),
 });
 
@@ -42,7 +44,7 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const payload = data.rows.map((r) => {
-      const { has_images: _hi, ...rest } = r;
+      const { has_images: _hi, main_image_url: _mi, gallery_urls: _gu, ...rest } = r;
       return { ...rest, project_id: data.projectId };
     });
     const { error } = await supabase.from("source_products").insert(payload as never);
