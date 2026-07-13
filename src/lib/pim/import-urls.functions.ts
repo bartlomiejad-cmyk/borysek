@@ -165,18 +165,79 @@ function stripTags(html: string): string {
     .trim();
 }
 
-function extractH1(rawHtml: string): string {
+const JUNK_NAMES = [
+  "recaptcha",
+  "captcha",
+  "cloudflare",
+  "just a moment",
+  "attention required",
+  "access denied",
+  "403 forbidden",
+  "404 not found",
+  "not found",
+  "robot check",
+  "verify you are human",
+  "checking your browser",
+];
+
+function isJunkName(s: string): boolean {
+  const n = s.trim().toLowerCase();
+  if (n.length < 3) return true;
+  return JUNK_NAMES.some((j) => n === j || n.includes(j));
+}
+
+function looksLikeChallengePage(
+  rawHtml: string,
+  markdown: string,
+  title: string,
+): boolean {
+  const hay = `${title}\n${markdown.slice(0, 4000)}\n${rawHtml.slice(0, 8000)}`.toLowerCase();
+  const markers = [
+    "g-recaptcha",
+    "grecaptcha",
+    "recaptcha/api.js",
+    "hcaptcha",
+    "cf-challenge",
+    "cf-browser-verification",
+    "challenge-platform",
+    "just a moment",
+    "checking your browser",
+    "attention required",
+    "access denied",
+    "please verify you are human",
+  ];
+  return markers.some((m) => hay.includes(m));
+}
+
+function extractProductH1(rawHtml: string): string {
   if (!rawHtml) return "";
-  const m = rawHtml.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-  if (!m) return "";
-  return stripTags(m[1]);
+  const re = /<h1\b([^>]*)>([\s\S]*?)<\/h1>/gi;
+  const all: Array<{ classAttr: string; text: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(rawHtml))) {
+    const classMatch = m[1].match(/class\s*=\s*["']([^"']*)["']/i);
+    const cls = classMatch ? classMatch[1].toLowerCase() : "";
+    const text = stripTags(m[2]);
+    if (!text) continue;
+    all.push({ classAttr: cls, text });
+  }
+  if (!all.length) return "";
+  // Prefer product-flavoured class names.
+  const preferred = all.find((h) =>
+    /(product|item)[-_ ]?(name|title|header)/.test(h.classAttr),
+  );
+  if (preferred && !isJunkName(preferred.text)) return preferred.text;
+  // Otherwise first non-junk H1.
+  const first = all.find((h) => !isJunkName(h.text));
+  return first?.text ?? "";
 }
 
 function extractHtmlTitle(rawHtml: string): string {
   if (!rawHtml) return "";
   const m = rawHtml.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
   if (!m) return "";
-  return stripTags(m[1]);
+  const t = stripTags(m[1]);
+  return isJunkName(t) ? "" : t;
 }
 
 function extractPageTitle(
@@ -191,7 +252,7 @@ function extractPageTitle(
     (meta as Record<string, unknown>)["twitter:title"],
   ];
   for (const c of candidates) {
-    if (typeof c === "string" && c.trim()) return c.trim();
+    if (typeof c === "string" && c.trim() && !isJunkName(c)) return c.trim();
   }
   return extractHtmlTitle(rawHtml);
 }
@@ -242,7 +303,16 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
                 ? (scrape.html as string)
                 : "";
           const pageTitle = extractPageTitle(meta, rawHtml) || null;
-          const h1Title = extractH1(rawHtml);
+          const h1Title = extractProductH1(rawHtml);
+
+          if (looksLikeChallengePage(rawHtml, rawMarkdown, pageTitle ?? "")) {
+            return {
+              url,
+              ok: false,
+              error:
+                "Strona zablokowana przez zabezpieczenia antybotowe (reCAPTCHA/Cloudflare). Spróbuj innego linku lub uruchom import ponownie.",
+            };
+          }
 
           const candidateImages = pickImagesFromScrape(scrape);
           const jsonLd = parseJsonLdProducts(rawHtml);
