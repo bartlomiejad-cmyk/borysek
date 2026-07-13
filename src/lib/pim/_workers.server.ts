@@ -1173,6 +1173,13 @@ const RELATED_TOKENS = [
   "product-suggestions", "product_suggestions", "suggested-products",
   "polecane", "podobne", "klienci-kupili", "klienci_kupili",
   "zobacz-tez", "zobacz_tez", "wiecej-produktow",
+  "newest", "newest-products", "nowosci", "nowo-sci",
+  "bestseller", "bestsellers", "bestsellery", "top-sellers",
+  "promo", "promocja", "promocje", "promotions",
+  "products-list", "product-list", "products-grid", "product-grid",
+  "product-tiles", "products-carousel", "product-carousel",
+  "sidebar", "side-bar", "widget", "breadcrumb",
+  "category-list", "categories", "shop-menu", "menu-list",
 ];
 
 const RELATED_ATTR_RE = new RegExp(
@@ -1260,6 +1267,83 @@ function stripRelatedProductBlocks(html: string): string {
   }
   out = stripRelatedHeadingSections(out);
   return out;
+}
+
+// Strip whole chrome elements regardless of attrs: nav/header/footer/aside +
+// noise wrappers script/style/noscript. Balanced tag matcher.
+function stripChromeElements(html: string): string {
+  let out = html;
+  for (const tag of ["nav", "header", "footer", "aside", "script", "style", "noscript"]) {
+    const openRe = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+    let guard = 0;
+    while (guard++ < 100) {
+      openRe.lastIndex = 0;
+      const m = openRe.exec(out);
+      if (!m) break;
+      const start = m.index;
+      const openEnd = m.index + m[0].length;
+      const scanRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+      scanRe.lastIndex = openEnd;
+      let depth = 1;
+      let endIdx = -1;
+      let s: RegExpExecArray | null;
+      while ((s = scanRe.exec(out))) {
+        if (s[0][1] === "/") {
+          depth--;
+          if (depth === 0) { endIdx = s.index + s[0].length; break; }
+        } else {
+          depth++;
+        }
+        if (scanRe.lastIndex - start > 400_000) break;
+      }
+      if (endIdx < 0) { out = out.slice(0, start); break; }
+      out = out.slice(0, start) + out.slice(endIdx);
+    }
+  }
+  return out;
+}
+
+function sliceBalancedElement(html: string, startIdx: number, tag: string): string | null {
+  const openRe = new RegExp(`^<${tag}\\b[^>]*>`, "i");
+  const head = html.slice(startIdx);
+  const m = openRe.exec(head);
+  if (!m) return null;
+  const openEnd = startIdx + m[0].length;
+  const scanRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+  scanRe.lastIndex = openEnd;
+  let depth = 1;
+  let s: RegExpExecArray | null;
+  while ((s = scanRe.exec(html))) {
+    if (s[0][1] === "/") {
+      depth--;
+      if (depth === 0) return html.slice(startIdx, s.index + s[0].length);
+    } else {
+      depth++;
+    }
+    if (scanRe.lastIndex - startIdx > 800_000) break;
+  }
+  return null;
+}
+
+// Isolate a HTML region that is guaranteed to describe THE product:
+// 1) schema.org/Product itemtype, 2) <main>, 3) <article>. Fall back to input.
+function extractProductRegionHtml(html: string): string {
+  const prodM = /<([a-z]+)\b[^>]*itemtype\s*=\s*["'][^"']*schema\.org\/Product[^"']*["'][^>]*>/i.exec(html);
+  if (prodM) {
+    const r = sliceBalancedElement(html, prodM.index, prodM[1]);
+    if (r && r.length > 500) return r;
+  }
+  const mainM = /<main\b[^>]*>/i.exec(html);
+  if (mainM) {
+    const r = sliceBalancedElement(html, mainM.index, "main");
+    if (r && r.length > 500) return r;
+  }
+  const artM = /<article\b[^>]*>/i.exec(html);
+  if (artM) {
+    const r = sliceBalancedElement(html, artM.index, "article");
+    if (r && r.length > 500) return r;
+  }
+  return html;
 }
 
 /**
