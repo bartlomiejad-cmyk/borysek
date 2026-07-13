@@ -97,18 +97,17 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
           if (!k) continue;
           const imgs = imagesByKey.get(k);
           if (!imgs) continue;
-          const combined: string[] = [];
-          const seen = new Set<string>();
-          for (const u of [imgs.main, ...imgs.gallery]) {
-            if (!u || seen.has(u)) continue;
-            seen.add(u);
-            combined.push(u);
-          }
+          // Store imported URLs on the source_product.raw payload (already
+          // there via `raw`) and only mark the enrichment as "has media" via
+          // the sentinel + pinned main. Do NOT write `ai_gallery_urls` —
+          // that column is reserved for AI visualizations and would make
+          // imported photos appear in the "Wizualizacje AI" section.
+          const mainUrl = imgs.main ?? imgs.gallery[0] ?? null;
+          if (!mainUrl) continue;
           const patch: Record<string, unknown> = {
             regenerated_main_image: "__imported__",
-            ai_gallery_urls: combined,
+            pinned_main_url: mainUrl,
           };
-          if (imgs.main) patch.pinned_main_url = imgs.main;
           const { error: mErr } = await supabase
             .from("enrichments")
             .update(patch as never)
