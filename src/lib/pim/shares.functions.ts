@@ -294,31 +294,14 @@ export const listShareProducts = createServerFn({ method: "POST" })
       fbMap.set(f.product_id, cur);
     }
 
+    const out = (products ?? []).map((p) => {
+      const row = p as { id: string };
+      const fbc = fbMap.get(row.id) ?? { comments: 0, fixes: 0 };
+      return { ...(p as Record<string, unknown>), feedback: fbc };
+    });
     return {
       projectName: (proj as { name?: string } | null)?.name ?? "Projekt",
-      products: (products ?? []).map((p: unknown) => {
-        const row = p as {
-          id: string;
-          nazwa: string | null;
-          kod: string | null;
-          ean: string | null;
-          enrichment: {
-            golden_name: string | null;
-            golden_description: string | null;
-            golden_features: unknown;
-            golden_slug: string | null;
-            golden_meta_description: string | null;
-            picked_urls: string[] | null;
-            regenerated_main_image: string | null;
-            pinned_main_url: string | null;
-            ai_gallery_urls: unknown;
-            hidden_images: unknown;
-            status: string;
-          } | null;
-        };
-        const fbc = fbMap.get(row.id) ?? { comments: 0, fixes: 0 };
-        return { ...row, feedback: fbc };
-      }),
+      products: out as Array<Record<string, unknown>>,
     };
   });
 
