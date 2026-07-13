@@ -1988,7 +1988,9 @@ async function scrapeAndStoreSource(
     const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
     const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
     const rawMarkdown = typeof scrape.markdown === "string" ? scrape.markdown : "";
-    const candidateImages = pickImagesFromScrape(scrape);
+    const picked = pickImagesFromScrape(scrape);
+    const candidateImages = picked.urls;
+    const imageTiers = picked.tiers;
 
     await emit(ctx, {
       level: "info",
@@ -2015,6 +2017,7 @@ async function scrapeAndStoreSource(
     }
 
     const rejectedImages = candidateImages.filter((u) => !filteredData.imageUrls.includes(u));
+    const imageMeta = filteredData.imageUrls.map((u) => ({ url: u, tier: (imageTiers[u] ?? 3) as 1 | 2 | 3 }));
 
     await supabaseAdmin
       .from("product_sources")
@@ -2026,6 +2029,7 @@ async function scrapeAndStoreSource(
           description: filteredData.description || null,
           images: filteredData.imageUrls as never,
           extra_images: [] as never,
+          image_meta: imageMeta as never,
           raw: {
             source: "firecrawl",
             metadata: meta,
