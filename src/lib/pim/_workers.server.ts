@@ -1198,7 +1198,9 @@ export function pickImagesFromScrape(res: unknown): string[] {
   const seen = new Set<string>();
   const push = (raw: unknown) => {
     if (typeof raw !== "string") return;
-    const t = upgradeToLargeImageUrl(raw.trim());
+    // Dwukrotny upgrade — czasem pierwsze przejście odsłania kolejny wzorzec.
+    let t = upgradeToLargeImageUrl(raw.trim());
+    t = upgradeToLargeImageUrl(t);
     if (!t || !/^https?:\/\//i.test(t)) return;
     if (seen.has(t)) return;
     const minDim = inferMinDimensionFromUrl(t);
@@ -1222,15 +1224,19 @@ export function pickImagesFromScrape(res: unknown): string[] {
     const dataAttrs = [
       "data-zoom-image", "data-large", "data-large_image", "data-src-large",
       "data-image", "data-full", "data-original", "data-big", "data-hires",
-      "data-zoom", "data-zoom-src",
+      "data-zoom", "data-zoom-src", "data-lazy-src", "data-lazy",
+      "data-flickity-lazyload", "data-flickity-lazyload-src",
+      "data-thumb-large", "data-photoswipe-src", "data-fancybox-href",
+      "data-mfp-src", "data-image-large", "data-image-src", "data-hires-src",
+      "data-src",
     ];
     for (const attr of dataAttrs) {
       const re = new RegExp(`<img\\b[^>]*\\b${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
       for (let m: RegExpExecArray | null; (m = re.exec(html)); ) push(m[1]);
     }
 
-    // 3) srcset — bierz największy wariant.
-    const srcsetRe = /<(?:img|source)\b[^>]*\bsrcset\s*=\s*["']([^"']+)["']/gi;
+    // 3) srcset (także data-srcset) — bierz największy wariant.
+    const srcsetRe = /<(?:img|source)\b[^>]*\b(?:data-)?srcset\s*=\s*["']([^"']+)["']/gi;
     for (let m: RegExpExecArray | null; (m = srcsetRe.exec(html)); ) {
       const list = m[1].split(",").map((s) => s.trim()).filter(Boolean);
       let bestUrl: string | null = null;
@@ -1253,6 +1259,50 @@ export function pickImagesFromScrape(res: unknown): string[] {
       const src = m[1];
       if (looksLikeProductPath(src)) push(src);
     }
+
+    // 5) <link rel="preload" as="image" href="...">
+    const preloadRe = /<link\b[^>]*\brel\s*=\s*["']preload["'][^>]*\bas\s*=\s*["']image["'][^>]*\bhref\s*=\s*["']([^"']+)["']/gi;
+    for (let m: RegExpExecArray | null; (m = preloadRe.exec(html)); ) push(m[1]);
+    const preloadRe2 = /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["']preload["'][^>]*\bas\s*=\s*["']image["']/gi;
+    for (let m: RegExpExecArray | null; (m = preloadRe2.exec(html)); ) push(m[1]);
+
+    // 6) JSON-LD: <script type="application/ld+json">…</script> — pole "image".
+    const jsonLdRe = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    for (let m: RegExpExecArray | null; (m = jsonLdRe.exec(html)); ) {
+      const body = m[1].trim();
+      if (!body) continue;
+      try {
+        const parsed = JSON.parse(body);
+        const stack: unknown[] = [parsed];
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node) continue;
+          if (Array.isArray(node)) { for (const it of node) stack.push(it); continue; }
+          if (typeof node !== "object") continue;
+          const obj = node as Record<string, unknown>;
+          const img = obj.image ?? obj.contentUrl;
+          if (typeof img === "string") push(img);
+          else if (Array.isArray(img)) {
+            for (const it of img) {
+              if (typeof it === "string") push(it);
+              else if (it && typeof it === "object" && typeof (it as { url?: unknown }).url === "string") push((it as { url: string }).url);
+            }
+          } else if (img && typeof img === "object" && typeof (img as { url?: unknown }).url === "string") {
+            push((img as { url: string }).url);
+          }
+          for (const v of Object.values(obj)) {
+            if (v && (Array.isArray(v) || typeof v === "object")) stack.push(v);
+          }
+        }
+      } catch { /* skip malformed JSON-LD */ }
+    }
+  }
+
+  // 7) metadata.ogImage / metadata["og:image"] — pełny obraz udostępniania.
+  const meta = r.metadata as Record<string, unknown> | undefined;
+  if (meta) {
+    const cand = [meta.ogImage, meta["og:image"], meta.twitterImage, meta["twitter:image"]];
+    for (const c of cand) if (typeof c === "string") push(c);
   }
 
   return filterImageUrls(out).slice(0, 12);
