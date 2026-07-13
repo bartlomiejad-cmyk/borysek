@@ -2,6 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { sanitizeProductDescription, filterImageUrls } from "./source-cleanup";
+import { llmCleanDescription, type CleaningMeta } from "./llm-cleaner.server";
+
+const LLM_CLEAN_MIN_CHARS = 200;
 
 type MatchType = "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH";
 
@@ -214,6 +217,15 @@ export const runMatching = createServerFn({ method: "POST" })
       );
       const srcMap = new Map<string, { title: string | null; description: string | null }>();
       const metaMap = new Map<string, SourceMeta>();
+      const productById = new Map(products.map((p) => [p.id, p]));
+      const urlToProduct = new Map<string, { nazwa: string | null; ean: string | null }>();
+      for (const u of updates) {
+        const p = productById.get(u.source_product_id);
+        if (!p) continue;
+        for (const url of u.picked_urls) {
+          if (!urlToProduct.has(url)) urlToProduct.set(url, { nazwa: p.nazwa, ean: p.ean });
+        }
+      }
       const CHUNK = 200;
       for (let i = 0; i < allUrls.length; i += CHUNK) {
         const chunk = allUrls.slice(i, i + CHUNK);
@@ -232,23 +244,36 @@ export const runMatching = createServerFn({ method: "POST" })
             extra_images: unknown;
           };
           const descRaw = rr.description ?? "";
-          const descClean = sanitizeProductDescription(descRaw);
+          const regexClean = sanitizeProductDescription(descRaw);
+          let descClean = regexClean;
+          let cleaningMeta: CleaningMeta = {
+            cleaned_by: "regex",
+            confidence: null,
+            removed_sections: [],
+          };
+          if (regexClean.length > LLM_CLEAN_MIN_CHARS) {
+            const ctx = urlToProduct.get(rr.url);
+            const llm = await llmCleanDescription({
+              rawHtml: descRaw,
+              productName: ctx?.nazwa ?? null,
+              ean: ctx?.ean ?? null,
+            });
+            descClean = llm.description || regexClean;
+            cleaningMeta = llm.meta;
+          }
           const mainIn = Array.isArray(rr.images) ? (rr.images as string[]) : [];
           const extraIn = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
           const mainClean = filterImageUrls(mainIn);
           const extraClean = filterImageUrls(extraIn);
-          const descChanged = descClean !== (descRaw ?? "");
-          const imgsChanged = mainClean.length !== mainIn.length || extraClean.length !== extraIn.length;
-          if (descChanged || imgsChanged) {
-            await supabase
-              .from("product_sources")
-              .update({
-                description: descClean || null,
-                images: mainClean as never,
-                extra_images: extraClean as never,
-              } as never)
-              .eq("id", rr.id);
-          }
+          await supabase
+            .from("product_sources")
+            .update({
+              description: descClean || null,
+              images: mainClean as never,
+              extra_images: extraClean as never,
+              cleaning_meta: cleaningMeta as never,
+            } as never)
+            .eq("id", rr.id);
           srcMap.set(rr.url, {
             title: rr.title ?? null,
             description: descClean || null,
@@ -260,7 +285,6 @@ export const runMatching = createServerFn({ method: "POST" })
           });
         }
       }
-      const productById = new Map(products.map((p) => [p.id, p]));
       let validated = 0;
       for (const u of updates) {
         if (!u.picked_urls.length) continue;

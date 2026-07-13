@@ -413,6 +413,7 @@ export type Database = {
       }
       product_sources: {
         Row: {
+          cleaning_meta: Json | null
           created_at: string
           description: string | null
           extra_images: Json
@@ -424,6 +425,7 @@ export type Database = {
           url: string
         }
         Insert: {
+          cleaning_meta?: Json | null
           created_at?: string
           description?: string | null
           extra_images?: Json
@@ -435,6 +437,7 @@ export type Database = {
           url: string
         }
         Update: {
+          cleaning_meta?: Json | null
           created_at?: string
           description?: string | null
           extra_images?: Json

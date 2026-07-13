@@ -1,0 +1,1 @@
+ALTER TABLE public.product_sources ADD COLUMN IF NOT EXISTS cleaning_meta jsonb DEFAULT NULL;

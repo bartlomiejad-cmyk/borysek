@@ -1037,6 +1037,31 @@ function ProductDetail() {
                           <span className="truncate">{s.url}</span>
                         </a>
                       </div>
+                      {s.cleaning_meta ? (
+                        <span
+                          className={cn(
+                            "text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full shrink-0 border",
+                            s.cleaning_meta.cleaned_by === "llm"
+                              ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400"
+                              : "bg-muted text-muted-foreground border-border",
+                          )}
+                          title={
+                            s.cleaning_meta.cleaned_by === "llm"
+                              ? `AI clean${
+                                  typeof s.cleaning_meta.confidence === "number"
+                                    ? ` · confidence ${Math.round(s.cleaning_meta.confidence * 100)}%`
+                                    : ""
+                                }${
+                                  s.cleaning_meta.removed_sections.length
+                                    ? `\nUsunięte sekcje: ${s.cleaning_meta.removed_sections.join(", ")}`
+                                    : ""
+                                }`
+                              : "Regex sanitizer (fallback)"
+                          }
+                        >
+                          {s.cleaning_meta.cleaned_by === "llm" ? "AI clean" : "regex"}
+                        </span>
+                      ) : null}
                       <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
                         {combined.length} zdj.
                       </span>
@@ -1059,9 +1084,17 @@ function ProductDetail() {
                           <ImageOff className="h-3 w-3" /> brak zdjęć{!includeExtra ? " (extra wyłączone)" : ""}
                         </div>
                       )}
-                      <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30">
-                        {s.description ?? "(brak opisu)"}
-                      </div>
+                      {s.cleaning_meta?.cleaned_by === "llm" && s.description ? (
+                        <div
+                          className="text-sm max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30 prose prose-sm max-w-none dark:prose-invert"
+                          // Content is sanitized server-side by whitelistSanitize (only h3/p/ul/li/strong/table/tr/td).
+                          dangerouslySetInnerHTML={{ __html: s.description }}
+                        />
+                      ) : (
+                        <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30">
+                          {s.description ?? "(brak opisu)"}
+                        </div>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"
