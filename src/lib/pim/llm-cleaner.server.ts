@@ -1,0 +1,144 @@
+/**
+ * LLM-first product description cleaner.
+ *
+ * Primary path: pre-filter with the regex sanitizer (to reduce token count),
+ * then ask a small Gemini model to keep only content that describes this
+ * exact product and return whitelist-safe HTML.
+ *
+ * Fallback: on any failure (missing key, gateway error, invalid JSON,
+ * validation fail) we return the regex output tagged as `cleaned_by: "regex"`.
+ */
+
+import { sanitizeProductDescription } from "./source-cleanup";
+
+const CLEANER_MODEL = "google/gemini-2.5-flash-lite";
+const MAX_INPUT_CHARS = 12000;
+const MIN_OUTPUT_CHARS = 100;
+const MAX_OUTPUT_CHARS = 8000;
+const ALLOWED_TAGS = new Set(["h3", "p", "ul", "li", "strong", "table", "tr", "td"]);
+const FORBIDDEN_TAGS_RE = /<\s*\/?\s*(script|style|iframe)\b/i;
+
+export type CleaningMeta = {
+  cleaned_by: "llm" | "regex";
+  confidence: number | null;
+  removed_sections: string[];
+};
+
+export type LlmCleanResult = {
+  description: string;
+  features: string[];
+  meta: CleaningMeta;
+};
+
+function whitelistSanitize(html: string): string {
+  // Strip any tag not in ALLOWED_TAGS. Keep inner text.
+  return html.replace(/<\/?\s*([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>/g, (match, tag: string) => {
+    return ALLOWED_TAGS.has(tag.toLowerCase()) ? match : "";
+  });
+}
+
+function regexFallback(rawHtml: string, reason: string): LlmCleanResult {
+  if (reason) console.warn(`[llm-cleaner] fallback → regex: ${reason}`);
+  const description = sanitizeProductDescription(rawHtml);
+  return {
+    description,
+    features: [],
+    meta: { cleaned_by: "regex", confidence: null, removed_sections: [] },
+  };
+}
+
+export async function llmCleanDescription(opts: {
+  rawHtml: string;
+  productName: string | null;
+  brand?: string | null;
+  ean?: string | null;
+}): Promise<LlmCleanResult> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+
+  // Always pre-filter with the regex sanitizer — this is the token-reducing
+  // safety net AND the fallback if the LLM path fails.
+  const preClean = sanitizeProductDescription(opts.rawHtml);
+  if (!apiKey) return regexFallback(opts.rawHtml, "LOVABLE_API_KEY missing");
+  if (!preClean || preClean.length < 40) {
+    return {
+      description: preClean,
+      features: [],
+      meta: { cleaned_by: "regex", confidence: null, removed_sections: [] },
+    };
+  }
+
+  const trimmed = preClean.slice(0, MAX_INPUT_CHARS);
+
+  const system = [
+    "You receive HTML scraped from an e-commerce product page.",
+    `Return ONLY content that describes this exact product: ${opts.productName ?? "(unknown)"}, brand: ${opts.brand ?? "(unknown)"}, EAN: ${opts.ean ?? "(unknown)"}.`,
+    "Remove: shipping/delivery info, return policies, prices, promotions, contact data, phone numbers, related/recommended products, reviews, store navigation, cookie notices.",
+    "Preserve the HTML structure of the remaining content using only these tags: h3, p, ul, li, strong, table, tr, td.",
+    'Output JSON: { "description_html": string, "features": string[], "confidence": number 0-1, "removed_sections": string[] }.',
+  ].join("\n");
+
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": apiKey,
+        "X-Lovable-AIG-SDK": "raw",
+      },
+      body: JSON.stringify({
+        model: CLEANER_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: trimmed },
+        ],
+      }),
+    });
+    if (!res.ok) return regexFallback(opts.rawHtml, `gateway ${res.status}`);
+    const json = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = json.choices?.[0]?.message?.content ?? "{}";
+    let parsed: {
+      description_html?: unknown;
+      features?: unknown;
+      confidence?: unknown;
+      removed_sections?: unknown;
+    };
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      return regexFallback(opts.rawHtml, `invalid JSON: ${e instanceof Error ? e.message : e}`);
+    }
+    const rawOut = typeof parsed.description_html === "string" ? parsed.description_html : "";
+    if (!rawOut) return regexFallback(opts.rawHtml, "empty description_html");
+    if (FORBIDDEN_TAGS_RE.test(rawOut)) {
+      return regexFallback(opts.rawHtml, "output contained script/style/iframe");
+    }
+    const cleaned = whitelistSanitize(rawOut).replace(/\s{2,}/g, " ").trim();
+    if (cleaned.length < MIN_OUTPUT_CHARS || cleaned.length > MAX_OUTPUT_CHARS) {
+      return regexFallback(opts.rawHtml, `length out of bounds (${cleaned.length})`);
+    }
+    const confidence =
+      typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
+        ? Math.max(0, Math.min(1, parsed.confidence))
+        : null;
+    const removed = Array.isArray(parsed.removed_sections)
+      ? parsed.removed_sections
+          .filter((s): s is string => typeof s === "string")
+          .slice(0, 20)
+      : [];
+    const features = Array.isArray(parsed.features)
+      ? parsed.features
+          .filter((s): s is string => typeof s === "string")
+          .slice(0, 20)
+      : [];
+    return {
+      description: cleaned,
+      features,
+      meta: { cleaned_by: "llm", confidence, removed_sections: removed },
+    };
+  } catch (e) {
+    return regexFallback(opts.rawHtml, e instanceof Error ? e.message : String(e));
+  }
+}
