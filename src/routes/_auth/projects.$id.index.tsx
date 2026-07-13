@@ -960,6 +960,21 @@ function ProjectPage() {
                             <ArrowRight className="h-4 w-4" />
                           </Link>
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Usuń produkt"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() =>
+                            setDeleteTarget({
+                              kind: "one",
+                              id: p.id,
+                              name: p.golden_name ?? p.nazwa ?? p.id,
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
