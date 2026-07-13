@@ -285,6 +285,70 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
   return (await res.json()) as FalResp;
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic pure-white background enforcement for product thumbnails.
+//
+// Even with a very strict prompt, generative models leave a faint beige / gray
+// cast under the product. To guarantee mathematically flat #FFFFFF, we:
+//   1. run the FAL output through a background-removal model → RGBA PNG,
+//   2. composite RGBA over solid #FFFFFF in pure JS (upng-js, Worker-safe),
+//   3. return the flattened PNG bytes.
+// Only used for thumbnails / packshots — never for lifestyle scenes.
+// ---------------------------------------------------------------------------
+export async function flattenToWhiteBackground(
+  publicImageUrl: string,
+  apiKey: string,
+): Promise<Uint8Array> {
+  // Step 1 — background removal. bria/background/remove returns { image: { url } }
+  // with a transparent PNG. If it errors, fall back to imageutils/rembg.
+  let cutoutUrl: string | undefined;
+  try {
+    const removed = await callFal(
+      "fal-ai/bria/background/remove",
+      { image_url: publicImageUrl },
+      apiKey,
+    );
+    cutoutUrl = removed.image?.url ?? removed.images?.[0]?.url;
+  } catch (e) {
+    console.warn("bria background/remove failed, falling back to rembg", e);
+  }
+  if (!cutoutUrl) {
+    const removed2 = await callFal(
+      "fal-ai/imageutils/rembg",
+      { image_url: publicImageUrl },
+      apiKey,
+    );
+    cutoutUrl = removed2.image?.url ?? removed2.images?.[0]?.url;
+  }
+  if (!cutoutUrl) throw new Error("Usuwanie tła nie zwróciło obrazu");
+
+  const cutoutBytes = await fetchBytes(cutoutUrl);
+
+  // Step 2 — decode PNG, composite over #FFFFFF, re-encode.
+  const UPNG = (await import("upng-js")).default as typeof import("upng-js");
+  const ab: ArrayBuffer = cutoutBytes.buffer.slice(
+    cutoutBytes.byteOffset,
+    cutoutBytes.byteOffset + cutoutBytes.byteLength,
+  ) as ArrayBuffer;
+  const decoded = UPNG.decode(ab);
+  const width = decoded.width;
+  const height = decoded.height;
+  const rgbaBuffers = UPNG.toRGBA8(decoded);
+  const src = new Uint8Array(rgbaBuffers[0]);
+  const out = new Uint8Array(width * height * 4);
+  for (let i = 0; i < out.length; i += 4) {
+    const a = src[i + 3] / 255;
+    const inv = 1 - a;
+    out[i] = Math.round(src[i] * a + 255 * inv);
+    out[i + 1] = Math.round(src[i + 1] * a + 255 * inv);
+    out[i + 2] = Math.round(src[i + 2] * a + 255 * inv);
+    out[i + 3] = 255;
+  }
+  // cnum=0 → lossless PNG. Buffer size ~2–4 MB for 2K/2.5K squares.
+  const encoded = UPNG.encode([out.buffer as ArrayBuffer], width, height, 0);
+  return new Uint8Array(encoded);
+}
+
 type FalQueueRequest = {
   request_id: string;
   status_url: string;
@@ -916,12 +980,17 @@ export async function runRegenerateMedia(
     const mainUrl = mainResp.images?.[0]?.url;
     if (!mainUrl) throw new Error("FAL nie zwróciło głównego zdjęcia");
 
-    const mainBytes = await fetchBytes(mainUrl);
-    const mainPath = `${enrichment.id}.jpg`;
-    await supabaseAdmin.storage.from("regenerated-images").remove([`${enrichment.id}.webp`, `${enrichment.id}.png`]).catch(() => undefined);
+    // Deterministic pure-white background: strip whatever tint the model left
+    // and composite the product over flat #FFFFFF before uploading.
+    const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY);
+    const mainPath = `${enrichment.id}.png`;
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([`${enrichment.id}.webp`, `${enrichment.id}.jpg`])
+      .catch(() => undefined);
     const { error: upErr } = await supabaseAdmin.storage
       .from("regenerated-images")
-      .upload(mainPath, mainBytes, { contentType: "image/jpeg", upsert: true });
+      .upload(mainPath, mainBytes, { contentType: "image/png", upsert: true });
     if (upErr) throw new Error(`Upload main: ${upErr.message}`);
     const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(mainPath);
     const mainPublic = `${pub.publicUrl}?v=${Date.now()}`;

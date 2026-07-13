@@ -1,53 +1,49 @@
+
 ## Problem
 
-`pickImagesFromScrape` (`src/lib/pim/_workers.server.ts`) zwraca URL-e z `srcset`/`<img src>` bez rzetelnej normalizacji do wersji full-size. Efekt: przy imporcie z linków (np. speed-line.com) do galerii trafiają miniatury zamiast pełnych zdjęć. Funkcja `upgradeToLargeImageUrl` pokrywa tylko część platform (WooCommerce, Shopify, Magento, PrestaShop, IdoSell/Shoper, Google CDN); brakuje typowych wzorców takich jak:
+Prompty do miniaturek już zakazują beżu/kremu/off-white, ale FAL (seedream v4 edit oraz worker `nano-banana`) i tak zostawia lekko beżową poświatę pod produktem. Sam prompt nie wystarczy — modele generatywne nie dają twardej gwarancji na pojedynczy kolor tła. Trzeba wymusić czystą biel po stronie serwera, deterministycznie.
 
-- `/thumbnail/`, `/thumbs/`, `/tiny/`, `/xs/`, `/small/`, `/preview/`, `/resized/…`
-- IdoSell v2: `/_data/products/…-1_360.jpg` / `-1_100.jpg` → `-1.jpg`
-- Speedline/Presta warianty: `-cart_default`, `-home_default`, `-thickbox_default` (już mamy) ale też `-small`, `_100x100`, `_thumb`
-- ogólne query-size: `?w=…&h=…`, `?size=…`, `?width=…`
-- CDN-y typu Cloudinary (`/w_200,h_200,c_…/`), Imgix (`?w=…&fit=…`), TinyMCE / Storyblok (`/f/…/…x…/`)
+## Rozwiązanie
 
-Dodatkowo:
+Po tym, jak model wygeneruje miniaturę (kwadrat 1:1 na "białym" tle), przepuść wynik przez usuwanie tła i skomponuj RGBA nad płaskim #FFFFFF. To gwarantuje matematycznie czyste tło niezależnie od tego, co zwrócił model.
 
-- Z `srcset` bierzemy „największy widoczny wariant", ale wciąż często nie ma tam pełnego oryginału — pełny bywa jedynie w `<a href>` galerii lub w JSON-LD (`image`, `image[0]`, `offers.image`).
-- Ignorujemy `metadata.ogImage` i `metadata.jsonLd` — a to w wielu sklepach jedyne miejsce z pełnym plikiem.
-- Nie zbieramy `<link rel="preload" as="image">` ani atrybutów `data-flickity-lazyload`, `data-lazy`, `data-lazy-src`, `data-srcset`.
+Dotyczy to dwóch ścieżek generowania miniatur:
 
-## Zmiany
+1. Ręczna regeneracja z edytora produktu — `regenerateMainImage` w `src/lib/pim/regen.functions.ts`.
+2. Masowa regeneracja w workerze — `runRegenerateMainImage` w `src/lib/pim/_workers.server.ts` (ta sama logika, ten sam problem).
 
-Wszystko dzieje się w warstwie ekstrakcji obrazów — bez dotykania promptów AI, generowania miniaturek FAL, ani UI.
+## Co dokładnie zmienimy
 
-### 1. `src/lib/pim/_workers.server.ts` — `upgradeToLargeImageUrl`
+### 1. Nowy helper `flattenToWhiteBackground` w `src/lib/pim/_workers.server.ts`
 
-Rozszerzyć o dodatkowe wzorce:
+- Wejście: `Uint8Array` z wynikiem FAL (JPEG/PNG).
+- Krok A: wywołaj `fal-ai/bria/background/remove` (albo `fal-ai/imageutils/rembg` jeśli bria zwraca 4xx) — model zwraca PNG z kanałem alfa (tło = 0).
+- Krok B: sparsuj RGBA używając czystego JS (`upng-js` — działa w Cloudflare Worker, nie wymaga sharpa ani canvasa; dodamy `bun add upng-js`).
+- Krok C: na nowym buforze RGB zainicjalizuj wszystkie piksele na `(255,255,255)`, następnie dla każdego piksela z alfą > 0 wykonaj kompozyt `dst = src*a + 255*(1-a)`. Wynik: JPEG (kompresja przez upng-js → PNG lub `@cf-wasm/photon` do JPEG; wybierzemy PNG dla prostoty i pewności — brak ryzyka artefaktów JPEG na krawędziach tła).
+- Wyjście: `Uint8Array` (PNG z płaskim białym tłem) + wymiary.
 
-- Ogólne segmenty w ścieżce: `/thumbnail/`, `/thumbs/`, `/tiny/`, `/preview/`, `/resized/`, `/scaled/`, `/xs/`, `/xxs/`, `/w200/`, `/w300/`, `/h200/`, `/mini/`, `/miniatures/`, `/miniatury/` → usunąć segment lub zamienić na `/source/` (z zachowaniem reszty ścieżki).
-- IdoSell v2: `-1_100.jpg`, `-1_360.jpg`, `_100.jpg`, `_360.jpg` → wersja bez sufiksu.
-- PrestaShop: dodać `-small`, `-cart`, `-home` bez `_default`, oraz `-thickbox` bez `_default`.
-- Query-size: dla parametrów `w`, `width`, `h`, `height`, `size`, `s`, `maxw`, `maxh`, `imwidth`, `imheight` — usunąć je z URL-a, żeby dostać oryginał (a jeśli CDN wymaga rozmiaru, ustawić `2048`).
-- Cloudinary: `/upload/w_\d+,h_\d+,c_[^/]+/` → `/upload/`.
-- Imgix / Sanity / Storyblok: usunąć `?w=…&h=…&fit=…` z query.
-- Sufiks `-thumb`, `-thumbnail`, `-mini`, `-tiny`, `-xs`, `-preview` przed rozszerzeniem → wyciąć.
+Kompresja PNG to prosty pass — pliki i tak rzędu 1–2 MB dla 2560px, w porządku.
 
-### 2. `src/lib/pim/_workers.server.ts` — `pickImagesFromScrape`
+### 2. Podpięcie w obu ścieżkach
 
-- Rozszerzyć listę `dataAttrs` o: `data-srcset`, `data-lazy-src`, `data-lazy`, `data-lazy-srcset`, `data-flickity-lazyload`, `data-flickity-lazyload-src`, `data-thumb-large`, `data-photoswipe-src`, `data-fancybox-href`, `data-mfp-src`, `data-image-large`, `data-image-src`, `data-hires-src`.
-- Dodać ekstrakcję `<link rel="preload" as="image" href="…">` z HTML — zwykle wskazuje na kluczowe zdjęcie hero w pełnym rozmiarze.
-- Dodać ekstrakcję z JSON-LD (`<script type="application/ld+json">…</script>`): pola `image`, `image.url`, `image[0]`, `offers.image`, `hasVariant.image`. Wpuścić przez `push()` (czyli automatyczny `upgradeToLargeImageUrl` + walidacja min. wymiaru).
-- Jeśli `res.metadata.ogImage` (lub `metadata.og:image`) prowadzi do pliku produktu (test `looksLikeProductPath` lub domena zgodna z sourceURL), dodać go do puli — nadal przechodzi przez upgrade i junk-filter.
-- Dla `srcset` — zamiast brać po prostu największy zadeklarowany `w`, po wybraniu spróbować dodatkowo puścić przez `upgradeToLargeImageUrl`; jeśli po upgradzie URL się zmienia w URL wskazujący jeszcze większą wersję (np. usunęliśmy `_100x100`), preferować wynik.
-- Przy deduplikacji, jeśli dwa URL-e różnią się tylko rozmiarem po normalizacji, zostaw jeden po `upgrade` (obecnie działa, bo `push` wywołuje upgrade — potwierdzić, że dodane źródła też przez to przechodzą).
+- `regenerateMainImage` (`src/lib/pim/regen.functions.ts`): po `fetchImageBytes(generatedUrl)`, przed uploadem do Storage, przepuść bajty przez `flattenToWhiteBackground`. Zapisz jako `.png` (nadpisując istniejące `.jpg`/`.webp`).
+- `runRegenerateMainImage` (`src/lib/pim/_workers.server.ts`): analogicznie — po pobraniu wyniku FAL, przed uploadem końcowym.
 
-### 3. `inferMinDimensionFromUrl`
+Ścieżka wizualizacji lifestyle (`PIM_VISUALIZATIONS`) NIE jest ruszana — tam tło ma być scenerią, nie białe.
 
-- Uodpornić na false-negatives: nie odrzucać URL-a jako „za małe", jeśli po `upgradeToLargeImageUrl` nadal jest widoczny rozmiar < 400 — spróbować drugiego upgrade'u; jeśli wciąż < 400, dopiero wtedy odrzucić.
+### 3. Uproszczenie promptu miniatury (opcjonalnie)
 
-### 4. Bez zmian w UI
+Skoro tło i tak wymusimy po fakcie, prompt do FAL możemy skrócić — zostawiamy jedno zdanie o białym tle plus twarde reguły dla samego produktu (kolory, logo, framing). Krótszy prompt = mniej driftu modelu na etykietach. To drobne uproszczenie, głównego problemu nie zmienia.
 
-Nie ruszamy `ImportUrlsDialog`, edytora produktu, list `Wybrane zdjęcia`, ani logiki FAL. To wyłącznie poprawa ekstrakcji URL-i po stronie scrapera/workera — działa tak samo dla importu z linków (`import-urls.functions.ts`) i głównego Firecrawl discovery.
+## Fallbacki
+
+- Jeśli usuwanie tła zwróci 4xx/5xx, log + `throw` w workerze (żeby job miał `failed_count`), a `regenerateMainImage` rzuca Toast — użytkownik klika ponownie. Nie zapisujemy "półgotowego" wyniku z beżowym tłem.
+- Jeśli `fal-ai/bria/background/remove` będzie problematyczny, alternatywa: `fal-ai/imageutils/rembg` (open-source, tańszy, chwilę wolniejszy). Wybór w helperze, jedna zmienna.
+
+## Runtime
+
+`upng-js` to czysty JS (~30 KB), zero natywnych zależności — bezpieczne dla Cloudflare Worker. Nie potrzebujemy `sharp`/`canvas`/`photon`.
 
 ## Weryfikacja
 
-- Po zmianach zaimportować ponownie przykładowy produkt ze speed-line.com i sprawdzić, czy URL-e w `enrichments.source_products[*].images[*]` nie zawierają segmentów `thumbnail`, `home_default`, `_100x100` itd.
-- Ręcznie przetestować `upgradeToLargeImageUrl` na kilku znanych wzorcach jednostkowo (log w `import-urls` już drukuje URL-e do konsoli — wystarczy przejrzeć wynik na produkcie z uploadu obok).
+Wygenerować miniaturę z produktu, na którym wcześniej wychodziło beżowe tło (np. Speed-line/Yasuni), i sprawdzić w podglądzie oraz otwierając PNG w narzędziu z pipetą — cztery narożniki muszą być dokładnie `#FFFFFF`.
