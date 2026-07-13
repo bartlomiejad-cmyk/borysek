@@ -609,23 +609,40 @@ const ImageScoreSchema = z.object({
   is_clean: z.number().min(0).max(10),
   has_packaging: z.number().min(0).max(10),
   is_banner_or_trash: z.boolean(),
+  identity: z.enum(["same", "different", "unsure"]).default("unsure"),
 });
-export type ImageScore = z.infer<typeof ImageScoreSchema> & { scored_at: string };
+export type ImageScore = z.infer<typeof ImageScoreSchema> & {
+  scored_at: string;
+  manual_keep?: boolean;
+};
 
 const SCORE_SYSTEM_PROMPT =
   "Jesteś ekspertem e-commerce. Oceń kompozycję zdjęcia pod kątem przydatności jako główna miniaturka produktu w sklepie. Zwróć surowy JSON według podanego schematu.";
 
-const SCORE_USER_TEXT = [
-  "Oceń to zdjęcie produktu i zwróć WYŁĄCZNIE JSON o strukturze:",
-  '{"is_central": number (1-10), "is_clean": number (1-10), "has_packaging": number (0-10), "is_banner_or_trash": boolean}',
-  "",
-  "is_central: czy produkt jest na środku kadru, dobrze widoczny (10), czy mikro-produkt w rogu / ucięty (1).",
-  "is_clean: czy tło jest jednolite/białe/mało rozpraszające (10). Odejmij punkty za banery, napisy, logotypy, kolaż.",
-  "has_packaging: 10 = w jednym kadrze widać i opakowanie/pudełko I sam produkt (np. pudełko amunicji + naboje obok); 6-9 = widać tylko pudełko/opakowanie z grafiką produktu; 3-5 = tylko sam produkt bez opakowania; 0-2 = brak kontekstu produktu / nieczytelne.",
-  "is_banner_or_trash: true, jeśli obrazek to baner reklamowy, infografika, tabela rozmiarów, ikona, logo sklepu, znak wodny lub kolaż - czyli NIE nadaje się na miniaturę.",
-].join("\n");
+function buildScoreUserText(productName: string, brand: string): string {
+  const header = productName
+    ? `Rozpatrywany produkt: „${productName}"${brand ? ` (marka: ${brand})` : ""}.`
+    : "";
+  return [
+    header,
+    "Oceń to zdjęcie i zwróć WYŁĄCZNIE JSON o strukturze:",
+    '{"is_central": number (1-10), "is_clean": number (1-10), "has_packaging": number (0-10), "is_banner_or_trash": boolean, "identity": "same" | "different" | "unsure"}',
+    "",
+    "is_central: czy produkt jest na środku kadru, dobrze widoczny (10), czy mikro-produkt w rogu / ucięty (1).",
+    "is_clean: czy tło jest jednolite/białe/mało rozpraszające (10). Odejmij punkty za banery, napisy, logotypy, kolaż.",
+    "has_packaging: 10 = w kadrze widać i opakowanie I sam produkt; 6-9 = tylko opakowanie; 3-5 = sam produkt bez opakowania; 0-2 = brak kontekstu.",
+    "is_banner_or_trash: true, jeśli obrazek to baner, infografika, tabela rozmiarów, ikona, logo sklepu, znak wodny lub kolaż.",
+    "identity: 'same' = zdjęcie pokazuje DOKŁADNIE ten produkt z nagłówka (ta sama nazwa/marka/wariant); 'different' = to inny produkt (np. kafle „polecane/nowości\", inny wariant, inny model); 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true.",
+  ].filter(Boolean).join("\n");
+}
 
-async function scoreOneImage(apiKey: string, url: string, timeoutMs = 15000): Promise<ImageScore> {
+async function scoreOneImage(
+  apiKey: string,
+  url: string,
+  productName: string,
+  brand: string,
+  timeoutMs = 15000,
+): Promise<ImageScore> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -645,7 +662,7 @@ async function scoreOneImage(apiKey: string, url: string, timeoutMs = 15000): Pr
           {
             role: "user",
             content: [
-              { type: "text", text: SCORE_USER_TEXT },
+              { type: "text", text: buildScoreUserText(productName, brand) },
               { type: "image_url", image_url: { url } },
             ],
           },
@@ -679,6 +696,35 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
     const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
+    // Fetch enrichment + product info for the identity prompt.
+    const { data: product, error: pErr } = await supabase
+      .from("source_products")
+      .select("id, project_id, nazwa, raw")
+      .eq("id", data.productId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!product) throw new Error("Product not found");
+    const rawObj = (product as unknown as { raw?: Record<string, unknown> | null }).raw ?? {};
+    const importedExtract = (rawObj as { imported_extract?: { marka?: string; producent?: string } })?.imported_extract ?? {};
+    const brand = String(importedExtract.marka ?? importedExtract.producent ?? "").trim();
+    const productName = String((product as unknown as { nazwa?: string }).nazwa ?? "").trim();
+
+    // Aggregate image tiers across all product_sources for this project.
+    // Tier 1 (JSON-LD / og:image) skips Vision — the shop declared it as THE
+    // product image, so we save cost and avoid false "different" verdicts.
+    const { data: sources } = await supabase
+      .from("product_sources")
+      .select("image_meta")
+      .eq("project_id", (product as unknown as { project_id: string }).project_id);
+    const tierByUrl = new Map<string, 1 | 2 | 3>();
+    for (const row of (sources ?? []) as Array<{ image_meta?: Array<{ url: string; tier: 1 | 2 | 3 }> | null }>) {
+      const list = row.image_meta ?? [];
+      for (const it of list) {
+        const prev = tierByUrl.get(it.url) ?? 3;
+        if (it.tier < prev) tierByUrl.set(it.url, it.tier);
+      }
+    }
+
     const { data: enrichment, error: eErr } = await supabase
       .from("enrichments")
       .select("id, image_scores")
@@ -688,14 +734,31 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
     if (!enrichment) throw new Error("No enrichment record. Run matching first.");
 
     const existing = (((enrichment as unknown as { image_scores?: Record<string, ImageScore> }).image_scores) ?? {}) as Record<string, ImageScore>;
-    const toScore = data.urls.filter((u) => !existing[u]);
+    // Skip Tier 1 (JSON-LD/og:image) — mark them as trusted without a Vision call.
+    const tier1Auto: Record<string, ImageScore> = {};
+    for (const u of data.urls) {
+      if (existing[u]) continue;
+      if ((tierByUrl.get(u) ?? 3) === 1) {
+        tier1Auto[u] = {
+          is_central: 8,
+          is_clean: 8,
+          has_packaging: 5,
+          is_banner_or_trash: false,
+          identity: "same",
+          scored_at: new Date().toISOString(),
+        };
+      }
+    }
+    const toScore = data.urls.filter((u) => !existing[u] && !tier1Auto[u]);
 
-    if (!toScore.length) {
+    if (!toScore.length && !Object.keys(tier1Auto).length) {
       return { scores: existing, source: "cache" as const, failed: [] as string[] };
     }
 
-    const settled = await Promise.allSettled(toScore.map((u) => scoreOneImage(apiKey, u)));
-    const merged: Record<string, ImageScore> = { ...existing };
+    const settled = await Promise.allSettled(
+      toScore.map((u) => scoreOneImage(apiKey, u, productName, brand)),
+    );
+    const merged: Record<string, ImageScore> = { ...existing, ...tier1Auto };
     const failed: string[] = [];
     settled.forEach((r, idx) => {
       const url = toScore[idx];
@@ -703,7 +766,7 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       else failed.push(url);
     });
 
-    const anySuccess = settled.some((r) => r.status === "fulfilled");
+    const anySuccess = settled.some((r) => r.status === "fulfilled") || Object.keys(tier1Auto).length > 0;
     if (anySuccess) {
       const { error: upErr } = await supabase
         .from("enrichments")
@@ -712,7 +775,7 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       if (upErr) throw new Error(upErr.message);
     }
 
-    const allFailed = failed.length === toScore.length;
+    const allFailed = toScore.length > 0 && failed.length === toScore.length && Object.keys(tier1Auto).length === 0;
     if (allFailed) throw new Error("AI scoring failed for all images");
 
     return {
