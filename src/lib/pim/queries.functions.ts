@@ -137,10 +137,16 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const picked = ((enrichment?.picked_urls as string[] | null) ?? []);
     const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
     const meta = ((enrichment as unknown as { image_meta?: ImageMeta } | null)?.image_meta ?? {}) as ImageMeta;
-    const scoresEarly = ((enrichment as unknown as { image_scores?: Record<string, { is_banner_or_trash?: boolean }> } | null)?.image_scores ?? {}) as Record<string, { is_banner_or_trash?: boolean }>;
+    const scoresEarly = ((enrichment as unknown as { image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }> } | null)?.image_scores ?? {}) as Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }>;
     const trash = new Set<string>(
       Object.entries(scoresEarly)
-        .filter(([, s]) => s && s.is_banner_or_trash === true)
+        .filter(([, s]) => {
+          if (!s) return false;
+          if (s.manual_keep === true) return false;
+          if (s.is_banner_or_trash === true) return true;
+          if (s.identity === "different") return true;
+          return false;
+        })
         .map(([u]) => u),
     );
     let sources: Array<{
@@ -197,7 +203,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
         };
       });
     }
-    const image_scores = ((enrichment as unknown as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; scored_at?: string }> } | null)?.image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; scored_at?: string }>;
+    const image_scores = ((enrichment as unknown as { image_scores?: Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; identity?: "same" | "different" | "unsure"; manual_keep?: boolean; scored_at?: string }> } | null)?.image_scores ?? {}) as Record<string, { is_central: number; is_clean: number; is_banner_or_trash: boolean; identity?: "same" | "different" | "unsure"; manual_keep?: boolean; scored_at?: string }>;
     return {
       product,
       enrichment,
