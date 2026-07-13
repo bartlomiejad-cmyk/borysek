@@ -1,31 +1,37 @@
 ## Problem
 
-Import URL `https://mieloch.pl/wydech-yasuni-carrera-16-aluminium-red-gilera-piaggio` kończy się błędem „Nie udało się wykryć nazwy produktu". Strona nie ma `application/ld+json` typu Product, więc `hints.name` jest puste; Firecrawl scrape z `onlyMainContent: true` obcina wiele nagłówków, przez co AI zwraca `nazwa: ""`; `metadata.title` w SDK v2 bywa pod inną kluczem (`ogTitle`, `og:title`) — łańcuch fallbacków (AI → JSON-LD → pageTitle) upada.
+Import URL zaciągnął produkt o nazwie „reCAPTCHA". Firecrawl scrape zwrócił stronę zabezpieczeń antybotową (reCAPTCHA/Cloudflare/„Just a moment…"), a fallback `extractH1` wziął pierwszy `<h1>` z takiej strony jako nazwę produktu.
 
 ## Rozwiązanie — `src/lib/pim/import-urls.functions.ts`
 
-### 1. Zażądaj dodatkowo pełnego HTML i nie odcinaj chrome przy pierwszym scrape
-Zmień wywołanie Firecrawl na dwa formaty: pobierz `rawHtml` bez `onlyMainContent` (żeby mieć `<h1>` i `<title>`), a `markdown` z `onlyMainContent: true` (do AI). Jeżeli SDK nie pozwala mieszać, wykonaj scrape raz z `onlyMainContent: true` i osobno wyciągnij `<h1>` / `<title>` / `og:title` z `rawHtml`, który Firecrawl zwraca w pełnej formie niezależnie od `onlyMainContent`.
+### 1. Wykrywanie stron-blokad przed jakąkolwiek ekstrakcją
+Dodaj helper `looksLikeChallengePage(rawHtml, markdown, title)` który zwraca `true`, gdy w HTML/markdown/title pojawia się dowolny z markerów:
+- `recaptcha`, `g-recaptcha`, `hcaptcha`, `cf-challenge`, `cf-browser-verification`, `cloudflare`
+- `just a moment`, `checking your browser`, `attention required`, `access denied`, `403 forbidden`, `robot check`
 
-### 2. Rozszerz zbieranie tytułu strony (`pageTitle`)
-Zamień jednolinijkowe:
-```
-const pageTitle = (meta.title ?? meta.ogTitle) as string | undefined ?? null;
-```
-na helper, który po kolei sprawdza: `meta.title`, `meta.ogTitle`, `meta["og:title"]`, `meta.twitterTitle`, `meta["twitter:title"]`, a jeśli wszystko puste — wyciąga `<title>…</title>` regexem z `rawHtml`.
+Jeżeli trafienie → zwróć od razu `{ url, ok: false, error: "Strona zablokowana przez zabezpieczenia antybotowe (reCAPTCHA/Cloudflare). Spróbuj innego linku lub uruchom import ponownie." }`.
 
-### 3. Dodaj czwarty fallback: `<h1>` z surowego HTML
-Nowy helper `extractH1(rawHtml)` — regex `/<h1\b[^>]*>([\s\S]*?)<\/h1>/i` z usunięciem tagów wewnętrznych i normalizacją whitespace'ów. Uruchamiany tylko gdy AI/JSON-LD/tytuł nie dały nazwy.
-
-### 4. Zaktualizuj kolejność fallbacków przy `rawNazwa`
+### 2. Blocklist na wynikową nazwę (belt-and-suspenders)
+Nawet gdy challenge nie zostanie wykryty przez markery, po wybraniu `rawNazwa` zwaliduj:
 ```
-extracted.nazwa || hints.name || pageTitle || extractH1(rawHtml) || ""
+const JUNK_NAMES = ["recaptcha", "captcha", "cloudflare", "just a moment",
+  "attention required", "access denied", "403 forbidden", "not found",
+  "robot check", "verify you are human"];
 ```
+Jeżeli znormalizowana `rawNazwa` (lowercase, trim) zawiera któryś marker lub jest krótsza niż 3 znaki → traktuj jako brak nazwy i zwróć czytelny błąd.
 
-### 5. Lepszy komunikat błędu
-Zamiast ogólnego „Nie udało się wykryć nazwy produktu" pokaż użytkownikowi krótki hint zależny od tego, co zawiodło (np. „Strona nie zawiera nagłówka H1/tytułu — sprawdź czy link prowadzi do konkretnego produktu, nie do listingu"). Nie zmieniamy typu zwrotu — tylko treść `error` w `ExtractResult`.
+### 3. Wybór lepszego `<h1>` gdy jest ich kilka
+Zmień `extractH1` na `extractProductH1(rawHtml)`:
+- Zbierz WSZYSTKIE `<h1>` z HTML.
+- Preferuj ten z klasą zawierającą `product`, `product-name`, `product-title`, `item-title` (case-insensitive) — mieloch.pl używa `<h1 class="product-name">`.
+- W przeciwnym razie zwróć pierwszy `<h1>` który nie pasuje do `JUNK_NAMES`.
+
+To samo zastosuj do `extractHtmlTitle` — po strip odrzuć wynik pasujący do JUNK_NAMES.
+
+### 4. Bez zmian w schemacie/DB/UI
+Zmiana wyłącznie w `src/lib/pim/import-urls.functions.ts`. UI dialogu pokaże czytelny komunikat błędu z pkt. 1/2, użytkownik zobaczy dlaczego link został odrzucony.
 
 ## Uwagi
 
-- Zmiana wyłącznie w `src/lib/pim/import-urls.functions.ts`. Nie ruszamy schematu bazy, workerów, ani UI dialogu.
-- Po naprawie link mieloch.pl powinien się zaimportować z nazwą z `<h1>` (`Wydech Yasuni Carrera 16 Aluminium Red, Gilera / Piaggio`), następnie wzbogaconą o markę (Yasuni) i MPN jeżeli AI je wyciągnie.
+- Rekord „reCAPTCHA" widoczny w projekcie mieloch.pl trzeba usunąć ręcznie z listy produktów po wdrożeniu — poprawka nie robi żadnej retroaktywnej wstecznej korekty w bazie.
+- Nie próbujemy obchodzić reCAPTCHA — po prostu rzetelnie zgłaszamy błąd zamiast tworzyć „śmieciowy" produkt.
