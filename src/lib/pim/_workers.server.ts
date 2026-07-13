@@ -1646,7 +1646,10 @@ async function filterScrapedForProduct(
   // Jeżeli markdown ma sekcję "## Description" / "## Opis" — do AI wysyłamy
   // tylko jej zawartość. Wtedy 3500-znakowe okno nie zostaje zjedzone przez
   // politykę wysyłki, recenzje ani "Related products".
-  const focusedMarkdown = extractDescriptionSection(pageMarkdown) ?? pageMarkdown;
+  // Dodatkowo przepuszczamy przez sanitizer — wycina nav-walls, „Nowości",
+  // „Zadzwoń", „Do koszyka" itp. zanim AI zobaczy syf.
+  const focusedMarkdownRaw = extractDescriptionSection(pageMarkdown) ?? pageMarkdown;
+  const focusedMarkdown = sanitizeProductDescription(focusedMarkdownRaw) || focusedMarkdownRaw;
 
   const user = [
     "PRODUKT (z bazy klienta):",
@@ -1673,7 +1676,17 @@ async function filterScrapedForProduct(
     const imageUrls = out.product_image_indexes
       .map((i) => cappedImages[i - 1])
       .filter((u): u is string => typeof u === "string" && u.length > 0);
-    const dedup = filterImageUrls(imageUrls);
+    let dedup = filterImageUrls(imageUrls);
+    // Vision AND-pass: Gemini ocenia miniaturki i wywala te, które nie są
+    // fotografią tego konkretnego produktu (inne kafle z listingu).
+    if (dedup.length) {
+      try {
+        const keepVisual = await visualFilterImages(apiKey, product.nazwa ?? "", dedup);
+        if (keepVisual) dedup = dedup.filter((u) => keepVisual.has(u));
+      } catch (e) {
+        console.warn("visualFilterImages non-fatal:", e);
+      }
+    }
     return {
       is_product_page: out.is_product_page,
       description: sanitizeProductDescription(out.product_description || ""),
@@ -1685,6 +1698,51 @@ async function filterScrapedForProduct(
   } catch (e) {
     console.warn("filterScrapedForProduct failed; keeping raw:", e);
     return { ...fallback, description: sanitizeProductDescription(fallback.description), imageUrls: filterImageUrls(fallback.imageUrls) };
+  }
+}
+
+// Vision filter: pyta Gemini czy każde ze zdjęć przedstawia konkretnie ten
+// produkt. Zwraca Set URL-i do zachowania. Przy błędzie/timeout zwraca null
+// — wtedy nie wycinamy nic dodatkowo poza filtrem tekstowym.
+async function visualFilterImages(
+  apiKey: string,
+  productName: string,
+  imageUrls: string[],
+): Promise<Set<string> | null> {
+  if (!imageUrls.length || !productName) return null;
+  const top = imageUrls.slice(0, 8);
+  const content = [
+    { type: "text", text: [
+      `Produkt: „${productName}".`,
+      "Otrzymujesz zdjęcia jako kandydatów do galerii tego produktu.",
+      "Zwróć JSON {\"keep\":[indeksy 1-based]} — WYŁĄCZNIE zdjęć, które przedstawiają dokładnie ten sam produkt (ten sam wariant/rozmiar/kolor).",
+      "ODRZUĆ: zdjęcia innych produktów widocznych na kaflach „Nowości/Polecane/Bestseller", ikony, banery, logo, zdjęcia kategorii, akcesoriów niezwiązanych z produktem.",
+      "Jeśli nie widzisz produktu albo nie masz pewności — nie dodawaj indeksu.",
+    ].join("\n") },
+    ...top.map((url) => ({ type: "image_url", image_url: { url } })),
+  ] as unknown[];
+  try {
+    const call = callGatewayJson(apiKey, "google/gemini-2.5-flash", [
+      { role: "user", content },
+    ]);
+    const timeout = new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error("vision timeout")), 15_000),
+    );
+    const parsed = (await Promise.race([call, timeout])) as { keep?: unknown };
+    const idxs = Array.isArray(parsed.keep)
+      ? parsed.keep.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+      : [];
+    const kept = new Set<string>();
+    for (const i of idxs) {
+      const u = top[i - 1];
+      if (u) kept.add(u);
+    }
+    // Zdjęcia poza top-8 nie były oceniane — zachowujemy je (bezpieczniej).
+    for (let i = 8; i < imageUrls.length; i++) kept.add(imageUrls[i]);
+    return kept;
+  } catch (e) {
+    console.warn("visualFilterImages failed:", e);
+    return null;
   }
 }
 
