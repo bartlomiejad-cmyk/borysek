@@ -535,6 +535,7 @@ export const importProductsFromUrls = createServerFn({ method: "POST" })
           // is stashed in source_products.raw so it can be inspected later.
           void description;
           void imageUrls;
+          void imageTiers;
           return { url, ok: true, sourceProductId, name: nazwa };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
