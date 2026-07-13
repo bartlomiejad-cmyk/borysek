@@ -1060,6 +1060,62 @@ function ProjectPage() {
             ?.visualization_requirements_pl ?? null
         }
       />
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => {
+          if (!v && !deleting) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.kind === "bulk"
+                ? `Usunąć ${deleteTarget.ids.length} produktów?`
+                : "Usunąć produkt?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Ta operacja jest nieodwracalna. Usunięte zostaną także złote
+                  rekordy, wizualizacje AI i dopasowania dla wskazanych
+                  produktów. Źródła (product_sources) i wyniki wyszukiwań
+                  pozostają nienaruszone.
+                </p>
+                {deleteTarget?.kind === "one" && (
+                  <p className="text-foreground font-medium line-clamp-2">
+                    „{deleteTarget.name}"
+                  </p>
+                )}
+                {deleteTarget?.kind === "bulk" && deleteTarget.names.length > 0 && (
+                  <ul className="text-xs text-foreground/80 list-disc pl-5 space-y-0.5">
+                    {deleteTarget.names.slice(0, 5).map((n, i) => (
+                      <li key={i} className="line-clamp-1">{n}</li>
+                    ))}
+                    {deleteTarget.names.length > 5 && (
+                      <li className="text-muted-foreground">
+                        …i {deleteTarget.names.length - 5} więcej
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                runDelete();
+              }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Usuwam…" : "Usuń"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }
