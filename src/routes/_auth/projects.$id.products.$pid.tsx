@@ -520,7 +520,12 @@ function ProductDetail() {
                     disabled={!enrichment || !mainUrl || regenMut.isPending}
                     onClick={() => {
                       if (!enrichment || !mainUrl) return;
-                      regenMut.mutate({ enrichmentId: enrichment.id, imageUrl: mainUrl });
+                      regenMut.mutate({
+                        enrichmentId: enrichment.id,
+                        imageUrl: mainUrl,
+                        customStyle: regenStyle.trim() || undefined,
+                        customRequirements: regenReq.trim() || undefined,
+                      });
                     }}
                   >
                     {regenMut.isPending ? (
@@ -531,6 +536,37 @@ function ProductDetail() {
                     {regenMut.isPending ? "Generuję…" : regeneratedUrl ? "Regeneruj ponownie" : "Regeneruj"}
                   </Button>
                 </div>
+              </div>
+              <div className="rounded-md border border-violet-200 bg-violet-50/40 dark:bg-violet-950/20 p-2 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px]">
+                    <div className="font-medium">Wskazówki wizualne (opcjonalnie)</div>
+                    <div className="text-muted-foreground">AI podpowie na bazie zdjęć źródłowych. Białe tło i proporcje pozostają nadrzędne.</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={analyzeForThumb}
+                    disabled={visionBusy || regenMut.isPending}
+                  >
+                    {visionBusy ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                    Analizuj zdjęcia
+                  </Button>
+                </div>
+                <Textarea
+                  value={regenStyle}
+                  onChange={(e) => setRegenStyle(e.target.value)}
+                  placeholder="Styl / kadr (np. lekki kąt ¾, rozłożone akcesoria, delikatny cień kontaktowy)"
+                  rows={2}
+                  className="text-xs"
+                />
+                <Textarea
+                  value={regenReq}
+                  onChange={(e) => setRegenReq(e.target.value)}
+                  placeholder="Wymagania (np. pokaż etykietę frontem, zachowaj kolor zielony pudełka)"
+                  rows={2}
+                  className="text-xs"
+                />
               </div>
               {regenMut.isPending && (
                 <p className="text-[11px] text-muted-foreground italic">
