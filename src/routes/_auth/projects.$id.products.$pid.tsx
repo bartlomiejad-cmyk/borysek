@@ -985,6 +985,11 @@ function ProductDetail() {
               Brak dopasowanych źródeł. Sprawdź pliki Search/Product JSON i uruchom dopasowanie.
             </CardContent></Card>
           )}
+          {dedupedCount > 0 && (
+            <div className="text-xs text-muted-foreground -mt-1">
+              Zduplikowane warianty zostały odfiltrowane ({dedupedCount})
+            </div>
+          )}
           {sources.map((s, i) => {
             const combined = [
               ...s.images.map((u) => ({ u, extra: false })),
