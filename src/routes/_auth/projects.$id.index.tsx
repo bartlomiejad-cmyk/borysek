@@ -501,6 +501,9 @@ function ProjectPage() {
           <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
             <Play className="h-4 w-4 mr-2" /> Dopasuj
           </Button>
+          <Button variant="outline" onClick={() => setShareOpen(true)}>
+            <Share2 className="h-4 w-4 mr-2" /> Udostępnij klientowi
+          </Button>
           <Button
             variant="outline"
             disabled={!!discActive}
