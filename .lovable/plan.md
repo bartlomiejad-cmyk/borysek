@@ -1,49 +1,65 @@
+# Analiza zdjęć produktu przez AI (Gemini) → prompt stylu i wymagań
 
-## Problem
+## Cel
 
-Prompty do miniaturek już zakazują beżu/kremu/off-white, ale FAL (seedream v4 edit oraz worker `nano-banana`) i tak zostawia lekko beżową poświatę pod produktem. Sam prompt nie wystarczy — modele generatywne nie dają twardej gwarancji na pojedynczy kolor tła. Trzeba wymusić czystą biel po stronie serwera, deterministycznie.
+Zanim uruchomimy regenerację miniatury lub wygenerujemy wizualizacje, AI (Gemini multimodalny) przegląda zdjęcia źródłowe produktu i pisze spersonalizowany prompt: styl/scenę oraz wymagania techniczne. Użytkownik widzi wynik w polu tekstowym i może go edytować przed uruchomieniem generacji.
 
-## Rozwiązanie
+## Model
 
-Po tym, jak model wygeneruje miniaturę (kwadrat 1:1 na "białym" tle), przepuść wynik przez usuwanie tła i skomponuj RGBA nad płaskim #FFFFFF. To gwarantuje matematycznie czyste tło niezależnie od tego, co zwrócił model.
+`google/gemini-2.5-pro` przez Lovable AI Gateway (obsługuje wejście `image_url`, chat completions). Fallback: `google/gemini-3-flash-preview` przy timeoutach.
 
-Dotyczy to dwóch ścieżek generowania miniatur:
+## Backend
 
-1. Ręczna regeneracja z edytora produktu — `regenerateMainImage` w `src/lib/pim/regen.functions.ts`.
-2. Masowa regeneracja w workerze — `runRegenerateMainImage` w `src/lib/pim/_workers.server.ts` (ta sama logika, ten sam problem).
+Nowa funkcja RPC w `src/lib/pim/ai.functions.ts`:
 
-## Co dokładnie zmienimy
+```
+analyzeProductImagesForPrompt({ productId, mode })
+  mode: "thumbnail" | "visualization"
+```
 
-### 1. Nowy helper `flattenToWhiteBackground` w `src/lib/pim/_workers.server.ts`
+Kroki handlera (z `requireSupabaseAuth`):
+1. Pobiera `source_products` + `enrichments` (nazwa, marka, kategoria, cechy, `image_urls[]`).
+2. Wybiera max 4 najlepsze zdjęcia (pierwsze niepuste, deduplikacja).
+3. Buduje wiadomość multimodalną: system prompt zależny od `mode` + user content `[text, image_url, image_url, ...]` (schemat z `ai-multimodal-input`).
+4. Wywołuje `POST https://ai.gateway.lovable.dev/v1/chat/completions` z `LOVABLE_API_KEY`.
+5. Wymusza JSON: `{ style: string, requirements: string }`.
+6. Zwraca do klienta.
 
-- Wejście: `Uint8Array` z wynikiem FAL (JPEG/PNG).
-- Krok A: wywołaj `fal-ai/bria/background/remove` (albo `fal-ai/imageutils/rembg` jeśli bria zwraca 4xx) — model zwraca PNG z kanałem alfa (tło = 0).
-- Krok B: sparsuj RGBA używając czystego JS (`upng-js` — działa w Cloudflare Worker, nie wymaga sharpa ani canvasa; dodamy `bun add upng-js`).
-- Krok C: na nowym buforze RGB zainicjalizuj wszystkie piksele na `(255,255,255)`, następnie dla każdego piksela z alfą > 0 wykonaj kompozyt `dst = src*a + 255*(1-a)`. Wynik: JPEG (kompresja przez upng-js → PNG lub `@cf-wasm/photon` do JPEG; wybierzemy PNG dla prostoty i pewności — brak ryzyka artefaktów JPEG na krawędziach tła).
-- Wyjście: `Uint8Array` (PNG z płaskim białym tłem) + wymiary.
+System prompty:
+- **thumbnail** — AI opisuje co widzi (kolor produktu, materiał, kształt, orientacja), pisze wymagania „zachowaj ten dokładnie ten kolor/materiał/logo, tło #FFFFFF, kąt ~45°" — dopasowane do konkretnego produktu.
+- **visualization** — AI proponuje scenę pasującą do kategorii/charakteru produktu (np. „notebook na drewnianym biurku w biurze przy oknie") + wymagania (spójność logo, proporcje, oświetlenie).
 
-Kompresja PNG to prosty pass — pliki i tak rzędu 1–2 MB dla 2560px, w porządku.
+## Frontend
 
-### 2. Podpięcie w obu ścieżkach
+### 1. Dialog „Generuj wizualizacje" (`GenerateVisualizationsDialog.tsx`)
 
-- `regenerateMainImage` (`src/lib/pim/regen.functions.ts`): po `fetchImageBytes(generatedUrl)`, przed uploadem do Storage, przepuść bajty przez `flattenToWhiteBackground`. Zapisz jako `.png` (nadpisując istniejące `.jpg`/`.webp`).
-- `runRegenerateMainImage` (`src/lib/pim/_workers.server.ts`): analogicznie — po pobraniu wyniku FAL, przed uploadem końcowym.
+Obok istniejącego przycisku „✨ Zaproponuj AI" (tekstowy, na bazie samej nazwy) dodać drugi przycisk **„🔍 Analizuj zdjęcia"** przy każdym z pól Styl/scena i Wymagania. Klik:
+- Wywołuje `analyzeProductImagesForPrompt({ productId, mode: "visualization" })` dla pierwszego zaznaczonego produktu.
+- Wynik `style` wstawia do pola Styl, `requirements` do pola Wymagania.
+- Loading state, disabled gdy brak zaznaczonych produktów lub brak zdjęć.
 
-Ścieżka wizualizacji lifestyle (`PIM_VISUALIZATIONS`) NIE jest ruszana — tam tło ma być scenerią, nie białe.
+Toast informacyjny gdy produkt nie ma zdjęć źródłowych.
 
-### 3. Uproszczenie promptu miniatury (opcjonalnie)
+### 2. Edytor produktu (`projects.$id.products.$pid.tsx`) — sekcja miniatury
 
-Skoro tło i tak wymusimy po fakcie, prompt do FAL możemy skrócić — zostawiamy jedno zdanie o białym tle plus twarde reguły dla samego produktu (kolory, logo, framing). Krótszy prompt = mniej driftu modelu na etykietach. To drobne uproszczenie, głównego problemu nie zmienia.
+W sekcji regeneracji miniatury dodać przycisk **„🔍 Analizuj zdjęcia i zaproponuj prompt"** obok istniejących kontrolek stylu. Klik:
+- Wywołuje `analyzeProductImagesForPrompt({ productId, mode: "thumbnail" })`.
+- Otwiera modal/rozwija panel z polami `style` i `requirements` do edycji.
+- Po akceptacji: przekazuje jako parametry do `regenerateMainImage` (rozszerzenie sygnatury o opcjonalne `customStyle`, `customRequirements`).
 
-## Fallbacki
+`regenerateMainImage` w `src/lib/pim/regen.functions.ts` przyjmuje opcjonalne pola i doklejają je do promptu FAL (przed twardymi ogranicznikami tła #FFFFFF/zakazu zmiany koloru — te zostają nienaruszone jako priorytet).
 
-- Jeśli usuwanie tła zwróci 4xx/5xx, log + `throw` w workerze (żeby job miał `failed_count`), a `regenerateMainImage` rzuca Toast — użytkownik klika ponownie. Nie zapisujemy "półgotowego" wyniku z beżowym tłem.
-- Jeśli `fal-ai/bria/background/remove` będzie problematyczny, alternatywa: `fal-ai/imageutils/rembg` (open-source, tańszy, chwilę wolniejszy). Wybór w helperze, jedna zmienna.
+## Ograniczenia / bezpieczeństwo
 
-## Runtime
+- Max 4 zdjęcia × ~1 MB base64 lub podanie jako URL (jeśli publiczne w storage). Preferuj URL — mniejszy payload.
+- Timeout 30s (limit Cloudflare Worker). Obsłużyć błędy `402` (kredyty) i `429` (rate limit) toastem.
+- Zachowaj istniejące twarde zabezpieczenia w promptach regeneracji (tło #FFFFFF, zakaz zmiany koloru produktu) — AI-generated `requirements` jest dodatkiem, nie zastępuje.
 
-`upng-js` to czysty JS (~30 KB), zero natywnych zależności — bezpieczne dla Cloudflare Worker. Nie potrzebujemy `sharp`/`canvas`/`photon`.
+## Pliki do zmiany
 
-## Weryfikacja
+- `src/lib/pim/ai.functions.ts` — nowa funkcja `analyzeProductImagesForPrompt`.
+- `src/lib/pim/regen.functions.ts` — rozszerzenie sygnatury o `customStyle`/`customRequirements`.
+- `src/components/pim/GenerateVisualizationsDialog.tsx` — przyciski „🔍 Analizuj zdjęcia" przy dwóch polach.
+- `src/routes/_auth/projects.$id.products.$pid.tsx` — przycisk + panel edycji promptu w sekcji miniatury.
 
-Wygenerować miniaturę z produktu, na którym wcześniej wychodziło beżowe tło (np. Speed-line/Yasuni), i sprawdzić w podglądzie oraz otwierając PNG w narzędziu z pipetą — cztery narożniki muszą być dokładnie `#FFFFFF`.
+Bez zmian w schemacie DB, bez nowych migracji.
