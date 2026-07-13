@@ -206,9 +206,9 @@ export const runMatching = createServerFn({ method: "POST" })
       });
     }
 
-    // AI validation pass: drop sources that don't actually describe the same
-    // product (e.g. missing the key brand token like "SWISS").
-    if (apiKey) {
+    // Zawsze: pobierz metadane źródeł, wyczyść opisy/obrazy i zastosuj
+    // scoring + cap TOP N. AI-walidacja jest opcjonalna (wymaga LOVABLE_API_KEY).
+    {
       const allUrls = Array.from(
         new Set(updates.flatMap((u) => u.picked_urls)),
       );
@@ -262,21 +262,26 @@ export const runMatching = createServerFn({ method: "POST" })
       }
       const productById = new Map(products.map((p) => [p.id, p]));
       let validated = 0;
-      // Sequential to respect rate limits; only validate rows with 1+ URLs.
       for (const u of updates) {
         if (!u.picked_urls.length) continue;
         const prod = productById.get(u.source_product_id);
         if (!prod || !prod.nazwa) continue;
-        const sources = u.picked_urls
-          .map((url) => ({
-            url,
-            title: srcMap.get(url)?.title ?? null,
-            description: srcMap.get(url)?.description ?? null,
-          }))
-          .filter((s) => s.title || s.description);
-        if (!sources.length) continue;
-        const keep = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
-        const kept = u.picked_urls.filter((url) => keep.has(url));
+
+        let kept = u.picked_urls;
+        if (apiKey) {
+          const sources = u.picked_urls
+            .map((url) => ({
+              url,
+              title: srcMap.get(url)?.title ?? null,
+              description: srcMap.get(url)?.description ?? null,
+            }))
+            .filter((s) => s.title || s.description);
+          if (sources.length) {
+            const keep = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
+            kept = u.picked_urls.filter((url) => keep.has(url));
+            validated++;
+          }
+        }
 
         // Ranking po jakości danych i cap TOP N — źródła bez tytułu/opisu/zdjęć
         // wypadają, nawet jeśli AI je zaakceptowało.
@@ -304,11 +309,9 @@ export const runMatching = createServerFn({ method: "POST" })
             if (wasMatched) matched--;
           }
         }
-        validated++;
       }
-      console.log(`[runMatching] AI-validated ${validated} products`);
-    } else {
-      console.warn("[runMatching] LOVABLE_API_KEY missing; skipping AI validation");
+      console.log(`[runMatching] scored+capped all products; AI-validated ${validated}`);
+      if (!apiKey) console.warn("[runMatching] LOVABLE_API_KEY missing; skipping AI validation");
     }
 
     if (updates.length) {

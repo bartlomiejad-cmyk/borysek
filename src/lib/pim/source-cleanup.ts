@@ -68,7 +68,7 @@ export function filterImageUrls(urls: ReadonlyArray<string>): string[] {
 // ---------------------------------------------------------------------------
 
 const DESC_HEADING_RE =
-  /^\s{0,3}(?:#{1,6}\s+|\*\*\s*)?(?:product\s+)?(description|opis|product\s+details|details|specification|specyfikacja)\s*[:\s*]{0,4}\**\s*$/im;
+  /^\s{0,3}(?:#{1,6}\s+|\*\*\s*)?(?:product\s+)?(description|opis(?:\s+i\s+specyfikacja)?|opis\s+produktu|product\s+details|details|specification|specyfikacja)\s*[:\s*]{0,4}\**\s*$/im;
 
 const NEXT_HEADING_RE = /^\s{0,3}(?:#{1,6}\s+\S|\*\*[^\n]+\*\*\s*$)/m;
 
@@ -151,6 +151,58 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
   /^compare$/i,
   /^obserwuj$/i,
   /^por[óo]wnaj$/i,
+  // === Babyhit / IdoSell / typowe chrome sklepów PL ===
+  /^\s*rozmiar\s*:?\s*$/i,
+  /^\s*uniwersalny\s*,?\s*$/i,
+  /wybierz rozmiar/i,
+  /produkt niedost[ęe]pny/i,
+  /^\s*wysy[łl]ka\s*:?\s*$/i,
+  /nasza cena/i,
+  /powiadom o dost[ęe]pno[śs]ci/i,
+  /powiadomienie\s*:/i,
+  /^\s*ilo[śs][ćc]\s*:?\s*$/i,
+  /^\s*\/\s*1\s*szt\.?\s*$/i,
+  /kup na raty/i,
+  /^\s*oblicz\s+rat[ęe]\b/i,
+  /santander consumer bank/i,
+  /\be?raty\b/i,
+  /cena w punktach/i,
+  /kup za punkty/i,
+  /prezent za punkty/i,
+  /kupuj[aą]c ten towar zyskasz/i,
+  /znalaz[łl]e[śs]\s+ten\s+produkt\s+taniej/i,
+  /przebijemy ofert[ęe]/i,
+  /cena konkurencji/i,
+  /link do oferty konkurencji/i,
+  /kod rabatowy/i,
+  /ty wysy[łl]asz ofert[ęe]/i,
+  /^\s*producent\s*:/i,
+  /wszystkie produkty tego producenta/i,
+  /darmowa wysy[łl]ka od/i,
+  /paczkomat/i,
+  /prosty kreator zwrot[óo]w/i,
+  /bez stresu i obaw/i,
+  /wed[łl]ug prawa konsumenta/i,
+  /^\s*gwarancja\s*:?\s*$/i,
+  /jako[śs][ćc]\s+i\s+bezpiecze[nń]stw/i,
+  /^\s*(opis\s+i\s+specyfikacja|przydatne\s+akcesoria)\s*$/i,
+  /opinie\s*,?\s*pytania\s+i\s+odpowiedzi/i,
+  /opinie u[żz]ytkownik[óo]w/i,
+  /aby m[óo]c oceni[ćc] produkt/i,
+  /musisz by[ćc]\s+zalogowany/i,
+  /je[żz]eli powy[żz]szy opis jest dla ciebie niewystarczaj[ąa]cy/i,
+  /pola oznaczone gwiazdk[ąa] s[ąa] wymagane/i,
+  /^\s*e[-\s]?mail\s*:?\s*$/i,
+  /^\s*pytanie\s*:?\s*$/i,
+  /^\s*wy[śs]lij\s*$/i,
+  /^\s*pkt\.?\s*$/i,
+  /^\s*~{2,}\s*$/,
+  /odst[ąa]pi[ćc] od umowy/i,
+  /14\s+dni\s+bez\s+podania\s+przyczyny/i,
+  /najwa[żz]niejsza jest twoja satysfakcja/i,
+  /\[obserwuj\]/i,
+  /\[por[óo]wnaj\]/i,
+  /add_favorite/i,
   /\bsaturday\b/i,
   /\bsunday\b/i,
   /\bmonday\b/i,
@@ -208,7 +260,7 @@ const DESC_BLOCK_PHRASES: RegExp[] = [
 ];
 
 const DESC_CUT_HEADINGS: RegExp[] = [
-  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?|masz pytanie|menu)\b/i,
+  /^#{1,6}?\s*(polecane|polecamy|zobacz te[zż]|klienci kupili|klienci polecaj[aą]|powi[aą]zane|opinie|recenzje|komentarze|stopka|dane kontaktowe|kontakt|regulamin|newsletter|p[łl]atno[śs]ci|dostawa|zwroty|address|adres|contact|sklep stacjonarny|stationary store|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?|masz pytanie|menu|[łl]atwy zwrot(?:\s+towaru)?|kup na raty|przydatne akcesoria|opinie u[żz]ytkownik[óo]w)\b/i,
   // Bloki nagłówka sklepowego czasem lądują w markdown jako pogrubienie: **Masz pytanie ?**
   /^\s*\*\*\s*(masz pytanie|zadzwo[nń]|nowo[śs]ci(?:\s+w\s+ofercie)?|bestseller[y]?)\b/i,
 ];
