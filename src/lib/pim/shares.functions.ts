@@ -3,6 +3,29 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { randomBytes, pbkdf2Sync, createHmac, timingSafeEqual } from "node:crypto";
 
+export type SharePublicEnrichment = {
+  golden_name: string | null;
+  golden_description: string | null;
+  golden_features: Array<{ key: string; value: string }> | null;
+  golden_slug: string | null;
+  golden_meta_description: string | null;
+  picked_urls: string[] | null;
+  regenerated_main_image: string | null;
+  pinned_main_url: string | null;
+  ai_gallery_urls: string[] | null;
+  hidden_images: string[] | null;
+  status: string;
+};
+
+export type SharePublicProduct = {
+  id: string;
+  nazwa: string | null;
+  kod: string | null;
+  ean: string | null;
+  enrichment: SharePublicEnrichment | null;
+  feedback: { comments: number; fixes: number };
+};
+
 // -------- helpers (server-only) --------
 
 function hashPassword(password: string, salt: string): string {
