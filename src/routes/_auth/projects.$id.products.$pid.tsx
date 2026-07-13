@@ -1084,9 +1084,17 @@ function ProductDetail() {
                           <ImageOff className="h-3 w-3" /> brak zdjęć{!includeExtra ? " (extra wyłączone)" : ""}
                         </div>
                       )}
-                      <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30">
-                        {s.description ?? "(brak opisu)"}
-                      </div>
+                      {s.cleaning_meta?.cleaned_by === "llm" && s.description ? (
+                        <div
+                          className="text-sm max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30 prose prose-sm max-w-none dark:prose-invert"
+                          // Content is sanitized server-side by whitelistSanitize (only h3/p/ul/li/strong/table/tr/td).
+                          dangerouslySetInnerHTML={{ __html: s.description }}
+                        />
+                      ) : (
+                        <div className="text-sm whitespace-pre-wrap max-h-64 overflow-auto border border-border/50 rounded-2xl p-3 bg-muted/30">
+                          {s.description ?? "(brak opisu)"}
+                        </div>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"
