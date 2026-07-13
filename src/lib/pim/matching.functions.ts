@@ -664,18 +664,21 @@ export async function scoreAndCapForProduct(
   // may not be in enrichment.picked_urls yet — pull both and rescore all.
   const { data: enRow } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, matched_term")
+    .select("id, picked_urls, matched_term, pinned_main_url")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enRow) return { count: 0, strong: 0 };
   const currentPicked = (enRow.picked_urls as string[] | null) ?? [];
+  const pinned = (enRow as { pinned_main_url?: string | null }).pinned_main_url ?? null;
 
   // Also pull ALL product_sources for the term(s) — union with existing picks.
   const { data: allSrcs } = await supabaseAdmin
     .from("product_sources")
-    .select("id, url, title, description, images, extra_images")
+    .select("id, url, title, description, images, extra_images, cleaning_meta")
     .eq("project_id", projectId);
   const bySrcUrl = new Map<string, { title: string | null; description: string | null; imagesCount: number }>();
+  const confidenceByUrl = new Map<string, number | null>();
+  const descLenByUrl = new Map<string, number>();
   for (const s of allSrcs ?? []) {
     const rr = s as {
       url: string;
@@ -683,6 +686,7 @@ export async function scoreAndCapForProduct(
       description: string | null;
       images: unknown;
       extra_images: unknown;
+      cleaning_meta: unknown;
     };
     const main = Array.isArray(rr.images) ? (rr.images as string[]) : [];
     const extra = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
@@ -691,6 +695,9 @@ export async function scoreAndCapForProduct(
       description: rr.description ?? null,
       imagesCount: main.length + extra.length,
     });
+    const cm = (rr.cleaning_meta ?? null) as { confidence?: number | null } | null;
+    confidenceByUrl.set(rr.url, cm?.confidence ?? null);
+    descLenByUrl.set(rr.url, (rr.description ?? "").length);
   }
 
   // Candidate URLs = union of previously picked + everything freshly scraped
@@ -719,6 +726,7 @@ export async function scoreAndCapForProduct(
 
   // AI validation (best-effort).
   let kept = candidates;
+  let clustersByUrl = new Map<string, string>();
   if (apiKey && nazwa) {
     const sources = candidates
       .map((url) => {
@@ -727,8 +735,9 @@ export async function scoreAndCapForProduct(
       })
       .filter((s) => s.title || s.description);
     if (sources.length) {
-      const keep = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources);
-      kept = candidates.filter((url) => keep.has(url));
+      const val = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources);
+      kept = candidates.filter((url) => val.keep.has(url));
+      if (!pinned && val.ok) clustersByUrl = val.clustersByUrl;
     }
   }
 
@@ -742,17 +751,39 @@ export async function scoreAndCapForProduct(
     );
     return { url, ...r };
   });
-  const rankedFull = scored
-    .filter((x) => x.total > 0)
+  const positive = scored.filter((x) => x.total > 0);
+  const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+  const dedup = applyClusterDedup(
+    positive.map((x) => x.url),
+    scoreByUrl,
+    clustersByUrl,
+    confidenceByUrl,
+    descLenByUrl,
+  );
+  const rankedFull = positive
+    .filter((x) => dedup.keptUrls.has(x.url))
     .sort((a, b) => b.total - a.total)
     .slice(0, TOP_SOURCES_PER_PRODUCT);
   const ranked = rankedFull.map((x) => x.url);
-  const breakdown = rankedFull.map((x) => ({
+  const winners: BreakdownEntry[] = rankedFull.map((x) => ({
     url: x.url,
     total: x.total,
     producer_boost: x.producer_boost,
     trusted_boost: x.trusted_boost,
+    variant_key: dedup.keyByUrl.get(x.url) ?? null,
+    deduped: false,
   }));
+  const dropped: BreakdownEntry[] = positive
+    .filter((x) => dedup.deduped.has(x.url))
+    .map((x) => ({
+      url: x.url,
+      total: x.total,
+      producer_boost: x.producer_boost,
+      trusted_boost: x.trusted_boost,
+      variant_key: dedup.keyByUrl.get(x.url) ?? null,
+      deduped: true,
+    }));
+  const breakdown: BreakdownEntry[] = [...winners, ...dropped];
 
   await supabaseAdmin
     .from("enrichments")
