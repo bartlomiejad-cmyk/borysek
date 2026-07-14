@@ -2109,8 +2109,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const extraBlacklist = ((project?.blacklist as string[] | null) ?? []);
   const strategy = ((project?.strategy as QueryStrategy | null) ?? "NAZWA") as QueryStrategy;
   const projectSettings = (project?.settings as Record<string, unknown> | null) ?? {};
-  const searchProvider: "firecrawl" | "apify" =
-    projectSettings.search_provider === "apify" ? "apify" : "firecrawl";
+  const rawProvider = projectSettings.search_provider;
+  const searchProvider: "firecrawl" | "apify" | "both" =
+    rawProvider === "apify" ? "apify" : rawProvider === "firecrawl" ? "firecrawl" : "both";
 
   // Producent + MPN mogą być w raw.imported_extract (import z URL) lub — dla
   // CSV — częściowo w `source_products.kod` (kod producenta lub sklepu).
@@ -2144,12 +2145,89 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   const firecrawl = new Firecrawl({ apiKey });
 
-  // 1) Search per wariant.
-  const perVariantUrls: Array<{ variant: string; kind: string; urls: string[] }> = [];
-  const mergedByNorm = new Map<string, string>(); // normalized -> original URL (first-seen)
-  // Apify path: SERP + AI preselection. Firecrawl path: original per-variant search.
+  // 1) Search per wariant. `providerRuns` is the canonical structure that
+  //    later populates search_results.query_variants — one entry per query
+  //    variant containing every discovered URL, its providers, AI pick
+  //    marker and (after scraping) whether it was scraped.
+  type VariantResult = {
+    url: string;
+    title?: string;
+    snippet?: string;
+    domain?: string;
+    providers: Array<"firecrawl" | "apify">;
+    ai_pick?: boolean;
+    ai_reason?: string;
+    filtered_out?: "marketplace" | "host_dup";
+    scraped?: boolean;
+  };
+  type VariantBucket = {
+    variant: string;
+    kind: string;
+    providers: { firecrawl?: number; apify?: number };
+    results: VariantResult[];
+  };
+  const perVariant: VariantBucket[] = variants.map((v) => ({
+    variant: v.query,
+    kind: v.kind,
+    providers: {},
+    results: [],
+  }));
+  // key = variantIndex + "|" + normalizedUrl -> position in bucket.results
+  const upsertResult = (vi: number, url: string, provider: "firecrawl" | "apify", meta: Partial<VariantResult>) => {
+    const bucket = perVariant[vi];
+    const key = normalizeUrlForDedup(url);
+    let existing = bucket.results.find((r) => normalizeUrlForDedup(r.url) === key);
+    if (!existing) {
+      existing = { url, providers: [], ...meta };
+      bucket.results.push(existing);
+    } else {
+      Object.assign(existing, meta);
+    }
+    if (!existing.providers.includes(provider)) existing.providers.push(provider);
+  };
+
+  const useApify = searchProvider === "apify" || searchProvider === "both";
+  const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
+
+  // ---- Firecrawl branch ----
+  if (useFirecrawl) {
+    for (let vi = 0; vi < variants.length; vi++) {
+      const v = variants[vi];
+      let hits: FirecrawlSearchHit[] = [];
+      try {
+        const sr = (await firecrawl.search(v.query, {
+          limit: 10,
+          sources: ["web"],
+          location: "Poland",
+          lang: "pl",
+          country: "pl",
+        } as never)) as unknown;
+        const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
+        hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
+        continue;
+      }
+      let n = 0;
+      for (const h of hits) {
+        const url = (h.url ?? "").trim();
+        if (!url) continue;
+        upsertResult(vi, url, "firecrawl", {
+          title: (h as { title?: string }).title,
+          snippet: (h as { description?: string; snippet?: string }).description
+            ?? (h as { snippet?: string }).snippet,
+          domain: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return undefined; } })(),
+        });
+        n++;
+      }
+      perVariant[vi].providers.firecrawl = n;
+    }
+  }
+
+  // ---- Apify branch ----
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
-  if (searchProvider === "apify") {
+  if (useApify) {
     let buckets: Array<{ query: string; results: SerpResult[] }> = [];
     try {
       buckets = await runSerpSearch(variants.map((v) => v.query), {
@@ -2161,115 +2239,84 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const msg = e instanceof Error ? e.message : String(e);
       await emit(ctx, {
         level: "warn",
-        message: `⚠️ ${nazwa} — Apify SERP: ${msg}. Fallback: Firecrawl search.`,
+        message: `⚠️ ${nazwa} — Apify SERP: ${msg}${useFirecrawl ? " (używam Firecrawl)" : ""}.`,
       });
       buckets = [];
     }
 
-    // Aggregate all SERP results across variants, keep first-seen order.
-    const flat: Array<{ i: number; title: string; snippet: string; url: string; domain: string; variantKind: string; variantQuery: string }> = [];
-    const seenUrl = new Set<string>();
+    // Flat pool across variants (used for AI preselect input).
+    const flat: Array<{ i: number; title: string; snippet: string; url: string; domain: string; vi: number }> = [];
     let idx = 0;
-    for (const v of variants) {
+    for (let vi = 0; vi < variants.length; vi++) {
+      const v = variants[vi];
       const bucket = buckets.find((b) => b.query.trim().toLowerCase() === v.query.trim().toLowerCase())
-        ?? buckets.shift();
+        ?? buckets[vi];
       const results = bucket?.results ?? [];
-      const urls: string[] = [];
+      let n = 0;
       for (const r of results) {
-        const key = normalizeUrlForDedup(r.url);
-        if (seenUrl.has(key)) continue;
-        seenUrl.add(key);
-        urls.push(r.url);
         idx++;
-        flat.push({
-          i: idx,
+        upsertResult(vi, r.url, "apify", {
           title: r.title,
           snippet: r.snippet,
-          url: r.url,
           domain: r.domain,
-          variantKind: v.kind,
-          variantQuery: v.query,
         });
+        flat.push({ i: idx, title: r.title, snippet: r.snippet, url: r.url, domain: r.domain, vi });
+        n++;
       }
-      perVariantUrls.push({ variant: v.query, kind: v.kind, urls });
+      perVariant[vi].providers.apify = n;
     }
 
     if (flat.length) {
-      // AI preselection — cap 40, keep picks order.
       const capped = flat.slice(0, 40);
       const preselect = await preselectSerpResults({
-        product: {
-          nazwa,
-          ean: product.ean ?? null,
-          producent,
-          kod_producenta: mpn,
-        },
+        product: { nazwa, ean: product.ean ?? null, producent, kod_producenta: mpn },
         items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
       });
-      let pickedUrls: string[] = [];
+      const byI = new Map(flat.map((f) => [f.i, f]));
+      let picks: Array<{ url: string; why?: string; vi: number }> = [];
       if (preselect.ok && preselect.picks.length) {
-        const byI = new Map(flat.map((f) => [f.i, f]));
-        pickedUrls = preselect.picks
-          .map((p) => byI.get(p.i)?.url)
-          .filter((u): u is string => !!u);
-        aiPreselectMeta = { total: flat.length, picked: pickedUrls.length };
+        picks = preselect.picks
+          .map((p) => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi } : null; })
+          .filter((v): v is { url: string; why?: string; vi: number } => !!v);
+        aiPreselectMeta = { total: flat.length, picked: picks.length };
       } else {
-        // Fallback: keep the raw SERP order (up to 20) if preselection failed.
-        pickedUrls = flat.slice(0, 20).map((f) => f.url);
-        aiPreselectMeta = {
-          total: flat.length,
-          picked: pickedUrls.length,
-          error: preselect.error ?? "empty",
-        };
+        picks = flat.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
+        aiPreselectMeta = { total: flat.length, picked: picks.length, error: preselect.error ?? "empty" };
       }
-      for (const u of pickedUrls) {
-        const key = normalizeUrlForDedup(u);
-        if (!mergedByNorm.has(key)) mergedByNorm.set(key, u);
+      for (const p of picks) {
+        upsertResult(p.vi, p.url, "apify", { ai_pick: true, ai_reason: p.why });
       }
       await logProductEvent(supabaseAdmin, {
         projectId: product.project_id,
         productId: product.id,
         kind: "ai_preselect",
         message: `AI preselekcja: ${aiPreselectMeta.picked}/${aiPreselectMeta.total}${aiPreselectMeta.error ? ` (fallback: ${aiPreselectMeta.error})` : ""}`,
-        meta: { model: "google/gemini-2.5-flash-lite", count: aiPreselectMeta.picked },
+        meta: { model: "google/gemini-2.5-flash-lite", count: aiPreselectMeta.picked, provider_mode: searchProvider },
       });
       await emit(ctx, {
         level: "info",
-        message: `🎯 ${nazwa} — Apify SERP: ${flat.length} wyników, AI wybrała ${pickedUrls.length}${aiPreselectMeta.error ? " (fallback)" : ""}`,
+        message: `🎯 ${nazwa} — Apify SERP: ${flat.length} wyników, AI wybrała ${picks.length}${aiPreselectMeta.error ? " (fallback)" : ""}`,
       });
     }
   }
 
-  // Firecrawl path (also used as fallback when Apify returned zero merged urls).
-  if (mergedByNorm.size === 0) {
-  for (const v of variants) {
-    let hits: FirecrawlSearchHit[] = [];
-    try {
-      const sr = (await firecrawl.search(v.query, {
-        limit: 10,
-        sources: ["web"],
-        location: "Poland",
-        lang: "pl",
-        country: "pl",
-      } as never)) as unknown;
-      const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
-      hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
-      continue;
-    }
-    const urls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
-    // Avoid double-counting if apify path also filled perVariantUrls.
-    if (!perVariantUrls.some((pv) => pv.variant === v.query && pv.kind === v.kind)) {
-      perVariantUrls.push({ variant: v.query, kind: v.kind, urls });
-    }
-    for (const u of urls) {
-      const key = normalizeUrlForDedup(u);
-      if (!mergedByNorm.has(key)) mergedByNorm.set(key, u);
+  // Merged candidate pool: firecrawl results (always) + apify AI picks (only).
+  // In pure "apify" mode there are no firecrawl results, so only picks survive.
+  const mergedByNorm = new Map<string, string>();
+  for (const b of perVariant) {
+    for (const r of b.results) {
+      const isFc = r.providers.includes("firecrawl");
+      const isApifyPick = r.providers.includes("apify") && r.ai_pick === true;
+      if (!isFc && !isApifyPick) continue;
+      const key = normalizeUrlForDedup(r.url);
+      if (!mergedByNorm.has(key)) mergedByNorm.set(key, r.url);
     }
   }
-  }
+  const perVariantUrls = perVariant.map((b) => ({
+    variant: b.variant,
+    kind: b.kind,
+    urls: b.results.map((r) => r.url),
+  }));
 
   const allUrls = Array.from(mergedByNorm.values());
   if (!allUrls.length) {
@@ -2281,6 +2328,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       message: `Wyszukano źródła: ${variants.length} zapytań, 0 wyników`,
       meta: {
         variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })),
+        provider_mode: searchProvider,
       },
     });
     return;
@@ -2293,6 +2341,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     message: `Wyszukano źródła: ${variants.length} zapytań, ${allUrls.length} unikalnych adresów`,
     meta: {
       variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })),
+      provider_mode: searchProvider,
     },
   });
 
@@ -2309,7 +2358,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       project_id: product.project_id,
       term: t,
       organic_urls: allUrls,
-      query_variants: withVariants ? perVariantUrls : null,
+      query_variants: withVariants ? (perVariant as unknown as Record<string, unknown>[]) : null,
     });
   };
   // Zawsze zapisz pod nazwą (matching NAZWA/HYBRID lookup).
@@ -2322,21 +2371,23 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   // 3) Filter out marketplaces / blacklist, dedup po hoście (max 1 URL/host), top 5.
   const seenHosts = new Set<string>();
-  const filtered = allUrls
-    .filter((u) => !isMarketplaceUrl(u, extraBlacklist))
-    .filter((u) => {
-      const h = (() => {
-        try {
-          return new URL(u).hostname.replace(/^www\./, "");
-        } catch {
-          return null;
-        }
-      })();
-      if (!h || seenHosts.has(h)) return false;
-      seenHosts.add(h);
-      return true;
-    })
-    .slice(0, 5);
+  const markFiltered = (url: string, reason: "marketplace" | "host_dup") => {
+    const key = normalizeUrlForDedup(url);
+    for (const b of perVariant) {
+      const r = b.results.find((x) => normalizeUrlForDedup(x.url) === key);
+      if (r && !r.filtered_out) r.filtered_out = reason;
+    }
+  };
+  const filtered: string[] = [];
+  for (const u of allUrls) {
+    if (isMarketplaceUrl(u, extraBlacklist)) { markFiltered(u, "marketplace"); continue; }
+    const h = (() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } })();
+    if (!h) { markFiltered(u, "marketplace"); continue; }
+    if (seenHosts.has(h)) { markFiltered(u, "host_dup"); continue; }
+    seenHosts.add(h);
+    if (filtered.length < 5) filtered.push(u);
+    else markFiltered(u, "host_dup");
+  }
   await emit(ctx, {
     level: filtered.length ? "info" : "warn",
     message: `   ${nazwa} — ${allUrls.length} wyników, ${filtered.length} po filtrze`,
