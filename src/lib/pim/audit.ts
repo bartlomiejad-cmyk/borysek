@@ -13,7 +13,10 @@
  * only enrichments.audit and source_products.review_status.
  */
 
-import { SOURCE_SCORE_THRESHOLD } from "./matching.functions";
+// Kept in sync with SOURCE_SCORE_THRESHOLD in ./matching.functions.
+// Duplicated deliberately so this module stays client-safe (matching.functions
+// transitively pulls llm-cleaner.server, which is blocked from client bundles).
+const SOURCE_SCORE_THRESHOLD = 4;
 
 export type AuditSeverity = "fail" | "warn";
 export type AuditCheckKey =
