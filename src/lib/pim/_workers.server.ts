@@ -691,7 +691,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw, product_notes, manual_lock")
+    .select("id, project_id, nazwa, kod, ean, raw, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -749,6 +749,12 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const systemPrompt = GOLDEN_SEO_SYSTEM_PROMPT;
 
+  const isCompatibleMode =
+    ((product as { matching_mode?: string | null }).matching_mode === "compatible");
+  const compatibilityLine = isCompatibleMode
+    ? "PRODUKT TYPU ZAMIENNIK/AKCESORIUM: opis może czerpać parametry techniczne i listy kompatybilności ze źródeł równoważnych, ale NIE przenoś nazw marek zamienników innych sklepów do nazwy i opisu; nazwą wiodącą jest nazwa z bazy klienta."
+    : "";
+
   const userPrompt = [
     `PRODUKT (z bazy klienta):`,
     `nazwa: ${product.nazwa ?? ""}`,
@@ -765,6 +771,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     sourceBlocks || "(brak)",
     "",
     guidelinesBlock ? guidelinesBlock + "\n" : "",
+    compatibilityLine,
     'Wygeneruj JSON {"name", "slug", "description", "meta_description", "seo_keywords", "features"} zgodnie z regułami SEO opisanymi w system prompt.',
   ].filter(Boolean).join("\n");
 
