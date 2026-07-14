@@ -103,6 +103,7 @@ function ProductDetail() {
   const resetSourcesFn = useServerFn(resetProductSources);
   const deleteProductsFn = useServerFn(deleteProducts);
   const attachManualFn = useServerFn(attachManualSources);
+  const removeSourceFn = useServerFn(removePickedSource);
   const setModeFn = useServerFn(setMatchingMode);
   const rerunMatchFn = useServerFn(rerunMatchingForProduct);
   const updateNotesFn = useServerFn(updateProductNotes);
