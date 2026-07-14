@@ -920,10 +920,11 @@ export async function runRegenerateMedia(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id")
+    .select("id, project_id, manual_lock")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
+  const productLocked = !!(product as { manual_lock?: boolean }).manual_lock;
 
   const baseSettings = await loadMediaSettings(product.project_id);
   const settings = {
