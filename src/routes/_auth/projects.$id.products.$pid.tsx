@@ -45,6 +45,9 @@ type ImgScore = {
   is_banner_or_trash: boolean;
   identity?: "same" | "different" | "unsure";
   manual_keep?: boolean;
+  w?: number;
+  h?: number;
+  large_url?: string;
 };
 type ImgMeta = { w: number; h: number };
 
@@ -251,11 +254,17 @@ function ProductDetail() {
 
   const scoreFor = (url: string): number => {
     const m = imageMeta[url];
-    const area = (m?.w ?? 0) * (m?.h ?? 0);
     const s = imageScores[url];
+    // Prefer probed dimensions from image_scores (fresh) over image_meta.
+    const w = s?.w ?? m?.w ?? 0;
+    const h = s?.h ?? m?.h ?? 0;
+    const area = w * h;
+    const minSide = w && h ? Math.min(w, h) : 0;
+    // Boost images that comfortably clear the 800px main-image threshold.
+    const resolutionBoost = minSide >= 800 ? 2 : minSide >= 600 ? 1 : minSide > 0 ? 0.5 : 1;
     // Fallback gdy brak wymiarów (image_meta puste) — oceniaj tylko po AI.
-    const effectiveArea = area > 0 ? area : 1;
-    if (!s) return area;
+    const effectiveArea = (area > 0 ? area : 1) * resolutionBoost;
+    if (!s) return area * resolutionBoost;
     if (s.is_banner_or_trash) return 0;
     const pkg = s.has_packaging ?? 0;
     return (s.is_central + s.is_clean + 1.5 * pkg) * effectiveArea;
@@ -429,6 +438,11 @@ function ProductDetail() {
     const s = imageScores[u];
     const isMain = u === mainUrl;
     const isPinned = u === pinnedMainUrl;
+    const m = imageMeta[u];
+    const w = s?.w ?? m?.w ?? 0;
+    const h = s?.h ?? m?.h ?? 0;
+    const minSide = w && h ? Math.min(w, h) : 0;
+    const isLowRes = minSide > 0 && minSide < 800;
     return (
       <div
         key={u}
@@ -438,6 +452,23 @@ function ProductDetail() {
         )}
       >
         <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+        {w > 0 && h > 0 && (
+          <span
+            className={cn(
+              "absolute bottom-0 right-0 text-[9px] font-medium px-1 py-0 rounded-tl border-l border-t",
+              isLowRes
+                ? "bg-amber-500/90 text-white border-amber-600"
+                : "bg-background/80 text-muted-foreground border-border",
+            )}
+            title={
+              isLowRes
+                ? `Niska rozdzielczość: ${w}×${h}px (min. 800px)`
+                : `${w}×${h}px`
+            }
+          >
+            {w}×{h}
+          </span>
+        )}
         {isMain && (
           <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded shadow flex items-center gap-1">
             <Crown className="h-2.5 w-2.5" /> Główne{isPinned ? " (przypięte)" : ""}
@@ -683,6 +714,29 @@ function ProductDetail() {
                   Generuję zdjęcie produktowe… (10–40 s)
                 </p>
               )}
+              {(() => {
+                if (!mainUrl) return null;
+                const s = imageScores[mainUrl];
+                const m = imageMeta[mainUrl];
+                const w = s?.w ?? m?.w ?? 0;
+                const h = s?.h ?? m?.h ?? 0;
+                if (!w || !h) return null;
+                const minSide = Math.min(w, h);
+                if (minSide >= 800) return null;
+                const largeAlt =
+                  s?.large_url && !hiddenSet.has(s.large_url) ? s.large_url : null;
+                return (
+                  <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-[11px] space-y-1">
+                    <div className="font-medium text-amber-800 dark:text-amber-300">
+                      Zdjęcie główne ma niską rozdzielczość: {w}×{h}px
+                    </div>
+                    <div className="text-muted-foreground">
+                      Zalecane min. 800×800px do regeneracji e-commerce.
+                      {largeAlt ? " Dostępny większy wariant tego samego zdjęcia." : ""}
+                    </div>
+                  </div>
+                );
+              })()}
               {regeneratedUrl && (
                 <a href={regeneratedUrl} target="_blank" rel="noreferrer" className="block">
                   <img

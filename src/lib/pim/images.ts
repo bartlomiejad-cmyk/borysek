@@ -14,7 +14,9 @@ export type ImageScoreLite = {
 };
 export type ImageScores = Record<string, ImageScoreLite | undefined>;
 
-const MIN_SIDE = 600;
+// Bumped 600 → 800. Product mains under 800px look blurry in the editor and
+// Allegro cards. Fallback still kicks in when nothing qualifies.
+const MIN_SIDE = 800;
 
 export function pickImages(
   urls: string[],

@@ -123,9 +123,26 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const FAL_KEY = process.env.FAL_KEY;
     if (!FAL_KEY) throw new Error("FAL_KEY nie jest skonfigurowany");
 
+    // If the AI verifier captured a source-size variant of this thumbnail
+    // (e.g. Shopify _small → _2048x), regenerate from that — better input =
+    // better output. Falls back to the URL the caller passed.
+    let sourceUrl = data.imageUrl;
+    try {
+      const { data: enr } = await context.supabase
+        .from("enrichments")
+        .select("image_scores")
+        .eq("id", data.enrichmentId)
+        .maybeSingle();
+      const scores = (enr as { image_scores?: Record<string, { large_url?: string }> } | null)?.image_scores;
+      const large = scores?.[data.imageUrl]?.large_url;
+      if (large && typeof large === "string" && /^https?:\/\//i.test(large)) {
+        sourceUrl = large;
+      }
+    } catch { /* keep original */ }
+
     // Step 1 — bytedance/seedream v4 edit: biały seamless background,
     // miękki cień, produkt ~70% kadru, kwadrat 2560x2560.
-    const sourceForFal = await prepareFalSourceImage(data.enrichmentId, data.imageUrl);
+    const sourceForFal = await prepareFalSourceImage(data.enrichmentId, sourceUrl);
     let shot: FalResp;
     const customBlock = (() => {
       const parts: string[] = [];

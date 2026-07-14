@@ -3365,6 +3365,43 @@ export async function runPimImageVerify(
     });
   }
 
+  // Size probing: for every accepted URL, capture dimensions and try the
+  // upgraded (source-size) variant so downstream regen / list ranking can
+  // prefer the largest available copy without re-probing next run.
+  try {
+    const { probeImageSize } = await import("./image-size.server");
+    const targets = Array.from(new Set(toScore.filter((u) => {
+      const cur = merged[u] as { w?: number; h?: number } | undefined;
+      return !(cur?.w && cur?.h);
+    })));
+    const capped = targets.slice(0, 24);
+    await Promise.all(capped.map(async (u) => {
+      const origDim = await probeImageSize(u, 5000).catch(() => null);
+      const upgraded = upgradeToLargeImageUrl(u);
+      let bigDim: { w: number; h: number } | null = null;
+      let bigUrl: string | null = null;
+      if (upgraded !== u) {
+        bigDim = await probeImageSize(upgraded, 5000).catch(() => null);
+        if (bigDim && origDim && (bigDim.w * bigDim.h) > (origDim.w * origDim.h)) {
+          bigUrl = upgraded;
+        } else if (bigDim && !origDim) {
+          bigUrl = upgraded;
+        }
+      }
+      const cur = (merged[u] as Record<string, unknown> | undefined) ?? {};
+      const patch: Record<string, unknown> = { ...cur };
+      if (origDim) { patch.w = origDim.w; patch.h = origDim.h; }
+      if (bigUrl && bigDim) {
+        patch.large_url = bigUrl;
+        // If we didn't get orig dims, at least record the upgraded size as authoritative.
+        if (!origDim) { patch.w = bigDim.w; patch.h = bigDim.h; }
+      }
+      merged[u] = patch;
+    }));
+  } catch (e) {
+    await emit(ctx, { level: "warn", message: `Probe rozmiaru pominięte: ${e instanceof Error ? e.message : "błąd"}` });
+  }
+
   if (succeeded > 0) {
     const { error: upErr } = await supabaseAdmin
       .from("enrichments")
