@@ -772,6 +772,38 @@ function ProjectPage() {
         </Card>
       )}
 
+      {verifyActive && verifyJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {verifyJob.cancel_requested ? "Zatrzymywanie… " : "Weryfikacja zdjęć AI "}
+                {verifyJob.processed_count}/{verifyJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">
+                  {Math.round((verifyJob.processed_count / Math.max(1, verifyJob.total)) * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: verifyJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_IMAGE_VERIFY"] });
+                  }}
+                  disabled={verifyJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(verifyJob.processed_count / Math.max(1, verifyJob.total)) * 100} />
+            <BulkJobLog jobId={verifyJob.id} />
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="data" className="mb-4">
         <TabsList>
           <TabsTrigger value="data">Dane</TabsTrigger>
