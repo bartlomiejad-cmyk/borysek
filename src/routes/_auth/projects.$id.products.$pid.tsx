@@ -709,6 +709,11 @@ function ProductDetail() {
                   Brak zdjęcia głównego do regeneracji.
                 </p>
               )}
+              {hasAnyEanConfirmed && mainUrl && !mainFromEanConfirmed && (
+                <p className="text-[11px] text-amber-600 italic">
+                  Zdjęcie główne pochodzi ze źródła bez potwierdzonego EAN.
+                </p>
+              )}
             </div>
 
             {/* Galeria wybranych zdjęć ze wszystkich dopasowanych źródeł */}
