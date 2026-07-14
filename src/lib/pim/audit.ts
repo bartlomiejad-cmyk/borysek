@@ -25,6 +25,7 @@ export type AuditCheckKey =
   | "ean_valid"
   | "sources_ok"
   | "main_image_ok"
+  | "viz_qc_ok"
   | "data_sufficiency_ok";
 
 export type AuditCheck = {
@@ -81,6 +82,15 @@ export type AuditInput = {
     issues?: string[];
     candidate_url?: string | null;
   } | null;
+  /**
+   * Post-generation Vision QC results for lifestyle visualisations
+   * (persisted on `enrichments.image_meta.viz_qc` as a URL-keyed map). Any
+   * entry with `passed:false` demotes the audit to a warning.
+   */
+  viz_qc?: Record<
+    string,
+    { passed?: boolean; product_intact?: boolean; product_visible?: boolean; issues?: string[] }
+  > | null;
 };
 
 // --- Helpers ---------------------------------------------------------------
