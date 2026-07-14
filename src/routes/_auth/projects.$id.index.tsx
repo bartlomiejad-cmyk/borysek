@@ -1362,6 +1362,27 @@ function ProjectPage() {
                             <><LockOpen className="h-3 w-3" /> Odblokowany</>
                           )}
                         </button>
+                        {(() => {
+                          const audit = (p as { audit?: { verdict?: "pass" | "warn" | "fail"; at?: string } | null }).audit;
+                          if (!audit) return null;
+                          const v = audit.verdict ?? "warn";
+                          const cls =
+                            v === "pass"
+                              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : v === "warn"
+                                ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                : "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300";
+                          const label = v === "pass" ? "Audyt OK" : v === "warn" ? "Audyt: ostrzeżenia" : "Audyt: błędy";
+                          return (
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-1.5 py-0 ${cls}`}
+                              title={audit.at ? `Audyt AI: ${new Date(audit.at).toLocaleString("pl-PL")}` : "Audyt AI"}
+                            >
+                              <ClipboardCheck className="h-3 w-3 mr-1" /> {label}
+                            </Badge>
+                          );
+                        })()}
                       </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
