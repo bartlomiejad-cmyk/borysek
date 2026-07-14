@@ -2717,7 +2717,7 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw, product_notes")
+    .select("id, project_id, nazwa, raw, product_notes, manual_lock")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
