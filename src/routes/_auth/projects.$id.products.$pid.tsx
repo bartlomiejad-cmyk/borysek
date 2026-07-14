@@ -1243,6 +1243,11 @@ function ProductDetail() {
                         <div className="text-sm font-medium truncate">
                           <span className="text-muted-foreground mr-2">#{i + 1}</span>
                           {s.title ?? "(brak tytułu)"}
+                          {eanConfirmedByUrl.get(s.url) && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-[10px] font-medium align-middle">
+                              EAN potwierdzony
+                            </span>
+                          )}
                         </div>
                         <a
                           href={s.url}
