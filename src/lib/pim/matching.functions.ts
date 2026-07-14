@@ -351,7 +351,7 @@ export const runMatching = createServerFn({ method: "POST" })
     const [{ data: products }, { data: searches }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, nazwa, ean, raw, manual_lock")
+        .select("id, nazwa, ean, raw, manual_lock, matching_mode")
         .eq("project_id", data.projectId),
       supabase
         .from("search_results")
@@ -364,6 +364,37 @@ export const runMatching = createServerFn({ method: "POST" })
         .filter((p) => !!p.manual_lock)
         .map((p) => p.id),
     );
+    const modeById = new Map<string, "strict" | "compatible">(
+      (products as Array<{ id: string; matching_mode?: string | null }>).map((p) => [
+        p.id,
+        ((p.matching_mode as string | null) === "compatible" ? "compatible" : "strict") as "strict" | "compatible",
+      ]),
+    );
+
+    // Load existing enrichments to preserve manual sources (score_breakdown
+    // entries flagged { manual: true }) and existing compat_suggested flags.
+    const productIds = (products as Array<{ id: string }>).map((p) => p.id);
+    const { data: existingEnRows } = productIds.length
+      ? await supabase
+          .from("enrichments")
+          .select("source_product_id, picked_urls, score_breakdown, compat_suggested")
+          .eq("project_id", data.projectId)
+          .in("source_product_id", productIds)
+      : { data: [] as unknown[] };
+    const manualByProduct = new Map<string, string[]>();
+    const manualBreakdownByProduct = new Map<string, BreakdownEntry[]>();
+    for (const r of (existingEnRows ?? []) as Array<{
+      source_product_id: string;
+      picked_urls: string[] | null;
+      score_breakdown: unknown;
+    }>) {
+      const bd = Array.isArray(r.score_breakdown) ? (r.score_breakdown as BreakdownEntry[]) : [];
+      const manualEntries = bd.filter((b) => b && (b as { manual?: boolean }).manual === true);
+      if (manualEntries.length) {
+        manualByProduct.set(r.source_product_id, manualEntries.map((e) => e.url));
+        manualBreakdownByProduct.set(r.source_product_id, manualEntries);
+      }
+    }
 
     const extractProducer = (raw: unknown): string | null => {
       if (!raw || typeof raw !== "object") return null;
@@ -432,7 +463,10 @@ export const runMatching = createServerFn({ method: "POST" })
 
       // Keep ALL matched URLs — downstream views (list + detail) need access to
       // images from every source, not just the first 3.
-      const picked = Array.from(new Set((urls ?? []).filter((u) => typeof u === "string" && u.length > 0)));
+      const raw = (urls ?? []).filter((u) => typeof u === "string" && u.length > 0);
+      // Union with manual sources — they must never be dropped by rematch.
+      const manualUrls = manualByProduct.get(p.id) ?? [];
+      const picked = Array.from(new Set([...manualUrls, ...raw]));
       if (picked.length) matched++;
       updates.push({
         source_product_id: p.id,
@@ -544,6 +578,7 @@ export const runMatching = createServerFn({ method: "POST" })
         let kept = u.picked_urls;
         let clustersByUrl = new Map<string, string>();
         const skipClustering = !!pinnedByProduct.get(u.source_product_id);
+        const mode = modeById.get(u.source_product_id) ?? "strict";
         if (apiKey) {
           const sources = u.picked_urls
             .map((url) => ({
@@ -553,11 +588,19 @@ export const runMatching = createServerFn({ method: "POST" })
             }))
             .filter((s) => s.title || s.description);
           if (sources.length) {
-            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
+            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources, mode);
             kept = u.picked_urls.filter((url) => val.keep.has(url));
             if (!skipClustering && val.ok) clustersByUrl = val.clustersByUrl;
             validated++;
           }
+        }
+
+        // Always preserve manual URLs regardless of AI validation outcome.
+        const manualUrls = manualByProduct.get(u.source_product_id) ?? [];
+        if (manualUrls.length) {
+          const set = new Set(kept);
+          for (const m of manualUrls) set.add(m);
+          kept = Array.from(set);
         }
 
         // Ranking po jakości danych i cap TOP N — źródła bez tytułu/opisu/zdjęć
@@ -618,6 +661,61 @@ export const runMatching = createServerFn({ method: "POST" })
             ean_confirmed: x.ean_confirmed,
           }));
         u.score_breakdown = [...winners, ...droppedByDedup];
+
+        // Merge manual breakdown entries so they survive the rescore and stay
+        // marked as { manual: true } for UI badges.
+        const manualBd = manualBreakdownByProduct.get(u.source_product_id) ?? [];
+        if (manualBd.length) {
+          const existingUrls = new Set(u.score_breakdown.map((b) => b.url));
+          const injected: BreakdownEntry[] = [];
+          for (const m of manualBd) {
+            if (!existingUrls.has(m.url)) {
+              injected.push({ ...m, manual: true });
+            } else {
+              // Ensure manual flag stays on already-scored URL.
+              const cur = u.score_breakdown.find((b) => b.url === m.url);
+              if (cur) (cur as BreakdownEntry).manual = true;
+            }
+          }
+          if (injected.length) u.score_breakdown = [...u.score_breakdown, ...injected];
+          // Ensure ranked list includes manual URLs at the top.
+          const rankedSet = new Set(u.picked_urls);
+          const manualHead = manualUrls.filter((m) => !rankedSet.has(m));
+          if (manualHead.length) {
+            u.picked_urls = [...manualHead, ...u.picked_urls];
+            if (u.status === "PENDING") {
+              u.status = "MATCHED";
+              matched++;
+            }
+          }
+        }
+
+        // Auto-suggestion: strict mode dropped all candidates + name looks
+        // like an accessory/replacement → flag compat_suggested.
+        if (
+          mode === "strict" &&
+          u.picked_urls.length === 0 &&
+          isLikelyCompatProduct(prod.nazwa)
+        ) {
+          try {
+            await supabase
+              .from("enrichments")
+              .update({ compat_suggested: true } as never)
+              .eq("source_product_id", u.source_product_id);
+          } catch {
+            /* non-fatal */
+          }
+        } else if (u.picked_urls.length > 0) {
+          // Clear stale hint once we have matches again.
+          try {
+            await supabase
+              .from("enrichments")
+              .update({ compat_suggested: false } as never)
+              .eq("source_product_id", u.source_product_id);
+          } catch {
+            /* non-fatal */
+          }
+        }
 
         const wasMatched = u.picked_urls.length > 0;
         if (ranked.length !== u.picked_urls.length) {
