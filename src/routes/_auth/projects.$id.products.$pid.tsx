@@ -1522,6 +1522,107 @@ function ProductDetail() {
 
         {/* Sources */}
         <div className="space-y-4">
+          {/* Matching-mode toggle + manual source attach */}
+          <Card>
+            <CardContent className="py-3 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="text-sm">
+                  <div className="font-medium">Tryb dopasowywania</div>
+                  <div className="text-xs text-muted-foreground">
+                    {productMatchingMode === "compatible"
+                      ? "Zamiennik / akcesorium — dopasowuje po kompatybilności (typ, parametry, wspólne modele)."
+                      : "Ścisły — dopasowuje po marce/modelu/wariancie (EAN, MPN)."}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={productMatchingMode === "compatible" ? "default" : "outline"}
+                    disabled={modeBusy}
+                    className="rounded-full"
+                    onClick={async () => {
+                      const next = productMatchingMode === "compatible" ? "strict" : "compatible";
+                      setModeBusy(true);
+                      try {
+                        await setModeFn({ data: { productIds: [pid], mode: next } });
+                        toast.success(next === "compatible" ? "Ustawiono tryb: zamiennik/akcesorium" : "Ustawiono tryb: ścisły");
+                        // Trigger a rematch for this product with the new mode.
+                        await rerunMatchFn({ data: { projectId: id, productId: pid } }).catch(() => {});
+                        invalidate();
+                      } catch (e) {
+                        toast.error(friendlyError(e, "Nie udało się zmienić trybu"));
+                      } finally {
+                        setModeBusy(false);
+                      }
+                    }}
+                  >
+                    {modeBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                    {productMatchingMode === "compatible" ? "Zamiennik/akcesorium" : "Przełącz na zamiennik"}
+                  </Button>
+                </div>
+              </div>
+              {compatSuggested && productMatchingMode === "strict" && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                  <span>
+                    Wykryto produkt typu <b>zamiennik/akcesorium</b> — ścisłe dopasowanie odrzuciło wszystkie źródła. Przełącz tryb, aby dopasować po kompatybilności.
+                  </span>
+                </div>
+              )}
+              <div className="pt-2 border-t">
+                <div className="text-sm font-medium">Dodaj źródło (URL)</div>
+                <div className="text-xs text-muted-foreground mb-2">
+                  Wklej 1–5 adresów oddzielonych spacją, przecinkiem lub nową linią. Ręcznie dodane źródła nie są odrzucane przez AI i przetrwają ponowne dopasowanie.
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Textarea
+                    value={manualUrlInput}
+                    onChange={(e) => setManualUrlInput(e.target.value)}
+                    placeholder="https://sklep1.pl/produkt-a https://sklep2.pl/produkt-b"
+                    className="min-h-[64px] flex-1"
+                    disabled={manualBusy}
+                  />
+                  <Button
+                    size="sm"
+                    disabled={manualBusy || !manualUrlInput.trim()}
+                    onClick={async () => {
+                      const urls = manualUrlInput
+                        .split(/[\s,;]+/)
+                        .map((u) => u.trim())
+                        .filter(Boolean)
+                        .slice(0, 5);
+                      if (!urls.length) return;
+                      setManualBusy(true);
+                      try {
+                        const res = await attachManualFn({
+                          data: { projectId: id, productId: pid, urls },
+                        });
+                        if (res.added > 0) {
+                          toast.success(`Dodano ${res.added} źródeł ręcznie`);
+                          setManualUrlInput("");
+                          invalidate();
+                        } else {
+                          toast.error("Nie udało się dodać żadnego źródła");
+                        }
+                        if (res.failed && res.failed.length) {
+                          for (const f of res.failed) {
+                            toast.warning(`${f.url}: ${f.reason}`);
+                          }
+                        }
+                      } catch (e) {
+                        toast.error(friendlyError(e, "Nie udało się dodać źródła"));
+                      } finally {
+                        setManualBusy(false);
+                      }
+                    }}
+                  >
+                    {manualBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
+                    Dodaj
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-semibold flex items-center gap-2">
               Źródła ({sources.length})
