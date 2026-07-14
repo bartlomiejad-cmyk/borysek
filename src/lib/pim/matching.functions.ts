@@ -34,6 +34,7 @@ type ScoreResult = {
   total: number;
   producer_boost: boolean;
   trusted_boost: boolean;
+  ean_confirmed: boolean;
 };
 
 type ValidationResult = {
@@ -49,6 +50,7 @@ type BreakdownEntry = {
   trusted_boost: boolean;
   variant_key: string | null;
   deduped: boolean;
+  ean_confirmed?: boolean;
 };
 
 /**
