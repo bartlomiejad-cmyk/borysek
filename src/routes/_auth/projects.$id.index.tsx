@@ -766,7 +766,10 @@ function ProjectPage() {
                 })()}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void runReclean()}>
-                <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
+                <Sparkles className="h-4 w-4 mr-2" /> Wyczyść śmieci ze źródeł
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void runResetSources()}>
+                <Sparkles className="h-4 w-4 mr-2" /> Reset źródeł (wróć na Import)
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setRemapOpen(true)}>
                 <Wand2 className="h-4 w-4 mr-2" /> Uzupełnij dane z CSV
