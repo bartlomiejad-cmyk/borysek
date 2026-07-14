@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type ProductEventKind =
   | "discovery_search"
+  | "ai_preselect"
   | "discovery_scrape"
   | "matching_done"
   | "rescrape"
