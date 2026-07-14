@@ -1460,6 +1460,42 @@ function ProjectPage() {
                             </Badge>
                           );
                         })()}
+                        {(() => {
+                          const mm = ((p as { matching_mode?: string | null }).matching_mode ?? "strict") as string;
+                          const suggested = !!(p as { compat_suggested?: boolean }).compat_suggested;
+                          if (mm === "compatible") {
+                            return (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                                title="Dopasowywanie po kompatybilności (zamiennik/akcesorium)"
+                              >
+                                Zamiennik
+                              </Badge>
+                            );
+                          }
+                          if (!suggested) return null;
+                          return (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
+                              title="Wykryto produkt typu zamiennik — kliknij, aby przełączyć tryb i uruchomić ponowne dopasowanie"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  await setModeFn({ data: { productIds: [p.id], mode: "compatible" } });
+                                  toast.success("Tryb: zamiennik/akcesorium");
+                                  await rerunMatchFn({ data: { projectId: id, productId: p.id } }).catch(() => {});
+                                  refetchProducts();
+                                } catch (err) {
+                                  toast.error(friendlyError(err, "Nie udało się przełączyć trybu"));
+                                }
+                              }}
+                            >
+                              Zamiennik? →
+                            </button>
+                          );
+                        })()}
                       </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
