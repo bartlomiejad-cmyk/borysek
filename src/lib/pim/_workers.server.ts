@@ -472,6 +472,15 @@ type PimVisualizationSlot = {
   mode?: "edit" | "safe-edit" | "generate";
   sourceUrl?: string;
   sourcePath?: string;
+  // Multi-reference (new — additive; sourceUrl/Path kept for BC / single-slot fallback):
+  sourceUrls?: string[];
+  sourcePaths?: string[];
+  // Retry-with-Vision-QC state (per slot, resets when moving to next slot):
+  attempts?: number;
+  bestUrl?: string;
+  bestQc?: VisualizationQcResult;
+  bestScore?: number;
+  extraPromptSuffix?: string;
   lastError?: string;
 };
 
