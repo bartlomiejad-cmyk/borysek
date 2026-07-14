@@ -893,13 +893,31 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       const prev = existing[u];
       if (!prev) return true;
       if (prev.manual_keep === true) return false;
+      // Known-dead URLs are cached; re-probe only on explicit revalidate.
+      if (prev.dead === true && !data.revalidate) return false;
       if (data.revalidate) return true;
       return (prev.identity_v ?? 0) < IDENTITY_VERSION;
     };
-    const toScore = data.urls.filter(needsCheck);
+    let toScore = data.urls.filter(needsCheck);
+
+    // Pre-flight so a stale URL doesn't blow up the whole scoring batch
+    // with `upstream_error: 404 status code when fetching image from URL`.
+    if (toScore.length) {
+      const { alive } = await filterAliveImages(supabase, enRow.id, toScore, existing);
+      toScore = alive;
+    }
 
     if (!toScore.length) {
-      return { scores: existing, source: "cache" as const, failed: [] as string[] };
+      // Re-read scores because filterAliveImages may have written dead markers.
+      const { data: refreshed } = await supabase
+        .from("enrichments")
+        .select("image_scores")
+        .eq("id", enRow.id)
+        .maybeSingle();
+      const scores =
+        ((refreshed as { image_scores?: Record<string, ImageScore> } | null)?.image_scores ??
+          existing) as Record<string, ImageScore>;
+      return { scores, source: "cache" as const, failed: [] as string[] };
     }
 
     const settled = await Promise.allSettled(
