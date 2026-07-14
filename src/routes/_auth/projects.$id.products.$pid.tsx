@@ -2133,7 +2133,7 @@ function ProductSearchResults({
       toast.success("Uruchomiono ponowne wyszukiwanie w tle");
       setTimeout(() => qc.invalidateQueries({ queryKey: ["search-results", projectId, productName] }), 4000);
     } catch (e) {
-      toast.error(friendlyError(e));
+      toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
     } finally {
       setRediscovering(false);
     }
