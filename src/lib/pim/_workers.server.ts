@@ -3262,33 +3262,74 @@ export async function runPimVisualization(
     }
   }
 
-  const appendVisualization = async (url: string, slot: number) => {
+  // Fallback single ref (used only if multi-ref list is empty for some reason,
+  // e.g. no analysisUrls at all — keeps behaviour parity with the old code).
+  const fallbackSingleRef = mainUrl;
+  // Effective references for FAL image_urls (top reference first).
+  const effectiveRefUrls: string[] =
+    referenceUrlsForFal.length ? referenceUrlsForFal : [fallbackSingleRef];
+
+  // Upload a FAL result to our bucket so we can persist it and run QC.
+  const uploadGalleryCandidate = async (url: string, slot: number, attempt: number): Promise<string> => {
     const bytes = await fetchBytes(url);
     const stamp = Date.now();
-    const path = `visualizations/${e.id}-${stamp}-${slot + 1}.jpg`;
+    const path = `visualizations/${e.id}-${stamp}-${slot + 1}-a${attempt}.jpg`;
     const { error: upErr } = await supabaseAdmin.storage
       .from("regenerated-images")
       .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
     if (upErr) throw new Error(upErr.message);
     const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(path);
-    const publicUrl = `${pub.publicUrl}?v=${stamp}`;
+    return `${pub.publicUrl}?v=${stamp}`;
+  };
 
+  // Commit a picked URL + its viz_qc metadata to the enrichment row.
+  const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number) => {
     const { data: fresh, error: readErr } = await supabaseAdmin
       .from("enrichments")
-      .select("ai_gallery_urls")
+      .select("ai_gallery_urls, image_meta, review_status")
       .eq("id", e.id)
       .single();
     if (readErr) throw new Error(readErr.message);
-    const existing = Array.isArray((fresh as { ai_gallery_urls?: unknown }).ai_gallery_urls)
-      ? ((fresh as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [])
+    const freshRow = fresh as {
+      ai_gallery_urls?: string[] | null;
+      image_meta?: Record<string, unknown> | null;
+      review_status?: string | null;
+    };
+    const existing = Array.isArray(freshRow.ai_gallery_urls)
+      ? (freshRow.ai_gallery_urls ?? [])
       : [];
     const merged = existing.includes(publicUrl) ? existing : [...existing, publicUrl];
+    const meta = (freshRow.image_meta ?? {}) as Record<string, unknown>;
+    const vizQcMap = ((meta.viz_qc ?? {}) as Record<string, VisualizationQcPersisted>) || {};
+    const passed = visualizationQcPassed(qc);
+    vizQcMap[publicUrl] = {
+      ...qc,
+      passed,
+      attempts,
+      at: new Date().toISOString(),
+      reference_url: effectiveRefUrls[0] ?? null,
+    };
+    const nextMeta: Record<string, unknown> = { ...meta, viz_qc: vizQcMap };
+    // If this viz failed product_intact, demote review_status — a broken
+    // visual on an approved product must resurface. Never touch REJECTED.
+    const updatePayload: Record<string, unknown> = {
+      ai_gallery_urls: merged,
+      image_meta: nextMeta,
+    };
+    if (!passed && freshRow.review_status !== "REJECTED" && freshRow.review_status !== "NEEDS_REVIEW") {
+      updatePayload.review_status = "NEEDS_REVIEW";
+    }
     const { error: dbErr } = await supabaseAdmin
       .from("enrichments")
-      .update({ ai_gallery_urls: merged as never } as never)
+      .update(updatePayload as never)
       .eq("id", e.id);
     if (dbErr) throw new Error(dbErr.message);
-    await emit(ctx, { level: "success", message: `   ✔ odebrano z FAL, upload OK, dopisano do galerii (${slot + 1}/${count})` });
+    await emit(ctx, {
+      level: passed ? "success" : "warn",
+      message: passed
+        ? `   ✔ wizualizacja ${slot + 1}/${count} zatwierdzona (viz QC pass, próby: ${attempts})`
+        : `   ⚠ wizualizacja ${slot + 1}/${count} zapisana z ostrzeżeniem (viz QC fail po ${attempts} prób(ach)): ${(qc.issues[0] ?? "produkt niezgodny z referencją").slice(0, 140)}`,
+    });
   };
 
   const isRefusal = (err: unknown) => {
