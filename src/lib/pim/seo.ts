@@ -46,6 +46,39 @@ export function clampMetaDescription(desc: string, maxLen = 160): string {
   return s;
 }
 
+/**
+ * Finalize a meta_description: return `raw` as-is if it already fits ≤160 chars.
+ * If longer, ask the model once (via `shortenFn`) to compress it into the
+ * 140-155 char target. As a last resort truncate to 157 chars + "…".
+ *
+ * The retry is the "programmatic meta_description validation" from the plan:
+ * LLMs often overshoot the 160-char limit even when the prompt asks for it.
+ */
+export async function finalizeMetaDescription(
+  raw: string,
+  shortenFn?: (text: string) => Promise<string>,
+): Promise<string> {
+  const normalize = (s: string) =>
+    s.trim().replace(/\s+/g, " ").replace(/["„""]/g, "");
+  const cleaned = normalize(raw);
+  if (cleaned.length <= 160) return cleaned;
+  if (shortenFn) {
+    try {
+      const shortened = normalize(await shortenFn(cleaned));
+      if (shortened && shortened.length <= 160) return shortened;
+    } catch {
+      /* fall through to hard truncate */
+    }
+  }
+  const cut = cleaned.slice(0, 157);
+  const lastSpace = cut.lastIndexOf(" ");
+  const base = lastSpace > 100 ? cut.slice(0, lastSpace) : cut;
+  return `${base.trim()}…`;
+}
+
+export const SHORTEN_META_SYSTEM_PROMPT =
+  "Skróć podany meta_description do 140-155 znaków, po polsku, naturalnie, bez cudzysłowów, bez cen, bez CTA. Zwróć wyłącznie JSON: {\"meta_description\": string}.";
+
 export function dedupeKeywords(arr: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
