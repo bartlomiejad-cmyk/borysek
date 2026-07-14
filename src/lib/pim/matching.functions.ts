@@ -830,5 +830,8 @@ export async function scoreAndCapForProduct(
     .eq("id", enRow.id);
 
   const strong = breakdown.filter((b) => b.total >= SOURCE_SCORE_THRESHOLD).length;
+  if (ranked.length > 0) {
+    await advancePipelineStatus(supabaseAdmin as never, productId, "MATCHED");
+  }
   return { count: ranked.length, strong };
 }
