@@ -12,6 +12,7 @@ import {
   getProjectShare,
   upsertProjectShare,
   setShareActive,
+  setShareApprovedOnly,
   listProjectFeedback,
   resolveFeedback,
   deleteFeedback,
@@ -30,6 +31,7 @@ export function ShareProjectDialog({
   const getShareFn = useServerFn(getProjectShare);
   const upsertFn = useServerFn(upsertProjectShare);
   const setActiveFn = useServerFn(setShareActive);
+  const setApprovedOnlyFn = useServerFn(setShareApprovedOnly);
   const listFbFn = useServerFn(listProjectFeedback);
   const resolveFn = useServerFn(resolveFeedback);
   const deleteFn = useServerFn(deleteFeedback);
@@ -64,6 +66,12 @@ export function ShareProjectDialog({
 
   const activeMut = useMutation({
     mutationFn: (active: boolean) => setActiveFn({ data: { projectId, active } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["project-share", projectId] }),
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const approvedOnlyMut = useMutation({
+    mutationFn: (v: boolean) => setApprovedOnlyFn({ data: { projectId, approvedOnly: v } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["project-share", projectId] }),
     onError: (e) => toast.error((e as Error).message),
   });
@@ -122,6 +130,14 @@ export function ShareProjectDialog({
                   disabled={activeMut.isPending}
                 />
                 <span className="text-sm">{share.data.is_active ? "Aktywny" : "Wyłączony"}</span>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Switch
+                  checked={!!share.data.approved_only}
+                  onCheckedChange={(v) => approvedOnlyMut.mutate(v)}
+                  disabled={approvedOnlyMut.isPending}
+                />
+                <span className="text-sm">Udostępnij tylko zatwierdzone produkty</span>
               </div>
             </div>
 
