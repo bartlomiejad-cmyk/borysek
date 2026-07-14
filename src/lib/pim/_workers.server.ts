@@ -2260,7 +2260,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 // Shared: scrape one URL with Firecrawl + AI filter, upsert into product_sources.
 // Extracted so discovery + rescrape share identical logic (idempotent upsert).
 // ---------------------------------------------------------------------------
-async function scrapeAndStoreSource(
+export async function scrapeAndStoreSource(
   firecrawl: Firecrawl,
   aiKey: string | undefined,
   product: { id: string; project_id: string; nazwa: string | null; kod: string | null; ean: string | null },
