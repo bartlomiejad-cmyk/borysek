@@ -475,6 +475,7 @@ export type Database = {
       }
       project_shares: {
         Row: {
+          approved_only: boolean
           created_at: string
           created_by: string
           id: string
@@ -487,6 +488,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          approved_only?: boolean
           created_at?: string
           created_by: string
           id?: string
@@ -499,6 +501,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          approved_only?: boolean
           created_at?: string
           created_by?: string
           id?: string
@@ -614,6 +617,8 @@ export type Database = {
       }
       source_products: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           created_at: string
           ean: string | null
           ext_id: string | null
@@ -628,6 +633,8 @@ export type Database = {
           review_status: Database["public"]["Enums"]["pim_review_status"]
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           ean?: string | null
           ext_id?: string | null
@@ -642,6 +649,8 @@ export type Database = {
           review_status?: Database["public"]["Enums"]["pim_review_status"]
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           ean?: string | null
           ext_id?: string | null
