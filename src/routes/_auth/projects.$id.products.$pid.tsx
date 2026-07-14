@@ -406,8 +406,24 @@ function ProductDetail() {
   const regeneratedUrl = resolveRegenUrl(
     (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null,
   );
-  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ deduped?: boolean }>;
+  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ url?: string; deduped?: boolean; ean_confirmed?: boolean }>;
   const dedupedCount = scoreBreakdown.filter((s) => s.deduped === true).length;
+  const eanConfirmedByUrl = new Map<string, boolean>();
+  for (const b of scoreBreakdown) {
+    if (b?.url) eanConfirmedByUrl.set(b.url, !!b.ean_confirmed);
+  }
+  const hasAnyEanConfirmed = Array.from(eanConfirmedByUrl.values()).some(Boolean);
+  // The main image "comes from" a source when that image appears in the
+  // source's images/extra_images list. Warn only when we have at least one
+  // ean-confirmed source and the current main image isn't in any of them.
+  const mainFromEanConfirmed = (() => {
+    if (!mainUrl) return false;
+    for (const s of sources) {
+      if (!eanConfirmedByUrl.get(s.url)) continue;
+      if (s.images.includes(mainUrl) || s.extra_images.includes(mainUrl)) return true;
+    }
+    return false;
+  })();
 
   const renderThumb = (u: string, extra: boolean) => {
     const s = imageScores[u];
@@ -691,6 +707,11 @@ function ProductDetail() {
               {!mainUrl && !regeneratedUrl && (
                 <p className="text-[11px] text-muted-foreground italic">
                   Brak zdjęcia głównego do regeneracji.
+                </p>
+              )}
+              {hasAnyEanConfirmed && mainUrl && !mainFromEanConfirmed && (
+                <p className="text-[11px] text-amber-600 italic">
+                  Zdjęcie główne pochodzi ze źródła bez potwierdzonego EAN.
                 </p>
               )}
             </div>
@@ -1222,6 +1243,11 @@ function ProductDetail() {
                         <div className="text-sm font-medium truncate">
                           <span className="text-muted-foreground mr-2">#{i + 1}</span>
                           {s.title ?? "(brak tytułu)"}
+                          {eanConfirmedByUrl.get(s.url) && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-[10px] font-medium align-middle">
+                              EAN potwierdzony
+                            </span>
+                          )}
                         </div>
                         <a
                           href={s.url}

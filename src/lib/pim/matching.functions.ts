@@ -30,10 +30,34 @@ type SourceMeta = {
   imagesCount: number;
 };
 
+/**
+ * True when the product's EAN (or its zero-stripped form) can be found inside
+ * the source's title, description or URL. Comparison is done on digit-only
+ * strings so separators (spaces, dashes, dots) don't hide a match.
+ */
+export function eanConfirmedFor(
+  productEan: string | null | undefined,
+  meta: { title: string | null; description: string | null },
+  url: string,
+): boolean {
+  const digits = (productEan ?? "").replace(/\D/g, "");
+  if (digits.length < 6) return false;
+  const stripped = digits.replace(/^0+/, "");
+  const hay = ((meta.title ?? "") + " " + (meta.description ?? "") + " " + (url ?? "")).replace(
+    /\D/g,
+    "",
+  );
+  if (!hay) return false;
+  if (hay.includes(digits)) return true;
+  if (stripped.length >= 6 && hay.includes(stripped)) return true;
+  return false;
+}
+
 type ScoreResult = {
   total: number;
   producer_boost: boolean;
   trusted_boost: boolean;
+  ean_confirmed: boolean;
 };
 
 type ValidationResult = {
@@ -49,6 +73,7 @@ type BreakdownEntry = {
   trusted_boost: boolean;
   variant_key: string | null;
   deduped: boolean;
+  ean_confirmed?: boolean;
 };
 
 /**
@@ -110,7 +135,7 @@ function scoreSource(
 
   // Śmieciowe źródło: brak tytułu, brak sensownego opisu, brak zdjęć.
   if (!title && descLen < 40 && imgs === 0) {
-    return { total: -5, producer_boost: false, trusted_boost: false };
+    return { total: -5, producer_boost: false, trusted_boost: false, ean_confirmed: false };
   }
 
   let s = 0;
@@ -125,8 +150,8 @@ function scoreSource(
 
   s += Math.min(imgs, 3);
 
-  const ean = (product.ean ?? "").trim();
-  if (ean && (title.includes(ean) || desc.includes(ean))) s += 2;
+  const ean_confirmed = eanConfirmedFor(product.ean, meta, url);
+  if (ean_confirmed) s += 8;
 
   const host = extractHostname(url);
   const normHost = normalizeDomainToken(host);
@@ -150,7 +175,7 @@ function scoreSource(
     }
   }
 
-  return { total: s, producer_boost, trusted_boost };
+  return { total: s, producer_boost, trusted_boost, ean_confirmed };
 }
 
 /**
@@ -528,7 +553,13 @@ export const runMatching = createServerFn({ method: "POST" })
         );
         const rankedFull = positive
           .filter((x) => dedup.keptUrls.has(x.url))
-          .sort((a, b) => b.total - a.total)
+          .sort((a, b) => {
+            // EAN-confirmed sources always rank above non-confirmed.
+            const ea = a.ean_confirmed ? 1 : 0;
+            const eb = b.ean_confirmed ? 1 : 0;
+            if (ea !== eb) return eb - ea;
+            return b.total - a.total;
+          })
           .slice(0, TOP_SOURCES_PER_PRODUCT);
         const ranked = rankedFull.map((x) => x.url);
         const winners: BreakdownEntry[] = rankedFull.map((x) => ({
@@ -538,6 +569,7 @@ export const runMatching = createServerFn({ method: "POST" })
           trusted_boost: x.trusted_boost,
           variant_key: dedup.keyByUrl.get(x.url) ?? null,
           deduped: false,
+          ean_confirmed: x.ean_confirmed,
         }));
         const droppedByDedup: BreakdownEntry[] = positive
           .filter((x) => dedup.deduped.has(x.url))
@@ -548,6 +580,7 @@ export const runMatching = createServerFn({ method: "POST" })
             trusted_boost: x.trusted_boost,
             variant_key: dedup.keyByUrl.get(x.url) ?? null,
             deduped: true,
+            ean_confirmed: x.ean_confirmed,
           }));
         u.score_breakdown = [...winners, ...droppedByDedup];
 
@@ -797,7 +830,12 @@ export async function scoreAndCapForProduct(
   );
   const rankedFull = positive
     .filter((x) => dedup.keptUrls.has(x.url))
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => {
+      const ea = a.ean_confirmed ? 1 : 0;
+      const eb = b.ean_confirmed ? 1 : 0;
+      if (ea !== eb) return eb - ea;
+      return b.total - a.total;
+    })
     .slice(0, TOP_SOURCES_PER_PRODUCT);
   const ranked = rankedFull.map((x) => x.url);
   const winners: BreakdownEntry[] = rankedFull.map((x) => ({
@@ -807,6 +845,7 @@ export async function scoreAndCapForProduct(
     trusted_boost: x.trusted_boost,
     variant_key: dedup.keyByUrl.get(x.url) ?? null,
     deduped: false,
+    ean_confirmed: x.ean_confirmed,
   }));
   const dropped: BreakdownEntry[] = positive
     .filter((x) => dedup.deduped.has(x.url))
@@ -817,6 +856,7 @@ export async function scoreAndCapForProduct(
       trusted_boost: x.trusted_boost,
       variant_key: dedup.keyByUrl.get(x.url) ?? null,
       deduped: true,
+      ean_confirmed: x.ean_confirmed,
     }));
   const breakdown: BreakdownEntry[] = [...winners, ...dropped];
 
