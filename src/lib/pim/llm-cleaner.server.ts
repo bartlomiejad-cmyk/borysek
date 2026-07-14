@@ -26,7 +26,7 @@ export type CleaningMeta = {
 
 export type LlmCleanResult = {
   description: string;
-  features: string[];
+  features: Array<{ key: string; value: string }>;
   meta: CleaningMeta;
 };
 
@@ -74,7 +74,9 @@ export async function llmCleanDescription(opts: {
     `Return ONLY content that describes this exact product: ${opts.productName ?? "(unknown)"}, brand: ${opts.brand ?? "(unknown)"}, EAN: ${opts.ean ?? "(unknown)"}.`,
     "Remove: shipping/delivery info, return policies, prices, promotions, contact data, phone numbers, related/recommended products, reviews, store navigation, cookie notices.",
     "Preserve the HTML structure of the remaining content using only these tags: h3, p, ul, li, strong, table, tr, td.",
-    'Output JSON: { "description_html": string, "features": string[], "confidence": number 0-1, "removed_sections": string[] }.',
+    "OUTPUT LANGUAGE: description_html MUST be in Polish. If the source is in another language, translate to natural Polish while preserving literally: product name, brand, model, variant, units, calibers, weights and technical designations. Do not add commercial information absent from the source.",
+    "Features keys must also be in Polish (np. \"Waga\", \"Kaliber\", \"Materiał\").",
+    'Output JSON: { "description_html": string, "features": [{"key": string, "value": string}], "confidence": number 0-1, "removed_sections": string[] }.',
   ].join("\n");
 
   try {
@@ -128,9 +130,22 @@ export async function llmCleanDescription(opts: {
           .filter((s): s is string => typeof s === "string")
           .slice(0, 20)
       : [];
-    const features = Array.isArray(parsed.features)
-      ? parsed.features
-          .filter((s): s is string => typeof s === "string")
+    const features: Array<{ key: string; value: string }> = Array.isArray(parsed.features)
+      ? (parsed.features as unknown[])
+          .map((f) => {
+            if (typeof f === "string") {
+              const s = f.trim();
+              return s ? { key: "Cecha", value: s } : null;
+            }
+            if (f && typeof f === "object") {
+              const ff = f as { key?: unknown; value?: unknown };
+              const key = typeof ff.key === "string" ? ff.key.trim() : "";
+              const value = typeof ff.value === "string" ? ff.value.trim() : "";
+              if (key && value) return { key, value };
+            }
+            return null;
+          })
+          .filter((x): x is { key: string; value: string } => x !== null)
           .slice(0, 20)
       : [];
     return {
