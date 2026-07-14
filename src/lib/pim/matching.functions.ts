@@ -74,7 +74,30 @@ type BreakdownEntry = {
   variant_key: string | null;
   deduped: boolean;
   ean_confirmed?: boolean;
+  manual?: boolean;
 };
+
+/**
+ * Heuristic: does this product name look like an accessory / replacement /
+ * compatibility item (e.g. filters, seals, spare parts)? Used to prompt the
+ * user to switch to compatibility matching mode when strict validation
+ * rejects every source.
+ */
+export function isLikelyCompatProduct(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const t = name.toLowerCase();
+  if (/\bpasuje\s+do\b/.test(t)) return true;
+  if (/\bzamiennik(i|em|ów|ow)?\b/.test(t)) return true;
+  if (/\bakcesori(a|um|ów|ow)?\b/.test(t)) return true;
+  if (/\bkomplet\s+filtr/.test(t)) return true;
+  if (/\bdo\s+rekuperator/.test(t)) return true;
+  // "do modelA/modelB/modelC" — three+ slash- or space-separated model tokens after "do "
+  if (/\bdo\s+[\wąćęłńóśźż0-9]{2,}[\s/,][\wąćęłńóśźż0-9]{2,}[\s/,][\wąćęłńóśźż0-9]{2,}/i.test(name)) return true;
+  // three+ slash/comma-separated tokens anywhere (350H/2 350V/2 355 Combo ...)
+  const slashSep = name.split(/[\/,;|]/).map((s) => s.trim()).filter((s) => s.length >= 2);
+  if (slashSep.length >= 3) return true;
+  return false;
+}
 
 /**
  * Given a set of URLs allowed to be picked, apply variant-cluster dedup.
@@ -194,6 +217,7 @@ async function validateSourcesWithAI(
     ean?: string | null;
     mpn?: string | null;
   }>,
+  mode: "strict" | "compatible" = "strict",
 ): Promise<ValidationResult> {
   if (!sources.length) return { keep: new Set(), clustersByUrl: new Map(), ok: true };
   const blocks = sources
@@ -210,7 +234,7 @@ async function validateSourcesWithAI(
       return lines.join("\n");
     })
     .join("\n\n");
-  const system = [
+  const strictSystem = [
     "Jesteś walidatorem dopasowań produktów w PIM.",
     "Dla podanego PRODUKTU oraz listy ŹRÓDEŁ (stron internetowych) zdecyduj, które źródła opisują DOKŁADNIE ten sam produkt (ten sam wariant, marka, model, rozmiar/gramatura).",
     "REGUŁA NADRZĘDNA: jeżeli w danych źródła występuje EAN identyczny z EAN produktu, źródło PASUJE — zaakceptuj je niezależnie od pozostałych heurystyk (nadal przypisz je do właściwego klastra wariantu).",
@@ -222,6 +246,17 @@ async function validateSourcesWithAI(
     "Zwróć JSON: {\"keep\": number[], \"clusters\": [{\"variant_key\": string, \"indices\": number[]}]}. Indeksy 1-based. Każdy indeks z keep musi wystąpić w dokładnie jednym klastrze.",
     "Jeśli żadne nie pasuje: {\"keep\": [], \"clusters\": []}.",
   ].join("\n");
+  const compatSystem = [
+    "Jesteś walidatorem dopasowań produktów typu AKCESORIUM / ZAMIENNIK w PIM.",
+    "Produkt to akcesorium/zamiennik (np. filtry do rekuperatora, uszczelki, części zamienne).",
+    "Źródło PASUJE, jeżeli opisuje produkt funkcjonalnie równoważny: ten sam TYP (np. komplet filtrów M5+G4, konkretny typ uszczelki), zgodne kluczowe parametry (klasy filtracji, wymiary jeśli podane) ORAZ pokrywająca się lista kompatybilnych modeli/urządzeń (wystarczy część wspólna z modelami wymienionymi w nazwie produktu klienta).",
+    "Inna marka zamiennika lub inny sklep NIE dyskwalifikuje źródła.",
+    "Odrzuć TYLKO: inny typ produktu, inne klasy/parametry techniczne, brak wspólnych modeli kompatybilności.",
+    "Klastruj po zestawie kompatybilności + typie, nie po marce. variant_key w formacie \"typ|parametry|kompatybilność\" małymi literami (np. \"filtr|m5+g4|wanas-350h-350v\"). Gdy brak informacji, użyj \"-\".",
+    "Zwróć JSON: {\"keep\": number[], \"clusters\": [{\"variant_key\": string, \"indices\": number[]}]}. Indeksy 1-based. Każdy indeks z keep musi wystąpić w dokładnie jednym klastrze.",
+    "Jeśli żadne nie pasuje: {\"keep\": [], \"clusters\": []}.",
+  ].join("\n");
+  const system = mode === "compatible" ? compatSystem : strictSystem;
   const user = [
     `PRODUKT: ${productName}`,
     productEan ? `EAN: ${productEan}` : "",
@@ -316,7 +351,7 @@ export const runMatching = createServerFn({ method: "POST" })
     const [{ data: products }, { data: searches }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, nazwa, ean, raw, manual_lock")
+        .select("id, nazwa, ean, raw, manual_lock, matching_mode")
         .eq("project_id", data.projectId),
       supabase
         .from("search_results")
@@ -329,6 +364,37 @@ export const runMatching = createServerFn({ method: "POST" })
         .filter((p) => !!p.manual_lock)
         .map((p) => p.id),
     );
+    const modeById = new Map<string, "strict" | "compatible">(
+      (products as Array<{ id: string; matching_mode?: string | null }>).map((p) => [
+        p.id,
+        ((p.matching_mode as string | null) === "compatible" ? "compatible" : "strict") as "strict" | "compatible",
+      ]),
+    );
+
+    // Load existing enrichments to preserve manual sources (score_breakdown
+    // entries flagged { manual: true }) and existing compat_suggested flags.
+    const productIds = (products as Array<{ id: string }>).map((p) => p.id);
+    const { data: existingEnRows } = productIds.length
+      ? await supabase
+          .from("enrichments")
+          .select("source_product_id, picked_urls, score_breakdown, compat_suggested")
+          .eq("project_id", data.projectId)
+          .in("source_product_id", productIds)
+      : { data: [] as unknown[] };
+    const manualByProduct = new Map<string, string[]>();
+    const manualBreakdownByProduct = new Map<string, BreakdownEntry[]>();
+    for (const r of (existingEnRows ?? []) as Array<{
+      source_product_id: string;
+      picked_urls: string[] | null;
+      score_breakdown: unknown;
+    }>) {
+      const bd = Array.isArray(r.score_breakdown) ? (r.score_breakdown as BreakdownEntry[]) : [];
+      const manualEntries = bd.filter((b) => b && (b as { manual?: boolean }).manual === true);
+      if (manualEntries.length) {
+        manualByProduct.set(r.source_product_id, manualEntries.map((e) => e.url));
+        manualBreakdownByProduct.set(r.source_product_id, manualEntries);
+      }
+    }
 
     const extractProducer = (raw: unknown): string | null => {
       if (!raw || typeof raw !== "object") return null;
@@ -397,7 +463,10 @@ export const runMatching = createServerFn({ method: "POST" })
 
       // Keep ALL matched URLs — downstream views (list + detail) need access to
       // images from every source, not just the first 3.
-      const picked = Array.from(new Set((urls ?? []).filter((u) => typeof u === "string" && u.length > 0)));
+      const raw = (urls ?? []).filter((u) => typeof u === "string" && u.length > 0);
+      // Union with manual sources — they must never be dropped by rematch.
+      const manualUrls = manualByProduct.get(p.id) ?? [];
+      const picked = Array.from(new Set([...manualUrls, ...raw]));
       if (picked.length) matched++;
       updates.push({
         source_product_id: p.id,
@@ -509,6 +578,7 @@ export const runMatching = createServerFn({ method: "POST" })
         let kept = u.picked_urls;
         let clustersByUrl = new Map<string, string>();
         const skipClustering = !!pinnedByProduct.get(u.source_product_id);
+        const mode = modeById.get(u.source_product_id) ?? "strict";
         if (apiKey) {
           const sources = u.picked_urls
             .map((url) => ({
@@ -518,11 +588,19 @@ export const runMatching = createServerFn({ method: "POST" })
             }))
             .filter((s) => s.title || s.description);
           if (sources.length) {
-            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources);
+            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources, mode);
             kept = u.picked_urls.filter((url) => val.keep.has(url));
             if (!skipClustering && val.ok) clustersByUrl = val.clustersByUrl;
             validated++;
           }
+        }
+
+        // Always preserve manual URLs regardless of AI validation outcome.
+        const manualUrls = manualByProduct.get(u.source_product_id) ?? [];
+        if (manualUrls.length) {
+          const set = new Set(kept);
+          for (const m of manualUrls) set.add(m);
+          kept = Array.from(set);
         }
 
         // Ranking po jakości danych i cap TOP N — źródła bez tytułu/opisu/zdjęć
@@ -583,6 +661,61 @@ export const runMatching = createServerFn({ method: "POST" })
             ean_confirmed: x.ean_confirmed,
           }));
         u.score_breakdown = [...winners, ...droppedByDedup];
+
+        // Merge manual breakdown entries so they survive the rescore and stay
+        // marked as { manual: true } for UI badges.
+        const manualBd = manualBreakdownByProduct.get(u.source_product_id) ?? [];
+        if (manualBd.length) {
+          const existingUrls = new Set(u.score_breakdown.map((b) => b.url));
+          const injected: BreakdownEntry[] = [];
+          for (const m of manualBd) {
+            if (!existingUrls.has(m.url)) {
+              injected.push({ ...m, manual: true });
+            } else {
+              // Ensure manual flag stays on already-scored URL.
+              const cur = u.score_breakdown.find((b) => b.url === m.url);
+              if (cur) (cur as BreakdownEntry).manual = true;
+            }
+          }
+          if (injected.length) u.score_breakdown = [...u.score_breakdown, ...injected];
+          // Ensure ranked list includes manual URLs at the top.
+          const rankedSet = new Set(u.picked_urls);
+          const manualHead = manualUrls.filter((m) => !rankedSet.has(m));
+          if (manualHead.length) {
+            u.picked_urls = [...manualHead, ...u.picked_urls];
+            if (u.status === "PENDING") {
+              u.status = "MATCHED";
+              matched++;
+            }
+          }
+        }
+
+        // Auto-suggestion: strict mode dropped all candidates + name looks
+        // like an accessory/replacement → flag compat_suggested.
+        if (
+          mode === "strict" &&
+          u.picked_urls.length === 0 &&
+          isLikelyCompatProduct(prod.nazwa)
+        ) {
+          try {
+            await supabase
+              .from("enrichments")
+              .update({ compat_suggested: true } as never)
+              .eq("source_product_id", u.source_product_id);
+          } catch {
+            /* non-fatal */
+          }
+        } else if (u.picked_urls.length > 0) {
+          // Clear stale hint once we have matches again.
+          try {
+            await supabase
+              .from("enrichments")
+              .update({ compat_suggested: false } as never)
+              .eq("source_product_id", u.source_product_id);
+          } catch {
+            /* non-fatal */
+          }
+        }
 
         const wasMatched = u.picked_urls.length > 0;
         if (ranked.length !== u.picked_urls.length) {
@@ -695,6 +828,7 @@ export async function scoreAndCapForProduct(
   projectId: string,
   productId: string,
   apiKey: string | undefined,
+  opts?: { force?: boolean },
 ): Promise<{ count: number; strong: number }> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -712,14 +846,18 @@ export async function scoreAndCapForProduct(
 
   const { data: productRow } = await supabaseAdmin
     .from("source_products")
-    .select("id, nazwa, ean, raw, manual_lock")
+    .select("id, nazwa, ean, raw, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (!productRow) return { count: 0, strong: 0 };
-  if ((productRow as { manual_lock?: boolean }).manual_lock) {
+  if ((productRow as { manual_lock?: boolean }).manual_lock && !opts?.force) {
     // Manually locked — do not rescore/overwrite picked_urls.
     return { count: 0, strong: 0 };
   }
+  const mode: "strict" | "compatible" =
+    ((productRow as { matching_mode?: string | null }).matching_mode === "compatible")
+      ? "compatible"
+      : "strict";
   const rawObj = ((productRow as { raw?: unknown }).raw ?? {}) as Record<string, unknown>;
   const ie = (rawObj.imported_extract ?? {}) as Record<string, unknown>;
   const producer =
@@ -732,12 +870,17 @@ export async function scoreAndCapForProduct(
   // may not be in enrichment.picked_urls yet — pull both and rescore all.
   const { data: enRow } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, matched_term, pinned_main_url")
+    .select("id, picked_urls, matched_term, pinned_main_url, score_breakdown")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enRow) return { count: 0, strong: 0 };
   const currentPicked = (enRow.picked_urls as string[] | null) ?? [];
   const pinned = (enRow as { pinned_main_url?: string | null }).pinned_main_url ?? null;
+  const prevBd = Array.isArray((enRow as { score_breakdown?: unknown }).score_breakdown)
+    ? ((enRow as unknown as { score_breakdown: BreakdownEntry[] }).score_breakdown)
+    : [];
+  const manualEntries = prevBd.filter((b) => b && (b as { manual?: boolean }).manual === true);
+  const manualUrls = manualEntries.map((e) => e.url);
 
   // Also pull ALL product_sources for the term(s) — union with existing picks.
   const { data: allSrcs } = await supabaseAdmin
@@ -790,7 +933,7 @@ export async function scoreAndCapForProduct(
       for (const u of rr.organic_urls as unknown[]) if (typeof u === "string") termUrlSet.add(u);
     }
   }
-  const candidates = Array.from(new Set([...currentPicked, ...Array.from(termUrlSet)]));
+  const candidates = Array.from(new Set([...manualUrls, ...currentPicked, ...Array.from(termUrlSet)]));
 
   // AI validation (best-effort).
   let kept = candidates;
@@ -803,10 +946,16 @@ export async function scoreAndCapForProduct(
       })
       .filter((s) => s.title || s.description);
     if (sources.length) {
-      const val = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources);
+      const val = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources, mode);
       kept = candidates.filter((url) => val.keep.has(url));
       if (!pinned && val.ok) clustersByUrl = val.clustersByUrl;
     }
+  }
+  // Never drop manual URLs.
+  if (manualUrls.length) {
+    const set = new Set(kept);
+    for (const m of manualUrls) set.add(m);
+    kept = Array.from(set);
   }
 
   const scored = kept.map((url) => {
@@ -860,18 +1009,36 @@ export async function scoreAndCapForProduct(
     }));
   const breakdown: BreakdownEntry[] = [...winners, ...dropped];
 
+  // Re-inject manual entries so their manual flag survives.
+  const bdUrls = new Set(breakdown.map((b) => b.url));
+  for (const m of manualEntries) {
+    if (!bdUrls.has(m.url)) breakdown.push({ ...m, manual: true });
+    else {
+      const cur = breakdown.find((b) => b.url === m.url);
+      if (cur) (cur as BreakdownEntry).manual = true;
+    }
+  }
+  const rankedSet = new Set(ranked);
+  const manualHead = manualUrls.filter((m) => !rankedSet.has(m));
+  const finalPicked = manualHead.length ? [...manualHead, ...ranked] : ranked;
+
+  // Auto-suggest compat mode when strict rejected everything on a suspicious name.
+  const compatSuggested =
+    mode === "strict" && finalPicked.length === 0 && isLikelyCompatProduct(nazwa);
+
   await supabaseAdmin
     .from("enrichments")
     .update({
-      picked_urls: ranked as never,
+      picked_urls: finalPicked as never,
       score_breakdown: breakdown as never,
-      status: ranked.length ? "MATCHED" : "PENDING",
+      status: finalPicked.length ? "MATCHED" : "PENDING",
+      compat_suggested: compatSuggested as never,
     } as never)
     .eq("id", enRow.id);
 
   const strong = breakdown.filter((b) => b.total >= SOURCE_SCORE_THRESHOLD).length;
-  if (ranked.length > 0) {
+  if (finalPicked.length > 0) {
     await advancePipelineStatus(supabaseAdmin as never, productId, "MATCHED");
   }
-  return { count: ranked.length, strong };
+  return { count: finalPicked.length, strong };
 }

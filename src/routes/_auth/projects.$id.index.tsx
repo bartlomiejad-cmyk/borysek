@@ -125,6 +125,7 @@ import {
 } from "@/lib/pim/pipeline-status";
 import { setManualLock } from "@/lib/pim/enrichments.functions";
 import { approveProduct, unapproveProduct, bulkApprovePass } from "@/lib/pim/review.functions";
+import { setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
 import { CheckCircle2, Undo2 } from "lucide-react";
 
 const searchSchema = z.object({
@@ -184,6 +185,8 @@ function ProjectPage() {
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
   const recleanFn = useServerFn(recleanProductSources);
   const setLockFn = useServerFn(setManualLock);
+  const setModeFn = useServerFn(setMatchingMode);
+  const rerunMatchFn = useServerFn(rerunMatchingForProduct);
   const deleteProductsFn = useServerFn(deleteProducts);
   const summaryFn = useServerFn(getPipelineSummary);
   const approveFn = useServerFn(approveProduct);
@@ -1235,6 +1238,32 @@ function ProjectPage() {
               >
                 <Sparkles className="h-4 w-4 mr-1" /> {allegroActive ? "Allegro…" : "Opisy Allegro"}
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const ids = [...selectedIds];
+                  if (!ids.length) return;
+                  // Toggle mode based on majority; if any is strict → set all to compatible, else back to strict.
+                  const anyStrict = products.some(
+                    (p) => selectedIds.has(p.id) && (((p as { matching_mode?: string | null }).matching_mode ?? "strict") === "strict"),
+                  );
+                  const next: "strict" | "compatible" = anyStrict ? "compatible" : "strict";
+                  try {
+                    await setModeFn({ data: { productIds: ids, mode: next } });
+                    toast.success(
+                      next === "compatible"
+                        ? `Ustawiono tryb zamiennik dla ${ids.length}`
+                        : `Ustawiono tryb ścisły dla ${ids.length}`,
+                    );
+                    refetchProducts();
+                  } catch (e) {
+                    toast.error(friendlyError(e, "Nie udało się zmienić trybu"));
+                  }
+                }}
+              >
+                Tryb: zamiennik/ścisły
+              </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV
               </Button>
@@ -1455,6 +1484,42 @@ function ProjectPage() {
                             >
                               <CheckCircle2 className="h-3 w-3 mr-1" /> Zatwierdzony
                             </Badge>
+                          );
+                        })()}
+                        {(() => {
+                          const mm = ((p as { matching_mode?: string | null }).matching_mode ?? "strict") as string;
+                          const suggested = !!(p as { compat_suggested?: boolean }).compat_suggested;
+                          if (mm === "compatible") {
+                            return (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                                title="Dopasowywanie po kompatybilności (zamiennik/akcesorium)"
+                              >
+                                Zamiennik
+                              </Badge>
+                            );
+                          }
+                          if (!suggested) return null;
+                          return (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
+                              title="Wykryto produkt typu zamiennik — kliknij, aby przełączyć tryb i uruchomić ponowne dopasowanie"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  await setModeFn({ data: { productIds: [p.id], mode: "compatible" } });
+                                  toast.success("Tryb: zamiennik/akcesorium");
+                                  await rerunMatchFn({ data: { projectId: id, productId: p.id } }).catch(() => {});
+                                  refetchProducts();
+                                } catch (err) {
+                                  toast.error(friendlyError(err, "Nie udało się przełączyć trybu"));
+                                }
+                              }}
+                            >
+                              Zamiennik? →
+                            </button>
                           );
                         })()}
                       </div>
