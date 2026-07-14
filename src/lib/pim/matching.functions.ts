@@ -291,7 +291,7 @@ export const runMatching = createServerFn({ method: "POST" })
     const [{ data: products }, { data: searches }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, nazwa, ean, raw")
+        .select("id, nazwa, ean, raw, manual_lock")
         .eq("project_id", data.projectId),
       supabase
         .from("search_results")
@@ -299,6 +299,11 @@ export const runMatching = createServerFn({ method: "POST" })
         .eq("project_id", data.projectId),
     ]);
     if (!products || !searches) return { matched: 0 };
+    const lockedSet = new Set<string>(
+      (products as Array<{ id: string; manual_lock?: boolean | null }>)
+        .filter((p) => !!p.manual_lock)
+        .map((p) => p.id),
+    );
 
     const extractProducer = (raw: unknown): string | null => {
       if (!raw || typeof raw !== "object") return null;
