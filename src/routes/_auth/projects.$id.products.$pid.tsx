@@ -28,6 +28,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { attachManualSources, setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
+import { removePickedSource } from "@/lib/pim/compat.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
 import { Button } from "@/components/ui/button";
 import {
