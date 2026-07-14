@@ -12,7 +12,6 @@ import {
   submitShareFeedback,
   type SharePublicProduct,
 } from "@/lib/pim/shares.functions";
-import { resolveRegenUrl } from "@/lib/pim/media";
 
 export const Route = createFileRoute("/share/$token/p/$pid")({
   head: () => ({
@@ -70,15 +69,10 @@ function Content({ token, session, pid }: { token: string; session: string; pid:
   const gallery = useMemo<string[]>(() => {
     if (!product) return [];
     const en = product.enrichment;
-    const hidden = new Set(en?.hidden_images ?? []);
-    const push = (u?: string | null, into?: string[]) => {
-      if (u && !hidden.has(u) && into && !into.includes(u)) into.push(u);
-    };
+    if (!en) return [];
     const list: string[] = [];
-    push(en?.pinned_main_url ?? null, list);
-    push(resolveRegenUrl(en?.regenerated_main_image), list);
-    for (const u of en?.ai_gallery_urls ?? []) push(u, list);
-    for (const u of en?.picked_urls ?? []) push(u, list);
+    for (const u of en.images ?? []) if (u && !list.includes(u)) list.push(u);
+    for (const u of en.ai_visualizations ?? []) if (u && !list.includes(u)) list.push(u);
     return list;
   }, [product]);
 
