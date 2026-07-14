@@ -130,6 +130,32 @@ function ProductDetail() {
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
   const analyzedKeyRef = useRef<string>("");
+  const [productNotes, setProductNotes] = useState("");
+  const [notesInitial, setNotesInitial] = useState("");
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesSaving, setNotesSaving] = useState(false);
+
+  useEffect(() => {
+    const n = ((data as { product?: { product_notes?: string | null } } | undefined)?.product?.product_notes ?? "") || "";
+    setProductNotes(n);
+    setNotesInitial(n);
+    if (n) setNotesOpen(true);
+  }, [data?.product]);
+
+  const saveNotes = async () => {
+    if (productNotes === notesInitial) return;
+    setNotesSaving(true);
+    try {
+      await updateNotesFn({ data: { productId: pid, notes: productNotes || null } });
+      setNotesInitial(productNotes);
+      toast.success("Notatki zapisane");
+      qc.invalidateQueries({ queryKey: ["product", id, pid] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Nie udało się zapisać notatek");
+    } finally {
+      setNotesSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (data?.enrichment) {
