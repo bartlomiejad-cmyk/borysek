@@ -179,7 +179,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
 
   const parsed = (await callGatewayJson(apiKey, "google/gemini-2.5-pro", [
     { role: "system", content: system },
-    { role: "user", content: content as unknown as string },
+    { role: "user", content },
   ])) as { style?: unknown; requirements?: unknown };
   const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
   const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
