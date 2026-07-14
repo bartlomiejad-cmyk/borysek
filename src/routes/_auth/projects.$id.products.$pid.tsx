@@ -88,6 +88,7 @@ function ProductDetail() {
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const acceptQcFn = useServerFn(acceptThumbnailCandidate);
   const rejectQcFn = useServerFn(rejectThumbnailCandidate);
+  const saveVizFn = useServerFn(saveVizAnalysisOverride);
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
