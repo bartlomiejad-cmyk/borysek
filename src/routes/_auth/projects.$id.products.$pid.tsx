@@ -20,7 +20,8 @@ import {
   rejectThumbnailCandidate,
   saveVizAnalysisOverride,
 } from "@/lib/pim/regen.functions";
-import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import { recleanProductSources, startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import { supabase } from "@/integrations/supabase/client";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { attachManualSources, setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
@@ -669,6 +670,8 @@ function ProductDetail() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      <ProductSearchResults projectId={id} productName={product.nazwa ?? ""} />
 
       <ProductTimeline productId={pid} />
 
