@@ -12,7 +12,7 @@ import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.fu
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
-import { deleteProducts } from "@/lib/pim/products.functions";
+import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -75,6 +75,7 @@ function ProductDetail() {
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
   const deleteProductsFn = useServerFn(deleteProducts);
+  const updateNotesFn = useServerFn(updateProductNotes);
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const deleteMut = useMutation({
