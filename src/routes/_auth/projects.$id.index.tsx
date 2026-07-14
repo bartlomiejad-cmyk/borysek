@@ -1052,6 +1052,22 @@ function ProjectPage() {
                           refetchProducts();
                         }}
                       />
+                      {(((p as { unsure_count?: number }).unsure_count ?? 0) +
+                        ((p as { rejected_count?: number }).rejected_count ?? 0)) > 0 && (
+                        <Link
+                          to="/projects/$id/products/$pid"
+                          params={{ id, pid: p.id }}
+                          className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                          title="Zdjęcia oczekujące weryfikacji / odrzucone przez AI"
+                        >
+                          {((p as { unsure_count?: number }).unsure_count ?? 0) > 0 && (
+                            <span>?{(p as { unsure_count?: number }).unsure_count}</span>
+                          )}
+                          {((p as { rejected_count?: number }).rejected_count ?? 0) > 0 && (
+                            <span>×{(p as { rejected_count?: number }).rejected_count}</span>
+                          )}
+                        </Link>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="font-medium line-clamp-1">{p.golden_name ?? p.nazwa ?? "—"}</div>
