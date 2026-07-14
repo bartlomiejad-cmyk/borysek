@@ -7,7 +7,7 @@ export type ProductEventRow = {
   at: string;
   kind: string;
   message: string;
-  meta: Record<string, unknown> | null;
+  meta: unknown;
 };
 
 /**
