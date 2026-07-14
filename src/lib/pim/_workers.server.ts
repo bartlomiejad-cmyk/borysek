@@ -3207,7 +3207,7 @@ export async function runPimVisualization(
         `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
         `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field.`,
         `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
-        projectStyle ? `Scene style: ${projectStyle}.` : "",
+        projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp, no motion blur, no text overlays, no watermarks.`,
       ].filter(Boolean).join(" ");
       return {
@@ -3228,7 +3228,7 @@ export async function runPimVisualization(
         `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
         descBrief ? `Product context: ${descBrief}.` : "",
         `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
-        projectStyle ? `Scene style: ${projectStyle}.` : "",
+        projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
       ].filter(Boolean).join(" ");
       return {
