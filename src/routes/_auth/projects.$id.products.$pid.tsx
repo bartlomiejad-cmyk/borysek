@@ -129,6 +129,7 @@ function ProductDetail() {
   const [allegroGenAt, setAllegroGenAt] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
   const analyzedKeyRef = useRef<string>("");
   const [productNotes, setProductNotes] = useState("");
@@ -184,6 +185,28 @@ function ProductDetail() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["product", id, pid] });
     qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+  };
+
+  // Manual re-verify: force re-run of the identity check for every visible
+  // image (up to the server-fn cap) with the new anchor-reference logic.
+  // Manually-kept and hidden entries are protected server-side.
+  const revalidateImages = async () => {
+    const urls = allVisible.filter((u) => !hiddenSet.has(u)).slice(0, 8);
+    if (!urls.length) {
+      toast.info("Brak widocznych zdjęć do weryfikacji");
+      return;
+    }
+    setRevalidating(true);
+    try {
+      analyzedKeyRef.current = "revalidated"; // stop the auto-analyze effect from firing again
+      await analyzeFn({ data: { productId: pid, urls, revalidate: true } });
+      toast.success(`Zweryfikowano ${urls.length} zdjęć`);
+      invalidate();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się zweryfikować zdjęć"));
+    } finally {
+      setRevalidating(false);
+    }
   };
 
   // Derive top-4 visible images and trigger AI scoring for missing ones.
