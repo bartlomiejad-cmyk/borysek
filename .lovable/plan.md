@@ -1,15 +1,51 @@
-## Problem
+## Cel
 
-Bulk visualization worker crashes with `column enrichments.review_status does not exist`. Toast: „Wizualizacje produktowe: nie powiodło się — … Ostatni błąd: column enrichments.review_status does not exist".
+Uzgodnić kryterium „bez źródeł" między paskiem pipeline a `startFirecrawlDiscovery`, żeby klik „Wyszukaj źródła (N)" faktycznie uruchamiał discovery, a resetowanie źródeł pozostawiało spójny stan.
 
-`review_status` is a column on `source_products` (schema confirmed via DB query — `enrichments` has no such column). Every other place in the code correctly reads/updates it on `source_products`. Only `commitVisualization` in `src/lib/pim/_workers.server.ts` (~lines 3292–3333) reads and updates it on `enrichments`, so each visualization commit fails and FAL never produces output for the product.
+## Zmiany
 
-## Fix
+### 1. `src/lib/pim/firecrawl.functions.ts` — `startFirecrawlDiscovery`
 
-Edit `src/lib/pim/_workers.server.ts` `commitVisualization`:
+- Wybór produktów opiera się wyłącznie na:
+  - jawnej selekcji przez `productIds` (użytkownik zaznaczył/otworzył produkt), **lub**
+  - `pipeline_status IS NULL` / `= 'IMPORTED'`, gdy `productIds` nie podano.
+- Usuwam obecny filtr sprawdzający obecność `search_results.term` (to on powoduje „Brak produktów do przetworzenia").
+- `onlyMissing` staje się no-opem/deprecated: gdy przekazano jawne `productIds`, produkt jest zawsze kwalifikowalny (regresja: „Szukaj ponownie" z edytora działa dla dowolnego statusu). Gdy `productIds` brak, filtruję po `pipeline_status = IMPORTED`.
+- Guard „brak nazwy" pozostaje — produkty z pustą `nazwa` są pomijane i liczone osobno; nie przerywają całego zadania.
+- Rzut wyjątku tylko gdy `targetIds.length === 0` — z rozdzielonymi licznikami: `skippedAdvanced` (status dalej niż Import) i `skippedNoName`.
+- Ładunek wyjątku zawiera oba liczniki: front pokazuje precyzyjny toast.
 
-1. Remove `review_status` from the `enrichments` SELECT (keep `ai_gallery_urls, image_meta`).
-2. When a visualization fails viz QC, load current `review_status` from `source_products` (`.eq('id', e.source_product_id)`) and, if not already `REJECTED`/`NEEDS_REVIEW`, update `source_products.review_status = 'NEEDS_REVIEW'` — do not write it into the enrichments update payload.
-3. Keep the `ai_gallery_urls` + `image_meta.viz_qc` update on `enrichments` as before.
+### 2. Toast błędu (klient) — `projects.$id.index.tsx` (CTA banner + Narzędzia)
 
-No schema migration, no UI changes — the field already lives on `source_products` everywhere else. Behavior (demoting APPROVED → NEEDS_REVIEW on failed viz QC) stays identical, just on the correct table.
+- Po nieudanym starcie parsuję nowe liczniki i wyświetlam: `0 produktów: X pominięto (status dalej niż Import), Y pominięto (brak nazwy).`
+- Fallback zostawiam dla nieoczekiwanych błędów sieciowych.
+
+### 3. „Wyczyść źródła" — pełny reset (project-level i product-level)
+
+Obecny `recleanProductSources` sanityzuje tylko zapisane treści. Rozdzielam intencję na dwie akcje:
+
+- **Sanitize** (dotychczasowe) — pozostaje pod obecnym tooltipem „Usuwa logo metod płatności…" w narzędziach projektu i w edytorze produktu; label zmieniam na „Wyczyść śmieci ze źródeł" (bez zmiany działania).
+- **Reset źródeł** — nowy `resetProductSources` w `firecrawl.functions.ts`, wywoływany z:
+  - narzędzi projektu (whole project),
+  - edytora produktu (single product, scope po `productIds`).
+  Wywołanie deterministycznie:
+  - kasuje `search_results` dla objętych produktów (po `term`, w ramach `project_id`, tylko jeśli term nie jest używany przez inny produkt w projekcie),
+  - kasuje `product_sources` powiązane z tymi produktami (przez `matching_products` / bezpośrednie linki, spójne z modelem obecnym w kodzie),
+  - resetuje discovery-related pola w `enrichments` (te, które worker ustawia przy discovery/matching: `image_scores`, `image_meta.discovery`, `viz_analysis` jeśli oznaczone jako auto — analog do obecnych resetów w matching),
+  - ustawia `pipeline_status = 'IMPORTED'` (nigdy nie modyfikuje `manual_lock`, `review_status`, `client_guidelines`, oceny audytu, ani ręcznych override'ów sceny wizualizacji: `viz_analysis.manual = true`).
+
+### 4. Regresja: per-product „Szukaj ponownie" (edytor)
+
+- Pozostaje bez zmian: przekazuje `productIds: [id]`, więc trafia w gałąź jawnej selekcji i działa dla dowolnego statusu.
+
+## Poza zakresem
+
+- Silnik wyszukiwania (Firecrawl + Apify combined, warianty, preselekcja AI) — bez zmian.
+- Backfill — niepotrzebny; jeden dotknięty produkt zacznie działać po pierwszym kliknięciu CTA.
+
+## Weryfikacja
+
+1. Na projekcie `ps2` (product „Filtry Do Rekuperatora…", `pipeline_status = IMPORTED`, stare `search_results` istnieje) klik „Wyszukaj źródła (1)" tworzy `bulk_jobs` (`FIRECRAWL_DISCOVERY`, total 1). Sprawdzę w `bulk_jobs` po uruchomieniu.
+2. Import produktu bez `nazwa` i klik CTA → toast: „0 produktów: 0 pominięto (status dalej niż Import), 1 pominięto (brak nazwy)."
+3. „Reset źródeł" na produkcie ze statusem `GOLDEN_READY` → status wraca do `IMPORTED`, `manual_lock` i `review_status` niezmienione, `search_results` dla jego termu skasowane (o ile nie współdzielone).
+4. „Szukaj ponownie" z edytora dla produktu w `GOLDEN_READY` → discovery startuje mimo statusu.
