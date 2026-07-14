@@ -59,6 +59,27 @@ export function dedupeKeywords(arr: string[]): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Client guidelines block — injected into golden / Allegro / visualization
+// prompts as a user-role addendum. Hard rules from the system prompt still win
+// (see "PRIORYTET REGUŁ" section above).
+// ---------------------------------------------------------------------------
+
+export function buildClientGuidelinesBlock(
+  guidelines: string | null | undefined,
+  productNotes: string | null | undefined,
+): string {
+  const g = (guidelines ?? "").trim().slice(0, 2000);
+  const n = (productNotes ?? "").trim().slice(0, 500);
+  if (!g && !n) return "";
+  const lines = [
+    "WYTYCZNE KLIENTA (obowiązkowe, mają pierwszeństwo przed ogólnymi zasadami stylu, ale NIE mogą łamać wymagań formatu JSON ani whitelisty tagów HTML):",
+  ];
+  lines.push(g || "(brak wytycznych projektowych)");
+  if (n) lines.push(`NOTATKI DO PRODUKTU: ${n}`);
+  return lines.join("\n");
+}
+
 export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "Jesteś redaktorem katalogu e-commerce i specjalistą SEO. Tworzysz zoptymalizowane pod wyszukiwarki treści produktu na podstawie 1-3 źródeł internetowych.",
   'Odpowiedź MUSI być poprawnym JSON-em: {"name": string, "slug": string, "description": string, "meta_description": string, "seo_keywords": string[], "features": [{"key": string, "value": string}]}.',
