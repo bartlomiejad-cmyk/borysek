@@ -157,6 +157,9 @@ function ProductDetail() {
   const [notesInitial, setNotesInitial] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesSaving, setNotesSaving] = useState(false);
+  const [manualUrlInput, setManualUrlInput] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+  const [modeBusy, setModeBusy] = useState(false);
 
   useEffect(() => {
     const n = ((data as { product?: { product_notes?: string | null } } | undefined)?.product?.product_notes ?? "") || "";
