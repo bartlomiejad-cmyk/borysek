@@ -671,11 +671,15 @@ function ProjectPage() {
     }
   };
 
-  const exportFile = async (fmt: "csv" | "xlsx", approvedOnly = false) => {
-    const allRows = await exportFn({ data: { projectId: id, approvedOnly } });
+  const exportFile = async (
+    fmt: "csv" | "xlsx",
+    approvedOnly = false,
+    mode: "client" | "qc" = "client",
+  ) => {
+    const allRows = await exportFn({ data: { projectId: id, approvedOnly, mode } });
     const rows =
       selectedIds.size > 0
-        ? allRows.filter((r: Record<string, unknown>) => {
+        ? (allRows as Array<Record<string, unknown>>).filter((r) => {
             const pid = (r.id ?? r.product_id ?? r.productId) as string | undefined;
             return pid ? selectedIds.has(pid) : true;
           })
