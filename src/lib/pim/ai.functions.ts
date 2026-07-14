@@ -807,7 +807,7 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
     const { supabase } = context;
     const { data: proj, error } = await supabase
       .from("projects")
-      .select("name, visualization_style_prompt, visualization_requirements_pl")
+      .select("name, visualization_style_prompt, visualization_requirements_pl, settings")
       .eq("id", data.projectId)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -818,6 +818,9 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
 
     const projectName = (proj.name ?? "").trim() || "(bez nazwy)";
     const currentStyle = (proj.visualization_style_prompt ?? "").trim();
+    const clientGuidelines =
+      ((proj.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+    const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, "");
 
     const system =
       data.field === "style"
@@ -841,8 +844,8 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
 
     const user =
       data.field === "style"
-        ? `Nazwa projektu: "${projectName}".`
-        : `Nazwa projektu: "${projectName}".${currentStyle ? `\nWybrany styl/scena: "${currentStyle}".` : ""}`;
+        ? `Nazwa projektu: "${projectName}".${guidelinesBlock ? `\n\n${guidelinesBlock}` : ""}`
+        : `Nazwa projektu: "${projectName}".${currentStyle ? `\nWybrany styl/scena: "${currentStyle}".` : ""}${guidelinesBlock ? `\n\n${guidelinesBlock}` : ""}`;
 
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
