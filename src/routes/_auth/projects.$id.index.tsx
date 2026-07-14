@@ -653,8 +653,10 @@ function ProjectPage() {
         <div>
           <h1 className="font-serif text-5xl tracking-tight">{meta?.project.name ?? "..."}</h1>
           <p className="text-sm text-muted-foreground">
-            {meta?.counts.source_products ?? 0} produktów · {meta?.counts.search_results ?? 0} zapytań ·{" "}
-            {meta?.counts.product_sources ?? 0} stron źródłowych · {meta?.counts.enrichments_done ?? 0} złotych rekordów
+            {summary?.total ?? meta?.counts.source_products ?? 0} produktów ·{" "}
+            {summary ? Math.max(0, summary.total - summary.imported) : (meta?.counts.product_sources ?? 0)} ze źródłami ·{" "}
+            {summary ? Math.max(0, summary.total - summary.imported - summary.sources_found - summary.matched) : (meta?.counts.enrichments_done ?? 0)} złotych rekordów ·{" "}
+            {summary?.visuals_ready ?? 0} z wizualizacjami
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
