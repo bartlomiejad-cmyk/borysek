@@ -3642,7 +3642,7 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, product_notes, manual_lock")
+    .select("id, project_id, nazwa, kod, ean, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -3688,6 +3688,12 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
   const productNotes = (product as { product_notes?: string | null }).product_notes ?? "";
   const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, productNotes);
 
+  const isCompatibleMode =
+    ((product as { matching_mode?: string | null }).matching_mode === "compatible");
+  const compatibilityLine = isCompatibleMode
+    ? "PRODUKT TYPU ZAMIENNIK/AKCESORIUM: opis może czerpać parametry techniczne i listy kompatybilności ze źródeł równoważnych, ale NIE przenoś nazw marek zamienników innych sklepów do nazwy i opisu; nazwą wiodącą jest nazwa z bazy klienta."
+    : "";
+
   const userPrompt = [
     `NAZWA PRODUKTU: ${goldenName}`,
     `KOD: ${product.kod ?? ""}`,
@@ -3706,6 +3712,7 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
     keywords.length ? keywords.join(", ") : "(brak)",
     "",
     guidelinesBlock ? guidelinesBlock + "\n" : "",
+    compatibilityLine,
     'Wygeneruj JSON {"html": string} — kompletny, sprzedażowy opis Allegro zgodny z system promptem. Bierz fakty wyłącznie z podanych danych.',
   ].filter(Boolean).join("\n");
 
