@@ -21,6 +21,7 @@ import {
 } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
+import { attachManualSources, setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
 import { Button } from "@/components/ui/button";
 import {
@@ -93,6 +94,9 @@ function ProductDetail() {
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
   const deleteProductsFn = useServerFn(deleteProducts);
+  const attachManualFn = useServerFn(attachManualSources);
+  const setModeFn = useServerFn(setMatchingMode);
+  const rerunMatchFn = useServerFn(rerunMatchingForProduct);
   const updateNotesFn = useServerFn(updateProductNotes);
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
