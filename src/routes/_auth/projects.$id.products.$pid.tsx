@@ -438,6 +438,11 @@ function ProductDetail() {
     const s = imageScores[u];
     const isMain = u === mainUrl;
     const isPinned = u === pinnedMainUrl;
+    const m = imageMeta[u];
+    const w = s?.w ?? m?.w ?? 0;
+    const h = s?.h ?? m?.h ?? 0;
+    const minSide = w && h ? Math.min(w, h) : 0;
+    const isLowRes = minSide > 0 && minSide < 800;
     return (
       <div
         key={u}
@@ -447,6 +452,23 @@ function ProductDetail() {
         )}
       >
         <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+        {w > 0 && h > 0 && (
+          <span
+            className={cn(
+              "absolute bottom-0 right-0 text-[9px] font-medium px-1 py-0 rounded-tl border-l border-t",
+              isLowRes
+                ? "bg-amber-500/90 text-white border-amber-600"
+                : "bg-background/80 text-muted-foreground border-border",
+            )}
+            title={
+              isLowRes
+                ? `Niska rozdzielczość: ${w}×${h}px (min. 800px)`
+                : `${w}×${h}px`
+            }
+          >
+            {w}×{h}
+          </span>
+        )}
         {isMain && (
           <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded shadow flex items-center gap-1">
             <Crown className="h-2.5 w-2.5" /> Główne{isPinned ? " (przypięte)" : ""}
