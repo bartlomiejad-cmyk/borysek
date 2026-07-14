@@ -17,6 +17,7 @@ import {
   clearRegeneratedImage,
   acceptThumbnailCandidate,
   rejectThumbnailCandidate,
+  saveVizAnalysisOverride,
 } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
@@ -87,6 +88,7 @@ function ProductDetail() {
   const clearRegenFn = useServerFn(clearRegeneratedImage);
   const acceptQcFn = useServerFn(acceptThumbnailCandidate);
   const rejectQcFn = useServerFn(rejectThumbnailCandidate);
+  const saveVizFn = useServerFn(saveVizAnalysisOverride);
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
@@ -1013,6 +1015,29 @@ function ProductDetail() {
 
             {/* Wizualizacje AI (lifestyle) */}
             {(() => {
+              const viz = ((imageMeta as unknown as { viz_analysis?: {
+                style?: string;
+                requirements?: string;
+                at?: string;
+                manual?: boolean;
+                source?: string;
+              } }).viz_analysis) ?? null;
+              if (!viz) return null;
+              return (
+                <VizAnalysisPanel
+                  productId={pid}
+                  viz={viz}
+                  onSave={async (style, requirements) => {
+                    await saveVizFn({
+                      data: { productId: pid, style, requirements, manual: true },
+                    });
+                    toast.success("Zapisano manualne nadpisanie sceny");
+                    invalidate();
+                  }}
+                />
+              );
+            })()}
+            {(() => {
               const gallery = (((enrichment as { ai_gallery_urls?: string[] | null } | null)?.ai_gallery_urls) ?? []) as string[];
               if (!gallery.length) return null;
               return (
@@ -1683,5 +1708,88 @@ function ProductDetail() {
         </AlertDialogContent>
       </AlertDialog>
     </main>
+  );
+}
+
+function VizAnalysisPanel({
+  productId: _productId,
+  viz,
+  onSave,
+}: {
+  productId: string;
+  viz: {
+    style?: string;
+    requirements?: string;
+    at?: string;
+    manual?: boolean;
+    source?: string;
+  };
+  onSave: (style: string, requirements: string) => Promise<void>;
+}) {
+  const [style, setStyle] = useState((viz.style ?? "").trim());
+  const [requirements, setRequirements] = useState((viz.requirements ?? "").trim());
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setStyle((viz.style ?? "").trim());
+    setRequirements((viz.requirements ?? "").trim());
+  }, [viz.style, viz.requirements]);
+  const dirty =
+    style.trim() !== (viz.style ?? "").trim() ||
+    requirements.trim() !== (viz.requirements ?? "").trim();
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="rounded border bg-muted/20 p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <Sparkles className="h-4 w-4" /> Scena AI dla tego produktu
+            {viz.manual && (
+              <Badge variant="outline" className="text-[10px]">Manual</Badge>
+            )}
+          </p>
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs">
+              <ChevronDown className={cn("h-3.5 w-3.5 mr-1 transition-transform", open && "rotate-180")} />
+              {open ? "Zwiń" : "Edytuj"}
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+        {!open && (
+          <div className="text-[11px] text-muted-foreground space-y-0.5">
+            <div className="line-clamp-2"><b>Scena:</b> {viz.style || "—"}</div>
+            <div className="line-clamp-2"><b>Wymagania:</b> {viz.requirements || "—"}</div>
+          </div>
+        )}
+        <CollapsibleContent className="space-y-2">
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground">Scena / stylistyka</label>
+            <Textarea rows={2} value={style} onChange={(e) => setStyle(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground">Wymagania techniczne</label>
+            <Textarea rows={3} value={requirements} onChange={(e) => setRequirements(e.target.value)} />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              disabled={busy || !dirty || !style.trim() || !requirements.trim()}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await onSave(style.trim(), requirements.trim());
+                } catch (e) {
+                  toast.error(friendlyError(e, "Nie udało się zapisać"));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Zatwierdź i użyj przy następnej generacji
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
   );
 }

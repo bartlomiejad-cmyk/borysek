@@ -9,26 +9,18 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Wand2, Sparkles, Loader2, ImageIcon, ChevronDown, Save, Check } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Wand2, Sparkles, Loader2, ImageIcon, ChevronDown } from "lucide-react";
 import { createBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { updateProject } from "@/lib/pim/projects.functions";
 import {
-  suggestVisualizationField,
-  suggestVisualizationPreset,
   analyzeProductImagesForPrompt,
 } from "@/lib/pim/ai.functions";
-import {
-  BUILT_IN_PRESETS,
-  legacyPreset,
-  readCustomPresets,
-  resolvePresetById,
-  composePresetPayload,
-  type ScenePreset,
-} from "@/lib/pim/scene-presets";
 import { friendlyError } from "@/lib/utils";
 
 export type VizTarget = {
   id: string;
+  nazwa?: string | null;
   picked_urls?: string[];
   regenerated_main_image?: string | null;
   pinned_main_url?: string | null;
@@ -62,13 +54,10 @@ export function GenerateVisualizationsDialog({
   selectedIds,
   defaultStylePrompt,
   defaultRequirementsPl,
-  projectSettings,
 }: Props) {
   const qc = useQueryClient();
   const createJob = useServerFn(createBulkJob);
   const updProject = useServerFn(updateProject);
-  const suggestField = useServerFn(suggestVisualizationField);
-  const suggestPreset = useServerFn(suggestVisualizationPreset);
   const analyzeImagesFn = useServerFn(analyzeProductImagesForPrompt);
 
   const selectedTargets = useMemo(
@@ -81,159 +70,25 @@ export function GenerateVisualizationsDialog({
     selectedIds.size > 0 ? "selected" : "with_main",
   );
   const [count, setCount] = useState(3);
-  const customPresets = useMemo<ScenePreset[]>(
-    () => readCustomPresets(projectSettings ?? null),
-    [projectSettings],
-  );
-  const legacy = useMemo(
-    () => legacyPreset(defaultStylePrompt, defaultRequirementsPl),
-    [defaultStylePrompt, defaultRequirementsPl],
-  );
-  const availablePresets = useMemo<ScenePreset[]>(
-    () => [
-      ...(legacy ? [legacy] : []),
-      ...customPresets,
-      ...BUILT_IN_PRESETS,
-    ],
-    [customPresets, legacy],
-  );
-  const initialPresetId = legacy ? legacy.id : BUILT_IN_PRESETS[0]!.id;
-  const [presetId, setPresetId] = useState<string>(initialPresetId);
-  const [adjustments, setAdjustments] = useState<string>("");
-  const [customOpen, setCustomOpen] = useState(false);
-  const [style, setStyle] = useState<string>("");
-  const [reqPl, setReqPl] = useState<string>("");
+  const [style, setStyle] = useState<string>((defaultStylePrompt ?? "").trim());
+  const [reqPl, setReqPl] = useState<string>((defaultRequirementsPl ?? "").trim());
+  const [constraintsOpen, setConstraintsOpen] = useState(false);
+  const [forceReanalyze, setForceReanalyze] = useState(false);
   const [quality, setQuality] = useState<"2K" | "4K">("2K");
   const [busy, setBusy] = useState(false);
-  const [busyStyle, setBusyStyle] = useState(false);
-  const [busyReq, setBusyReq] = useState(false);
-  const [busyVision, setBusyVision] = useState(false);
-  const [busyMatch, setBusyMatch] = useState(false);
-  const [busySave, setBusySave] = useState(false);
-  const [presetName, setPresetName] = useState("");
+  const [busyPreview, setBusyPreview] = useState(false);
+  const [previewProductId, setPreviewProductId] = useState<string>("");
+  const [preview, setPreview] = useState<{ style: string; requirements: string; name: string } | null>(null);
 
-  const selectedPreset = useMemo<ScenePreset | null>(
-    () => resolvePresetById(presetId, [...(legacy ? [legacy] : []), ...customPresets]),
-    [presetId, legacy, customPresets],
-  );
-
-  // When user opens Dostosuj, prefill the two text fields from the preset so
-  // they can tweak in Polish. Style comes from style_en (which is the EN scene
-  // description we pass into buildFalPromptsFromPolish); requirements come
-  // from requirements_en. Legacy preset already holds the original PL text.
-  useEffect(() => {
-    if (!open) return;
-    if (!selectedPreset) return;
-    setStyle(selectedPreset.style_en);
-    setReqPl(selectedPreset.requirements_en);
-  }, [open, selectedPreset]);
-
-  const suggest = async (field: "style" | "requirements") => {
-    const setBusyFn = field === "style" ? setBusyStyle : setBusyReq;
-    setBusyFn(true);
-    try {
-      const { text } = await suggestField({ data: { projectId, field } });
-      if (field === "style") setStyle(text);
-      else setReqPl(text);
-    } catch (e) {
-      toast.error(friendlyError(e, "Nie udało się wygenerować propozycji"));
-    } finally {
-      setBusyFn(false);
-    }
-  };
-
-  const matchPreset = async () => {
-    setBusyMatch(true);
-    try {
-      const out = await suggestPreset({ data: { projectId } });
-      setPresetId(out.preset_id);
-      setAdjustments(out.adjustments ?? "");
-      toast.success("AI dobrała preset");
-    } catch (e) {
-      toast.error(friendlyError(e, "Nie udało się dopasować presetu"));
-    } finally {
-      setBusyMatch(false);
-    }
-  };
-
-  const analyzeFromImages = async () => {
-    const withMain = selectedTargets.filter(hasMain);
-    const pick = withMain[0] ?? withMainTargets[0];
-    if (!pick) {
-      toast.info("Zaznacz produkt ze zdjęciem, aby AI mogła je przeanalizować");
-      return;
-    }
-    setBusyVision(true);
-    try {
-      const out = await analyzeImagesFn({
-        data: { productId: pick.id, mode: "visualization" },
-      });
-      // Vision output is treated as per-product personalisation ON TOP of the
-      // chosen preset. Preset rules take precedence on conflicts; we simply
-      // concatenate the vision insight into the `adjustments` field.
-      const merged = [adjustments.trim(), out.requirements.trim(), out.style.trim()]
-        .filter(Boolean)
-        .join(" · ")
-        .slice(0, 480);
-      setAdjustments(merged);
-      toast.success(`AI przeanalizowała ${out.analyzed} zdjęcie/zdjęć`);
-    } catch (e) {
-      toast.error(friendlyError(e, "Nie udało się przeanalizować zdjęć"));
-    } finally {
-      setBusyVision(false);
-    }
-  };
-
-  // Re-sync scope + preset defaults when the dialog opens.
   useEffect(() => {
     if (!open) return;
     setScope(selectedIds.size > 0 ? "selected" : "with_main");
-    setPresetId(legacy ? legacy.id : BUILT_IN_PRESETS[0]!.id);
-    setAdjustments("");
-    setCustomOpen(false);
-  }, [open, selectedIds, legacy]);
-
-  const savePreset = async () => {
-    const name = presetName.trim();
-    if (!name) {
-      toast.info("Nadaj nazwę presetowi");
-      return;
-    }
-    const s = style.trim();
-    const r = reqPl.trim();
-    if (!s && !r) {
-      toast.info("Uzupełnij pola stylu lub wymagań przed zapisem");
-      return;
-    }
-    setBusySave(true);
-    try {
-      const existing = readCustomPresets(projectSettings ?? null);
-      const id = `custom_${Date.now().toString(36)}`;
-      const nextArr = [
-        ...existing,
-        {
-          id,
-          label_pl: name,
-          thumbnail_hint: "Własny preset projektu.",
-          style_en: s,
-          requirements_en: r,
-        },
-      ];
-      const nextSettings = {
-        ...(projectSettings ?? {}),
-        scene_presets: nextArr,
-      } as Record<string, unknown>;
-      await updProject({ data: { id: projectId, settings: nextSettings } });
-      qc.invalidateQueries({ queryKey: ["project", projectId] });
-      toast.success("Preset zapisany w projekcie");
-      setPresetName("");
-      setPresetId(id);
-    } catch (e) {
-      toast.error(friendlyError(e, "Nie udało się zapisać presetu"));
-    } finally {
-      setBusySave(false);
-    }
-  };
+    setConstraintsOpen(false);
+    setForceReanalyze(false);
+    setPreview(null);
+    setStyle((defaultStylePrompt ?? "").trim());
+    setReqPl((defaultRequirementsPl ?? "").trim());
+  }, [open, selectedIds, defaultStylePrompt, defaultRequirementsPl]);
 
   const targets = useMemo(() => {
     if (scope === "selected") return selectedTargets.filter(hasMain);
@@ -244,6 +99,37 @@ export function GenerateVisualizationsDialog({
   const total = targets.length;
   const totalRenders = total * count;
 
+  // Default preview product = first selected-with-main, or first with-main overall.
+  useEffect(() => {
+    if (!open) return;
+    if (previewProductId && targets.some((t) => t.id === previewProductId)) return;
+    const first = targets[0] ?? withMainTargets[0];
+    setPreviewProductId(first?.id ?? "");
+  }, [open, targets, withMainTargets, previewProductId]);
+
+  const runPreview = async () => {
+    const pick = allProducts.find((p) => p.id === previewProductId) ?? targets[0] ?? withMainTargets[0];
+    if (!pick || !hasMain(pick)) {
+      toast.info("Wybierz produkt ze zdjęciem, aby AI mogła przygotować podgląd");
+      return;
+    }
+    setBusyPreview(true);
+    try {
+      const out = await analyzeImagesFn({
+        data: { productId: pick.id, mode: "visualization" },
+      });
+      setPreview({
+        style: out.style,
+        requirements: out.requirements,
+        name: (pick.nazwa ?? pick.id.slice(0, 8)).trim(),
+      });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się wygenerować podglądu"));
+    } finally {
+      setBusyPreview(false);
+    }
+  };
+
   const run = async () => {
     if (count <= 0) {
       toast.info("Ustaw liczbę wizualizacji > 0");
@@ -253,28 +139,15 @@ export function GenerateVisualizationsDialog({
       toast.info("Brak produktów z gotowym zdjęciem głównym w wybranym zakresie");
       return;
     }
-    if (!selectedPreset) {
-      toast.info("Wybierz preset sceny");
-      return;
-    }
     setBusy(true);
     try {
-      // If the user edited the collapsible text fields we honour those exact
-      // values; otherwise we compose the payload from the preset + AI-picked
-      // per-product adjustments. Preset preservation rules always apply.
-      const usingCustomText = customOpen &&
-        (style.trim() !== selectedPreset.style_en.trim() ||
-          reqPl.trim() !== selectedPreset.requirements_en.trim());
-      const payload = usingCustomText
-        ? { stylePrompt: style.trim(), requirementsPl: reqPl.trim() }
-        : composePresetPayload(selectedPreset, adjustments);
-
-      // Persist last-used defaults on the project so users don't retype them.
+      const stylePrompt = style.trim();
+      const requirementsPl = reqPl.trim();
       await updProject({
         data: {
           id: projectId,
-          visualization_style_prompt: payload.stylePrompt || null,
-          visualization_requirements_pl: payload.requirementsPl || null,
+          visualization_style_prompt: stylePrompt || null,
+          visualization_requirements_pl: requirementsPl || null,
         },
       });
       await createJob({
@@ -284,8 +157,9 @@ export function GenerateVisualizationsDialog({
           items: targets.map((t) => t.id),
           payload: {
             count,
-            stylePrompt: payload.stylePrompt,
-            requirementsPl: payload.requirementsPl,
+            stylePrompt,
+            requirementsPl,
+            force_reanalyze: forceReanalyze,
             targetResolution: quality === "4K" ? 4096 : 2048,
           },
         },
@@ -314,27 +188,14 @@ export function GenerateVisualizationsDialog({
           <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
             Miniatura z rekwizytami nie nadaje się na zdjęcie główne Allegro (na zdjęciu głównym mogą być tylko elementy będące częścią oferty).
           </div>
-          <div className="flex items-center justify-between gap-2 rounded-md border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-2">
-            <div className="text-xs">
-              <div className="font-medium">Spersonalizuj na podstawie zdjęć</div>
-              <div className="text-muted-foreground">
-                Gemini przegląda zdjęcia pierwszego produktu i dokłada wskazówki do wybranego presetu.
-              </div>
+          <div className="rounded-md border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-xs">
+            <div className="font-medium flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" /> AI dobiera scenę dla każdego produktu z osobna
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={analyzeFromImages}
-              disabled={busyVision || busy}
-            >
-              {busyVision ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <ImageIcon className="h-3.5 w-3.5 mr-1.5" />
-              )}
-              Analizuj zdjęcia
-            </Button>
+            <div className="text-muted-foreground mt-1">
+              Przed każdą wizualizacją Gemini Vision analizuje zdjęcia danego produktu i pisze spersonalizowany prompt.
+              Wynik jest cache'owany na produkcie — kolejne uruchomienia są darmowe, o ile nie zmienią się źródłowe zdjęcia.
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -370,70 +231,56 @@ export function GenerateVisualizationsDialog({
             />
           </div>
 
-          <div className="space-y-2">
+          {/* Preview: run analysis for a single product to see the scene AI will pick. */}
+          <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <Label>Preset sceny</Label>
+              <Label className="text-xs font-medium">Przykład doboru sceny</Label>
               <Button
                 type="button"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={matchPreset}
-                disabled={busyMatch || busy}
+                onClick={runPreview}
+                disabled={busyPreview || busy || !previewProductId}
               >
-                {busyMatch ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                Dobierz AI
+                {busyPreview ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Pokaż podgląd
               </Button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {availablePresets.map((p) => {
-                const active = presetId === p.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setPresetId(p.id)}
-                    className={`text-left rounded-md border p-2 transition-colors focus:outline-none focus:ring-2 focus:ring-violet-400/60 ${
-                      active
-                        ? "border-violet-500 bg-violet-50 dark:bg-violet-950/30"
-                        : "border-border hover:border-violet-300"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-medium">{p.label_pl}</div>
-                      {active && <Check className="h-3.5 w-3.5 text-violet-600" />}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground line-clamp-2">
-                      {p.thumbnail_hint}
-                    </div>
-                    {p.custom && (
-                      <div className="mt-1 text-[10px] uppercase tracking-wide text-violet-700 dark:text-violet-300">
-                        {p.id === "__legacy_custom__" ? "Dotychczasowe" : "Preset projektu"}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="space-y-1 pt-1">
-              <Label htmlFor="viz-adjust" className="text-xs">
-                Dostosowanie dla tego projektu (PL, opcjonalnie)
-              </Label>
-              <Textarea
-                id="viz-adjust"
-                rows={2}
-                placeholder="np. dodaj świeże liście i drewnianą deskę wokół produktu"
-                value={adjustments}
-                onChange={(e) => setAdjustments(e.target.value.slice(0, 480))}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Zasady zachowania koloru, logo i proporcji produktu są nadrzędne — nie zostaną zmienione.
-              </p>
-            </div>
+            <select
+              className="w-full h-8 rounded-md border bg-background px-2 text-sm"
+              value={previewProductId}
+              onChange={(e) => {
+                setPreviewProductId(e.target.value);
+                setPreview(null);
+              }}
+            >
+              {(targets.length ? targets : withMainTargets).slice(0, 200).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {(p.nazwa ?? p.id.slice(0, 8)).trim()}
+                </option>
+              ))}
+            </select>
+            {preview && (
+              <div className="rounded bg-muted/40 p-2 text-xs space-y-1">
+                <div className="font-medium">{preview.name}</div>
+                <div>
+                  <span className="text-muted-foreground">Scena:</span> {preview.style}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Wymagania:</span> {preview.requirements}
+                </div>
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              To tylko podgląd — batch analizuje każdy produkt osobno.
+            </p>
           </div>
 
-          <Collapsible open={customOpen} onOpenChange={setCustomOpen}>
+          <Collapsible open={constraintsOpen} onOpenChange={setConstraintsOpen}>
             <CollapsibleTrigger asChild>
               <Button
                 type="button"
@@ -442,80 +289,52 @@ export function GenerateVisualizationsDialog({
                 className="h-8 px-2 text-xs"
               >
                 <ChevronDown
-                  className={`h-3.5 w-3.5 mr-1 transition-transform ${customOpen ? "rotate-180" : ""}`}
+                  className={`h-3.5 w-3.5 mr-1 transition-transform ${constraintsOpen ? "rotate-180" : ""}`}
                 />
-                Dostosuj (edytuj prompt ręcznie)
+                Ramy projektu (opcjonalne)
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-3 pt-2">
+              <p className="text-[11px] text-muted-foreground">
+                Te pola OGRANICZAJĄ dobór sceny per produkt — AI będzie się do nich stosować.
+                Zostaw puste, żeby AI decydowała samodzielnie na podstawie zdjęć.
+              </p>
               <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="viz-style">Styl / scena (EN)</Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => suggest("style")}
-                    disabled={busyStyle || busy}
-                  >
-                    {busyStyle ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                    Zaproponuj AI
-                  </Button>
-                </div>
+                <Label htmlFor="viz-style" className="text-xs">Styl / stylistyka (PL, opcjonalnie)</Label>
                 <Textarea
                   id="viz-style"
                   rows={2}
+                  placeholder='np. "wszystkie sceny w jasnej, skandynawskiej stylistyce; bez ludzi"'
                   value={style}
                   onChange={(e) => setStyle(e.target.value)}
                 />
               </div>
               <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="viz-req">Wymagania techniczne (EN/PL)</Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => suggest("requirements")}
-                    disabled={busyReq || busy}
-                  >
-                    {busyReq ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                    Zaproponuj AI
-                  </Button>
-                </div>
+                <Label htmlFor="viz-req" className="text-xs">Wymagania (PL, opcjonalnie)</Label>
                 <Textarea
                   id="viz-req"
-                  rows={4}
+                  rows={3}
+                  placeholder="np. bez ludzi z twarzą, tylko naturalne materiały, unikaj sztucznych kolorów tła"
                   value={reqPl}
                   onChange={(e) => setReqPl(e.target.value)}
                 />
               </div>
-              <div className="flex items-center gap-2 rounded-md border border-dashed p-2">
-                <Input
-                  placeholder="Nazwa presetu (np. Sklep narzędziowy)"
-                  value={presetName}
-                  onChange={(e) => setPresetName(e.target.value)}
-                  className="flex-1 h-8 text-sm"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={savePreset}
-                  disabled={busySave || busy}
-                >
-                  {busySave ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <Save className="h-3.5 w-3.5 mr-1.5" />
-                  )}
-                  Zapisz jako preset projektu
-                </Button>
-              </div>
             </CollapsibleContent>
           </Collapsible>
+
+          <label className="flex items-start gap-2 rounded-md border p-2 text-xs">
+            <Checkbox
+              checked={forceReanalyze}
+              onCheckedChange={(v) => setForceReanalyze(v === true)}
+              className="mt-0.5"
+            />
+            <div>
+              <div className="font-medium">Wymuś ponowną analizę zdjęć</div>
+              <div className="text-muted-foreground">
+                Zignoruje cache — użyj po zmianach zdjęć głównych/galerii. Ręczne nadpisania sceny (manual) i tak zostają.
+              </div>
+            </div>
+          </label>
 
           <div className="space-y-1">
             <Label>Jakość</Label>
@@ -547,7 +366,7 @@ export function GenerateVisualizationsDialog({
           </Button>
           <Button onClick={run} disabled={busy || count === 0 || total === 0}>
             <Wand2 className="h-4 w-4 mr-2" />
-            Uruchom
+            Generuj (AI dobierze scenę per produkt)
           </Button>
         </DialogFooter>
       </DialogContent>

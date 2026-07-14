@@ -134,6 +134,59 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
+/**
+ * Per-product visualization scene analysis via Gemini Vision. Plain server
+ * helper (no createServerFn wrapper) so bulk workers can call it directly.
+ * Returns Polish {style, requirements} that feed buildFalPromptsFromPolish.
+ * Callers layer client_guidelines and project constraints on top separately.
+ */
+export async function analyzeVisualizationSceneForProduct(args: {
+  productName: string;
+  featuresText: string;
+  imageUrls: string[]; // main first, max 4, must be publicly fetchable
+  projectConstraintsPl?: string; // optional PL text; overrides scene choices
+}): Promise<{ style: string; requirements: string; used: number }> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+  const urls = args.imageUrls.filter(Boolean).slice(0, 4);
+  if (!urls.length) throw new Error("Brak zdjęć do analizy");
+
+  const system = [
+    "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
+    "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
+    "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
+    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"..."}.',
+    "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
+    "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
+  ].join("\n");
+
+  const constraintsBlock = (args.projectConstraintsPl ?? "").trim();
+  const userText = [
+    `Nazwa produktu: "${args.productName || "(bez nazwy)"}"`,
+    args.featuresText ? `Cechy: ${args.featuresText}` : "",
+    constraintsBlock
+      ? `OGRANICZENIA PROJEKTU (nadrzędne wobec Twoich pomysłów na scenę):\n${constraintsBlock}`
+      : "",
+    `Przeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON.`,
+  ].filter(Boolean).join("\n");
+
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [{ type: "text", text: userText }];
+  for (const u of urls) content.push({ type: "image_url", image_url: { url: u } });
+
+  const parsed = (await callGatewayJson(apiKey, "google/gemini-2.5-pro", [
+    { role: "system", content: system },
+    { role: "user", content },
+  ])) as { style?: unknown; requirements?: unknown };
+  const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
+  const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+  if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
+  return { style, requirements, used: urls.length };
+}
+
 // Deterministic fallback used when the AI gateway call fails — mirrors the
 // original hardcoded prompts so generation never blocks on the translator.
 function fallbackPrompts(args: {
@@ -2844,6 +2897,7 @@ export async function runPimVisualization(
     requirementsPl?: string;
     stylePrompt?: string;
     targetResolution?: number;
+    force_reanalyze?: boolean;
   },
 ): Promise<{ complete: boolean }> {
   const FAL_KEY = process.env.FAL_KEY;
@@ -2855,8 +2909,15 @@ export async function runPimVisualization(
     return { complete: true };
   }
   const targetResolution = payload?.targetResolution === 4096 ? "4K" : "2K";
-  const requirementsPl = (payload?.requirementsPl ?? "").trim();
-  const projectStyle = (payload?.stylePrompt ?? "").trim();
+  const projectRequirementsPl = (payload?.requirementsPl ?? "").trim();
+  const projectStylePl = (payload?.stylePrompt ?? "").trim();
+  const forceReanalyze = !!payload?.force_reanalyze;
+  // Combined PL block used as fallback when analysis fails AND as "OGRANICZENIA
+  // PROJEKTU" appended to the vision prompt.
+  const projectConstraintsPl = [
+    projectStylePl ? `Styl / scena: ${projectStylePl}` : "",
+    projectRequirementsPl ? `Wymagania: ${projectRequirementsPl}` : "",
+  ].filter(Boolean).join("\n");
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
@@ -2880,7 +2941,7 @@ export async function runPimVisualization(
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description")
+    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enrichment) throw new Error("Brak enrichment");
@@ -2892,6 +2953,8 @@ export async function runPimVisualization(
     ai_gallery_urls: string[] | null;
     golden_name: string | null;
     golden_description: string | null;
+    golden_features: unknown;
+    image_meta: Record<string, unknown> | null;
   };
 
   // Pick main source image: pinned → regenerated (skip sentinel) → picked[0].
@@ -2936,17 +2999,151 @@ export async function runPimVisualization(
       .eq("id", ctx.bulkJobId);
   };
 
-  // Build EN prompt from Polish requirements. Prefer golden record if present.
+  // ---------- Per-product AI scene analysis (with cache & fallback) ----------
   const nameForPrompt = e.golden_name?.trim() || productName || "product";
   const descForPrompt = e.golden_description?.trim() || productDesc;
+  const featuresText = Array.isArray(e.golden_features)
+    ? (e.golden_features as unknown[])
+        .map((f) => {
+          if (typeof f === "string") return f;
+          if (f && typeof f === "object") {
+            const obj = f as { key?: string; name?: string; value?: string };
+            const k = obj.key ?? obj.name ?? "";
+            const v = obj.value ?? "";
+            return `${k}: ${v}`.trim().replace(/^:\s*/, "");
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .slice(0, 8)
+        .join("; ")
+    : "";
+
+  // Candidate source images for vision (main first, then rest of picked_urls).
+  const analysisCandidates: string[] = [];
+  if (e.pinned_main_url) analysisCandidates.push(e.pinned_main_url);
+  if (e.regenerated_main_image && e.regenerated_main_image !== "__imported__") {
+    analysisCandidates.push(e.regenerated_main_image);
+  }
+  for (const u of e.picked_urls ?? []) {
+    if (u && u !== "__imported__") analysisCandidates.push(u);
+  }
+  const analysisUrls = Array.from(new Set(analysisCandidates)).slice(0, 4);
+  const sourceUrlsHash = analysisUrls.length ? await sha256Hex(analysisUrls.join("|")) : "";
+
+  type VizAnalysisRec = {
+    style: string;
+    requirements: string;
+    at: string;
+    source_urls_hash: string;
+    manual?: boolean;
+    source?: "vision" | "fallback_project" | "fallback_generic";
+  };
+  const existingMeta = (e.image_meta ?? {}) as Record<string, unknown>;
+  const cached = existingMeta.viz_analysis as VizAnalysisRec | undefined;
+
+  let analysisPl: { style: string; requirements: string } | null = null;
+  let analysisSource: VizAnalysisRec["source"] = "vision";
+
+  // 1) Manual overrides are never touched.
+  if (cached?.manual && cached.style && cached.requirements) {
+    analysisPl = { style: cached.style, requirements: cached.requirements };
+    await emit(ctx, { level: "info", message: `   • używam ręcznej analizy sceny (manual override)` });
+  } else if (
+    !forceReanalyze &&
+    cached?.style &&
+    cached?.requirements &&
+    cached.source_urls_hash === sourceUrlsHash &&
+    sourceUrlsHash
+  ) {
+    // 2) Cached analysis for the same source set.
+    analysisPl = { style: cached.style, requirements: cached.requirements };
+    analysisSource = cached.source ?? "vision";
+    await emit(ctx, { level: "info", message: `   • używam zapisanej analizy sceny (cache)` });
+  } else if (analysisUrls.length) {
+    // 3) Fresh vision analysis — up to 1 retry on API error.
+    for (let attempt = 0; attempt < 2 && !analysisPl; attempt++) {
+      try {
+        await emit(ctx, {
+          level: "info",
+          message: `   • analizuję scenę per produkt (gemini-2.5-pro, ${analysisUrls.length} zdj)…`,
+        });
+        const out = await analyzeVisualizationSceneForProduct({
+          productName: nameForPrompt,
+          featuresText,
+          imageUrls: analysisUrls,
+          projectConstraintsPl,
+        });
+        analysisPl = { style: out.style, requirements: out.requirements };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt === 0) {
+          await emit(ctx, { level: "warn", message: `   ⚠ analiza sceny błąd, ponawiam: ${msg}` });
+        } else {
+          await emit(ctx, { level: "warn", message: `   ⚠ analiza sceny nieudana: ${msg}` });
+        }
+      }
+    }
+  }
+
+  // 4) Fallbacks when vision analysis failed or no images available.
+  if (!analysisPl) {
+    if (projectStylePl || projectRequirementsPl) {
+      analysisPl = { style: projectStylePl, requirements: projectRequirementsPl };
+      analysisSource = "fallback_project";
+      await emit(ctx, { level: "info", message: `   • fallback: używam ustawień projektu` });
+    } else {
+      analysisPl = {
+        style: "neutralna, jasna scena studyjno-lifestylowa; miękkie dzienne światło; naturalne rekwizyty pasujące do kategorii produktu",
+        requirements:
+          "kąt kamery lekki 3/4 z wysokości oczu; obiektyw 50mm; niewielka głębia ostrości; światło dzienne 5000K z lewej; zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle",
+      };
+      analysisSource = "fallback_generic";
+      await emit(ctx, { level: "warn", message: `   ⚠ fallback: bezpieczna scena generyczna` });
+    }
+  }
+
+  // Persist the analysis (unless it's a preserved manual override) so
+  // re-runs skip the Gemini call while the source set is unchanged.
+  if (!cached?.manual && analysisSource !== "fallback_generic") {
+    const nextMeta: Record<string, unknown> = {
+      ...existingMeta,
+      viz_analysis: {
+        style: analysisPl.style,
+        requirements: analysisPl.requirements,
+        at: new Date().toISOString(),
+        source_urls_hash: sourceUrlsHash,
+        source: analysisSource,
+        manual: false,
+      } satisfies VizAnalysisRec,
+    };
+    await supabaseAdmin
+      .from("enrichments")
+      .update({ image_meta: nextMeta as never } as never)
+      .eq("id", e.id)
+      .then(() => undefined, () => undefined);
+  }
+
+  // Compose the Polish requirements block for buildFalPromptsFromPolish:
+  // vision analysis first (style + requirements), then project constraints
+  // as an authoritative override block (unless the analysis IS the project fallback).
+  const perProductPl = [
+    analysisPl.style ? `Scena: ${analysisPl.style}` : "",
+    analysisPl.requirements,
+  ].filter(Boolean).join("\n");
+  const constraintsSuffix = analysisSource === "fallback_project" || !projectConstraintsPl
+    ? ""
+    : `\n\nOGRANICZENIA PROJEKTU (nadrzędne wobec sceny powyżej):\n${projectConstraintsPl}`;
+  const combinedRequirementsPl = `${perProductPl}${constraintsSuffix}`.trim();
+
   if (!lifePrompt) {
     try {
       await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
       const built = await buildFalPromptsFromPolish({
         productName: nameForPrompt,
         productDesc: descForPrompt,
-        requirementsPl,
-        projectStyle,
+        requirementsPl: combinedRequirementsPl,
+        projectStyle: "", // integrated into requirementsPl above
         clientGuidelines,
         productNotes,
       });
@@ -2957,8 +3154,8 @@ export async function runPimVisualization(
       const fb = fallbackPrompts({
         productName: nameForPrompt,
         productDesc: descForPrompt,
-        requirementsPl,
-        projectStyle,
+        requirementsPl: combinedRequirementsPl,
+        projectStyle: projectStylePl,
       });
       lifePrompt = fb.lifestyle_prompt;
     }
@@ -3010,7 +3207,7 @@ export async function runPimVisualization(
         `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
         `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field.`,
         `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
-        projectStyle ? `Scene style: ${projectStyle}.` : "",
+        projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp, no motion blur, no text overlays, no watermarks.`,
       ].filter(Boolean).join(" ");
       return {
@@ -3031,7 +3228,7 @@ export async function runPimVisualization(
         `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
         descBrief ? `Product context: ${descBrief}.` : "",
         `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
-        projectStyle ? `Scene style: ${projectStyle}.` : "",
+        projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
       ].filter(Boolean).join(" ");
       return {

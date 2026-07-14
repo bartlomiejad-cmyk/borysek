@@ -337,3 +337,47 @@ export const rejectThumbnailCandidate = createServerFn({ method: "POST" })
       .catch(() => undefined);
     return { ok: true };
   });
+
+/**
+ * Save a manual scene-analysis override for the product. When `manual` is
+ * true, `runPimVisualization` will use these values verbatim and skip
+ * automatic vision analysis (even on force_reanalyze).
+ */
+export const saveVizAnalysisOverride = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        productId: z.string().uuid(),
+        style: z.string().max(600),
+        requirements: z.string().max(800),
+        manual: z.boolean().default(true),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: enr } = await context.supabase
+      .from("enrichments")
+      .select("id, image_meta")
+      .eq("source_product_id", data.productId)
+      .maybeSingle();
+    if (!enr) throw new Error("Brak enrichment dla produktu");
+    const meta = ((enr as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
+    const prev = (meta.viz_analysis as Record<string, unknown> | undefined) ?? {};
+    const nextMeta = {
+      ...meta,
+      viz_analysis: {
+        ...prev,
+        style: data.style.trim(),
+        requirements: data.requirements.trim(),
+        manual: data.manual,
+        at: new Date().toISOString(),
+      },
+    };
+    const { error } = await context.supabase
+      .from("enrichments")
+      .update({ image_meta: nextMeta as never } as never)
+      .eq("id", (enr as { id: string }).id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
