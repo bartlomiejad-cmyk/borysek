@@ -588,10 +588,17 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw, product_notes")
+    .select("id, project_id, nazwa, kod, ean, raw, product_notes, manual_lock")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  if ((product as { manual_lock?: boolean }).manual_lock) {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (zablokowane): ${product.nazwa ?? productId} — złoty rekord`,
+    });
+    return;
+  }
   await emit(ctx, { level: "info", message: `✍️  ${product.nazwa ?? productId} — generuję opis` });
 
   const { data: project } = await supabaseAdmin
