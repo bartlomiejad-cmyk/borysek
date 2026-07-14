@@ -508,6 +508,35 @@ function ProjectPage() {
     }
   };
 
+  // Bulk AI image identity verification. Operates on the current selection
+  // (or the filtered view). Products without picked_urls are skipped by the
+  // worker itself; we still send them so the log shows the skip.
+  const verifyImagesAll = async (opts: { force: boolean; productIds?: string[] }) => {
+    const idSet = opts.productIds ? new Set(opts.productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
+    const targets = source.filter(
+      (p) => !!(p as { enrichment_id?: string | null }).enrichment_id,
+    );
+    if (!targets.length) {
+      toast.info("Brak produktów z dopasowaniem — najpierw uruchom Dopasowanie.");
+      return;
+    }
+    try {
+      await createJobFn({
+        data: {
+          projectId: id,
+          kind: "PIM_IMAGE_VERIFY",
+          items: targets.map((t) => t.id),
+          payload: { force: opts.force },
+        },
+      });
+      toast.success(`Uruchomiono weryfikację zdjęć AI: ${targets.length} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_IMAGE_VERIFY"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
+    }
+  };
+
   const exportFile = async (fmt: "csv" | "xlsx") => {
     const allRows = await exportFn({ data: { projectId: id } });
     const rows =
