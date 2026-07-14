@@ -12,6 +12,7 @@ import { runAuditForProduct } from "@/lib/pim/audit.functions";
 import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
+import { getProductEvents, type ProductEventRow } from "@/lib/pim/product-events.functions";
 import {
   regenerateMainImage,
   clearRegeneratedImage,
@@ -40,7 +41,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
 import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye, CheckCircle2 } from "lucide-react";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown, FileText, History } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
