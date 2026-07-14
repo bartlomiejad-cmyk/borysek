@@ -2515,6 +2515,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   };
   const filtered: string[] = [];
   for (const u of allUrls) {
+    if (removedUrlSet.has(normalizeUrlForDedup(u))) { markFiltered(u, "marketplace"); continue; }
     if (isMarketplaceUrl(u, extraBlacklist)) { markFiltered(u, "marketplace"); continue; }
     const h = (() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } })();
     if (!h) { markFiltered(u, "marketplace"); continue; }
