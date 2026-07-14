@@ -130,7 +130,7 @@ function fallbackPrompts(args: {
     productDesc ? `PRODUCT DETAILS: ${productDesc}` : ``,
     `BACKGROUND: Pure white #FFFFFF seamless studio.`,
     `CONTEXTUAL PROPS: Add 1–3 small, tasteful props that are clearly related to what this product is used for (e.g. a few fresh green leaves for a garden shear, coffee beans for a grinder, wood shavings for a chisel). Arrange them asymmetrically around the product without covering it. Do not add unrelated objects.`,
-    `FRAMING: Square 1:1, product centered, ~75-85% of frame.`,
+    `FRAMING: Square 1:1, product centered, fills 70-80% of the frame in BOTH width and height; longest edge ~75% of the canvas.`,
     `SHADOW: Soft realistic contact shadows.`,
     `PRESERVE: Every label, logo, colour, material and proportion — pixel-faithful to the source.`,
     `CRITICAL COLOUR: Preserve the product's own colour(s) exactly — do NOT whiten, desaturate, bleach, lighten or shift hue. Only the background is white; the product keeps its original colour.`,
@@ -172,7 +172,7 @@ export async function buildFalPromptsFromPolish(args: {
     `THUMBNAIL PROMPT rules:`,
     `- Square 1:1 e-commerce catalog thumbnail on a pure white seamless studio background (#FFFFFF).`,
     `- Enrich the frame with 1–3 small CONTEXTUAL PROPS that are clearly and logically related to the product (e.g. fresh leaves for garden shears, coffee beans for a grinder, wood shavings for chisels). Props sit asymmetrically around the product, do not cover it, and do not compete visually.`,
-    `- Soft realistic contact shadow. Product fills ~75–85% of the frame.`,
+    `- Soft realistic contact shadow. Product fills 70–80% of the frame in BOTH width and height; longest edge ~75% of the canvas.`,
     `- Preserve every label, logo, brand mark, colour, material and proportion pixel-faithfully. Remove watermarks and store overlays that are not physically printed on the product.`,
     `- Preserve the product's own colour(s) letter-for-letter — hue, saturation and tone identical to the reference. NEVER whiten, desaturate, bleach, lighten or shift the hue of the product body, cover, packaging or printed graphics. Only the background changes to pure white; product colours stay identical.`,
     `- Quote any visible printed text on the product LITERALLY, in double quotes, letter-for-letter, e.g. preserve label "PRODUCT NAME" letter-for-letter — do not paraphrase, translate or invent characters.`,
@@ -1736,8 +1736,12 @@ async function filterScrapedForProduct(
     // fotografią tego konkretnego produktu (inne kafle z listingu).
     if (dedup.length) {
       try {
-        const keepVisual = await visualFilterImages(apiKey, product.nazwa ?? "", dedup);
-        if (keepVisual) dedup = dedup.filter((u) => keepVisual.has(u));
+        const ordered = await visualFilterImages(apiKey, product.nazwa ?? "", dedup);
+        // Canonical uncertainty policy: keep-images first, unsure appended
+        // after, dropped (confidently-different / banner / logo / icon)
+        // excluded. Manual overrides (image_scores[url].manual_keep,
+        // pinned_main_url) are enforced downstream and always win.
+        if (ordered) dedup = ordered;
       } catch (e) {
         console.warn("visualFilterImages non-fatal:", e);
       }
@@ -1763,16 +1767,17 @@ async function visualFilterImages(
   apiKey: string,
   productName: string,
   imageUrls: string[],
-): Promise<Set<string> | null> {
+): Promise<string[] | null> {
   if (!imageUrls.length || !productName) return null;
   const top = imageUrls.slice(0, 8);
   const content = [
     { type: "text", text: [
       `Produkt: „${productName}".`,
       "Otrzymujesz zdjęcia jako kandydatów do galerii tego produktu.",
-      "Zwróć JSON {\"keep\":[indeksy 1-based]} — WYŁĄCZNIE zdjęć, które przedstawiają dokładnie ten sam produkt (ten sam wariant/rozmiar/kolor).",
-      "ODRZUĆ: zdjęcia innych produktów widocznych na kaflach Nowości/Polecane/Bestseller, ikony, banery, logo, zdjęcia kategorii, akcesoriów niezwiązanych z produktem.",
-      "Jeśli nie widzisz produktu albo nie masz pewności — nie dodawaj indeksu.",
+      "Zwróć JSON {\"keep\":[indeksy 1-based], \"unsure\":[indeksy 1-based]}.",
+      "keep = zdjęcia na pewno tego produktu (ten sam wariant/rozmiar/kolor).",
+      "unsure = nie można stwierdzić na pewno (niewyraźne, częściowo widoczne, słaby kadr).",
+      "Pomiń indeks (nie dodawaj ani do keep, ani do unsure) TYLKO gdy na PEWNO to inny produkt, baner, logo lub ikona.",
     ].join("\n") },
     ...top.map((url) => ({ type: "image_url", image_url: { url } })),
   ] as unknown[];
@@ -1783,18 +1788,34 @@ async function visualFilterImages(
     const timeout = new Promise<never>((_, rej) =>
       setTimeout(() => rej(new Error("vision timeout")), 15_000),
     );
-    const parsed = (await Promise.race([call, timeout])) as { keep?: unknown };
-    const idxs = Array.isArray(parsed.keep)
+    const parsed = (await Promise.race([call, timeout])) as { keep?: unknown; unsure?: unknown };
+    const keepIdx = Array.isArray(parsed.keep)
       ? parsed.keep.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
       : [];
-    const kept = new Set<string>();
-    for (const i of idxs) {
+    const unsureIdx = Array.isArray(parsed.unsure)
+      ? parsed.unsure.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+      : [];
+    const keepUrls: string[] = [];
+    const unsureUrls: string[] = [];
+    const seen = new Set<string>();
+    for (const i of keepIdx) {
       const u = top[i - 1];
-      if (u) kept.add(u);
+      if (u && !seen.has(u)) { keepUrls.push(u); seen.add(u); }
     }
-    // Zdjęcia poza top-8 nie były oceniane — zachowujemy je (bezpieczniej).
-    for (let i = 8; i < imageUrls.length; i++) kept.add(imageUrls[i]);
-    return kept;
+    for (const i of unsureIdx) {
+      const u = top[i - 1];
+      if (u && !seen.has(u)) { unsureUrls.push(u); seen.add(u); }
+    }
+    // Zdjęcia poza top-8 nie były oceniane — zachowujemy je na końcu.
+    const tail: string[] = [];
+    for (let i = 8; i < imageUrls.length; i++) {
+      const u = imageUrls[i];
+      if (!seen.has(u)) { tail.push(u); seen.add(u); }
+    }
+    // Ordering: confident-keep → unsure → untested. Ensures an unsure
+    // image is never at index 0 unless there is no confident-keep at all,
+    // so downstream main-image auto-selection prefers a confident image.
+    return [...keepUrls, ...unsureUrls, ...tail];
   } catch (e) {
     console.warn("visualFilterImages failed:", e);
     return null;
