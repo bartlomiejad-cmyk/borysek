@@ -1092,16 +1092,18 @@ export const analyzeProductImagesForPrompt = createServerFn({ method: "POST" })
 
     const { data: enrichment } = await supabase
       .from("enrichments")
-      .select("picked_urls, golden_name, golden_features, pinned_main_url, regenerated_main_image")
+      .select("id, picked_urls, golden_name, golden_features, pinned_main_url, regenerated_main_image, image_scores")
       .eq("source_product_id", product.id)
       .maybeSingle();
 
     const en = (enrichment ?? {}) as {
+      id?: string;
       picked_urls?: string[] | null;
       golden_name?: string | null;
       golden_features?: unknown;
       pinned_main_url?: string | null;
       regenerated_main_image?: string | null;
+      image_scores?: Record<string, ImageScore> | null;
     };
 
     const candidates: string[] = [];
@@ -1112,8 +1114,20 @@ export const analyzeProductImagesForPrompt = createServerFn({ method: "POST" })
     for (const u of en.picked_urls ?? []) {
       if (u && u !== "__imported__") candidates.push(u);
     }
-    const urls = Array.from(new Set(candidates)).slice(0, 4);
+    let urls = Array.from(new Set(candidates)).slice(0, 4);
     if (!urls.length) throw new Error("Brak zdjęć produktu do analizy");
+
+    // Pre-flight: drop dead URLs so gateway doesn't 400 on a 404 image.
+    if (en.id) {
+      const { alive } = await filterAliveImages(
+        supabase,
+        en.id,
+        urls,
+        (en.image_scores ?? {}) as Record<string, ImageScore>,
+      );
+      if (alive.length) urls = alive;
+    }
+    if (!urls.length) throw new Error("Brak dostępnych zdjęć — wszystkie źródła zwracają 404.");
 
     const productName = (en.golden_name ?? product.nazwa ?? "").trim() || "(bez nazwy)";
     const features = Array.isArray(en.golden_features)
