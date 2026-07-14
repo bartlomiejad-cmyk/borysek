@@ -6,6 +6,72 @@ import { type ImageMeta, pickThumbsForList } from "./images";
 import { getVisibleGallery, type GalleryImageScore } from "./gallery";
 import { setManualLockOnProduct } from "./pipeline-status";
 
+export type PipelineSummary = {
+  total: number;
+  imported: number;        // pipeline_status = IMPORTED (missing sources)
+  sources_found: number;   // SOURCES_FOUND (pending matching)
+  matched: number;         // MATCHED (pending golden)
+  golden_ready: number;    // GOLDEN_READY (pending visuals/media)
+  visuals_ready: number;   // VISUALS_READY
+  weak_sources: number;    // enrichments with rescrape_rounds>=2 && strong<3
+  review_queue: number;    // review_status IN (AI_FLAGGED, NEEDS_REVIEW)
+  review_ai_flagged: number;
+  review_needs_review: number;
+  review_approved: number; // APPROVED
+};
+
+export const getPipelineSummary = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ projectId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }): Promise<PipelineSummary> => {
+    const { supabase } = context;
+    const [{ data: sp }, { data: en }] = await Promise.all([
+      supabase
+        .from("source_products")
+        .select("pipeline_status, review_status")
+        .eq("project_id", data.projectId)
+        .limit(20000),
+      supabase
+        .from("enrichments")
+        .select("source_product_id, rescrape_rounds, score_breakdown")
+        .eq("project_id", data.projectId)
+        .limit(20000),
+    ]);
+    const rows = (sp ?? []) as Array<{ pipeline_status?: string | null; review_status?: string | null }>;
+    const s: PipelineSummary = {
+      total: rows.length,
+      imported: 0,
+      sources_found: 0,
+      matched: 0,
+      golden_ready: 0,
+      visuals_ready: 0,
+      weak_sources: 0,
+      review_queue: 0,
+      review_ai_flagged: 0,
+      review_needs_review: 0,
+      review_approved: 0,
+    };
+    for (const r of rows) {
+      const ps = r.pipeline_status ?? "IMPORTED";
+      if (ps === "IMPORTED") s.imported++;
+      else if (ps === "SOURCES_FOUND") s.sources_found++;
+      else if (ps === "MATCHED") s.matched++;
+      else if (ps === "GOLDEN_READY") s.golden_ready++;
+      else if (ps === "VISUALS_READY") s.visuals_ready++;
+      const rs = r.review_status ?? "NONE";
+      if (rs === "AI_FLAGGED") { s.review_ai_flagged++; s.review_queue++; }
+      else if (rs === "NEEDS_REVIEW") { s.review_needs_review++; s.review_queue++; }
+      else if (rs === "APPROVED") s.review_approved++;
+    }
+    for (const e of (en ?? []) as Array<{ rescrape_rounds?: number; score_breakdown?: Array<{ total?: number }> }>) {
+      const rounds = e.rescrape_rounds ?? 0;
+      const bd = Array.isArray(e.score_breakdown) ? e.score_breakdown : [];
+      const strong = bd.filter((b) => (b?.total ?? 0) >= 4).length;
+      if (rounds >= 2 && strong < 3) s.weak_sources++;
+    }
+    return s;
+  });
+
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({ projectId: z.string().uuid() }).parse(i))
