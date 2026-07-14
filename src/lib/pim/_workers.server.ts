@@ -35,6 +35,13 @@ import {
   qcAllPass,
   type ThumbnailQcResult,
   type ThumbnailQcPersisted,
+  runVisualizationQc,
+  buildVisualizationCorrectionSentence,
+  visualizationQcScore,
+  visualizationQcPassed,
+  runReferenceConsistencyCheck,
+  type VisualizationQcResult,
+  type VisualizationQcPersisted,
 } from "./thumbnail-qc";
 import {
   auditChecks,
