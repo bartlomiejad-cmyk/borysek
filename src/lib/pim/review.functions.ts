@@ -24,6 +24,25 @@ export const approveProduct = createServerFn({ method: "POST" })
       } as never)
       .eq("id", data.productId);
     if (error) throw new Error(error.message);
+    try {
+      const { data: p } = await supabase
+        .from("source_products")
+        .select("project_id")
+        .eq("id", data.productId)
+        .maybeSingle();
+      const projectId = (p as { project_id?: string } | null)?.project_id;
+      if (projectId) {
+        const { logProductEvent } = await import("./product-events.server");
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        await logProductEvent(supabaseAdmin, {
+          projectId,
+          productId: data.productId,
+          kind: "review_change",
+          message: "Zatwierdzono produkt",
+          meta: { action: "approve", actor_id: userId },
+        });
+      }
+    } catch { /* best-effort */ }
     return { ok: true };
   });
 
@@ -31,7 +50,7 @@ export const unapproveProduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({ productId: z.string().uuid() }).parse(i))
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
+    const { supabase, userId } = context;
     const { error } = await supabase
       .from("source_products")
       .update({
@@ -41,6 +60,25 @@ export const unapproveProduct = createServerFn({ method: "POST" })
       } as never)
       .eq("id", data.productId);
     if (error) throw new Error(error.message);
+    try {
+      const { data: p } = await supabase
+        .from("source_products")
+        .select("project_id")
+        .eq("id", data.productId)
+        .maybeSingle();
+      const projectId = (p as { project_id?: string } | null)?.project_id;
+      if (projectId) {
+        const { logProductEvent } = await import("./product-events.server");
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        await logProductEvent(supabaseAdmin, {
+          projectId,
+          productId: data.productId,
+          kind: "review_change",
+          message: "Cofnięto zatwierdzenie produktu",
+          meta: { action: "unapprove", actor_id: userId },
+        });
+      }
+    } catch { /* best-effort */ }
     return { ok: true };
   });
 

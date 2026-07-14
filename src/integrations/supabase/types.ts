@@ -426,6 +426,44 @@ export type Database = {
         }
         Relationships: []
       }
+      product_events: {
+        Row: {
+          at: string
+          id: string
+          kind: string
+          message: string
+          meta: Json | null
+          product_id: string
+          project_id: string
+        }
+        Insert: {
+          at?: string
+          id?: string
+          kind: string
+          message: string
+          meta?: Json | null
+          product_id: string
+          project_id: string
+        }
+        Update: {
+          at?: string
+          id?: string
+          kind?: string
+          message?: string
+          meta?: Json | null
+          product_id?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_events_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "source_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_sources: {
         Row: {
           cleaning_meta: Json | null

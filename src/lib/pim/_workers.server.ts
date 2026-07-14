@@ -28,6 +28,7 @@ import {
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
 import { advancePipelineStatus } from "./pipeline-status";
+import { logProductEvent } from "./product-events.server";
 import {
   runThumbnailQc,
   buildCorrectionSentence,
@@ -870,6 +871,13 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     } catch { /* review-reset is best-effort */ }
     await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
     await advancePipelineStatus(supabaseAdmin as never, product.id, "GOLDEN_READY");
+    await logProductEvent(supabaseAdmin, {
+      projectId: product.project_id,
+      productId: product.id,
+      kind: "golden_generated",
+      message: `Wygenerowano złoty rekord (${dataSufficiency ?? "n/d"})`,
+      meta: { model: GOLDEN_MODEL, data_sufficiency: dataSufficiency ?? null },
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
@@ -1332,6 +1340,13 @@ export async function runRegenerateMedia(
     // Only advance the pipeline when we actually produced a usable thumbnail.
     if (mainPublic) {
       await advancePipelineStatus(supabaseAdmin as never, product.id, "VISUALS_READY");
+      await logProductEvent(supabaseAdmin, {
+        projectId: product.project_id,
+        productId: product.id,
+        kind: "media_generated",
+        message: `Miniatura wygenerowana (galeria: ${galleryUrls.length})`,
+        meta: { slot: 0, gallery_count: galleryUrls.length },
+      });
     }
   } finally {
     for (const p of preparedMain) {
@@ -2155,8 +2170,23 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const allUrls = Array.from(mergedByNorm.values());
   if (!allUrls.length) {
     await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak wyników w żadnym wariancie` });
+    await logProductEvent(supabaseAdmin, {
+      projectId: product.project_id,
+      productId: product.id,
+      kind: "discovery_search",
+      message: `Wyszukano źródła: ${variants.length} zapytań, 0 wyników`,
+      meta: { variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })) },
+    });
     return;
   }
+
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "discovery_search",
+    message: `Wyszukano źródła: ${variants.length} zapytań, ${allUrls.length} unikalnych adresów`,
+    meta: { variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })) },
+  });
 
   // 2) Persist raw search result. Wstawiamy wiersz per term używany przez
   //    matching (nazwa / ean / "nazwa ean"), wszystkie z tym samym mergem —
@@ -2257,6 +2287,18 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     level: scraped ? "success" : "warn",
     message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
     details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
+  });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "discovery_scrape",
+    message: `Zescrapowano ${scraped} stron (${filtered.length - scraped - cacheHits} pominiętych, ${cacheHits} z cache)`,
+    meta: {
+      scraped_urls: filtered.slice(0, scraped),
+      total_candidates: filtered.length,
+      cache_hits: cacheHits,
+      images_found: totalImages,
+    },
   });
   if (scraped > 0) {
     await advancePipelineStatus(supabaseAdmin as never, product.id, "SOURCES_FOUND");
@@ -2494,6 +2536,13 @@ export async function runPimRescrape(productId: string, ctx?: WorkerCtx): Promis
   await emit(ctx, {
     level: "success",
     message: `✅ ${nazwa} — doscrapowanie: +${newlyScraped.length} źródeł, przeliczono scoring (runda ${rounds + 1}/2)`,
+  });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "rescrape",
+    message: `Doscrapowanie runda ${rounds + 1}/2: dodano ${newlyScraped.length} źródeł`,
+    meta: { round: rounds + 1, added_urls: newlyScraped, count: newlyScraped.length },
   });
 }
 
@@ -3794,6 +3843,13 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
   } catch { /* best-effort */ }
 
   await emit(ctx, { level: "success", message: `✅ Allegro: opis zapisany (${html.length} znaków)` });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "allegro_generated",
+    message: `Wygenerowano opis Allegro (${html.length} znaków)`,
+    meta: { model: "openai/gpt-5.5", length: html.length },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -4030,6 +4086,23 @@ export async function runPimImageVerify(
     level: failed > 0 && succeeded === 0 ? "error" : "success",
     message: `✅ Weryfikacja: OK ${succeeded}, błędy ${failed}`,
   });
+  try {
+    const { data: p } = await supabaseAdmin
+      .from("source_products")
+      .select("project_id")
+      .eq("id", productId)
+      .maybeSingle();
+    const projectId = (p as { project_id?: string } | null)?.project_id;
+    if (projectId) {
+      await logProductEvent(supabaseAdmin, {
+        projectId,
+        productId,
+        kind: "image_verify",
+        message: `Weryfikacja zdjęć: ${succeeded} przeanalizowanych, ${failed} błędów`,
+        meta: { accepted_count: succeeded, rejected_images_count: failed },
+      });
+    }
+  } catch { /* best-effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -4253,5 +4326,12 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
   await emit(ctx, {
     level: verdict === "fail" ? "error" : verdict === "warn" ? "warn" : "success",
     message: `${summary}${failedNames ? ` · ${failedNames}` : ""}`,
+  });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "audit_done",
+    message: `Audyt AI: ${verdict}${failedNames ? ` · ${failedNames}` : ""}`,
+    meta: { verdict, issues: checks.filter((c) => !c.ok).map((c) => c.check) },
   });
 }

@@ -747,6 +747,28 @@ export const runMatching = createServerFn({ method: "POST" })
           await advancePipelineStatus(supabase as never, u.source_product_id, "MATCHED");
         }
       }
+      // Timeline event per product — best-effort, never blocks matching.
+      try {
+        const { logProductEvent } = await import("./product-events.server");
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        for (const u of updates) {
+          const eanConfirmed = (u.score_breakdown ?? []).filter(
+            (s) => (s as { ean_confirmed?: boolean }).ean_confirmed,
+          ).length;
+          await logProductEvent(supabaseAdmin, {
+            projectId: data.projectId,
+            productId: u.source_product_id,
+            kind: "matching_done",
+            message: `Dopasowanie: przyjęto ${u.picked_urls.length} źródeł`,
+            meta: {
+              accepted: u.picked_urls,
+              rejected_count: Math.max(0, (u.score_breakdown?.length ?? 0) - u.picked_urls.length),
+              ean_confirmed_count: eanConfirmed,
+              ai_validation_used: !!apiKey,
+            },
+          });
+        }
+      } catch { /* best-effort */ }
     }
 
     // ---------------------------------------------------------------------

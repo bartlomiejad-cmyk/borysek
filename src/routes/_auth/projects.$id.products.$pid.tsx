@@ -12,6 +12,7 @@ import { runAuditForProduct } from "@/lib/pim/audit.functions";
 import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
+import { getProductEvents, type ProductEventRow } from "@/lib/pim/product-events.functions";
 import {
   regenerateMainImage,
   clearRegeneratedImage,
@@ -40,7 +41,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
 import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye, CheckCircle2 } from "lucide-react";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown, FileText, History } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
@@ -668,6 +669,8 @@ function ProductDetail() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      <ProductTimeline productId={pid} />
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Golden record */}
@@ -1931,6 +1934,140 @@ function VizAnalysisPanel({
           </div>
         </CollapsibleContent>
       </div>
+    </Collapsible>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Product activity timeline. Collapsible, newest-first. Each row renders the
+// message + relative time; rows with structured meta expand to show details.
+// ---------------------------------------------------------------------------
+function eventIcon(kind: string): string {
+  switch (kind) {
+    case "discovery_search": return "🔎";
+    case "discovery_scrape": return "🧾";
+    case "matching_done": return "🧩";
+    case "rescrape": return "🔁";
+    case "golden_generated": return "✍️";
+    case "allegro_generated": return "🛒";
+    case "media_generated": return "🖼";
+    case "image_verify": return "👁";
+    case "audit_done": return "🔍";
+    case "review_change": return "✅";
+    case "manual_edit": return "✏️";
+    default: return "•";
+  }
+}
+
+function formatEventTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return iso;
+  }
+}
+
+function ProductTimeline({ productId }: { productId: string }) {
+  const [open, setOpen] = useState(false);
+  const [events, setEvents] = useState<ProductEventRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [exhausted, setExhausted] = useState(false);
+  const fetchEvents = useServerFn(getProductEvents);
+
+  const load = async (before?: string) => {
+    setLoading(true);
+    try {
+      const rows = await fetchEvents({ data: { productId, limit: 50, ...(before ? { beforeAt: before } : {}) } });
+      if (before) {
+        setEvents((prev) => [...prev, ...rows]);
+      } else {
+        setEvents(rows);
+      }
+      if (rows.length < 50) setExhausted(true);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się wczytać historii"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && events.length === 0 && !loading) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mb-6">
+      <CollapsibleTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-between">
+          <span className="flex items-center gap-2">
+            <History className="h-4 w-4" />
+            Historia produktu (audyt zdarzeń)
+          </span>
+          <span className="text-xs text-muted-foreground">{open ? "Zwiń" : "Rozwiń"}</span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2">
+        <Card>
+          <CardContent className="pt-4 space-y-2">
+            {loading && events.length === 0 ? (
+              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Wczytuję historię…
+              </div>
+            ) : events.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Brak zdarzeń — historia zbierana od teraz.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {events.map((ev) => {
+                  const hasMeta = ev.meta && typeof ev.meta === "object" && Object.keys(ev.meta).length > 0;
+                  const isOpen = !!expanded[ev.id];
+                  return (
+                    <li key={ev.id} className="rounded border bg-muted/20 px-2.5 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => hasMeta && setExpanded((p) => ({ ...p, [ev.id]: !p[ev.id] }))}
+                        className={cn(
+                          "w-full flex items-start justify-between gap-3 text-left",
+                          hasMeta ? "cursor-pointer" : "cursor-default",
+                        )}
+                      >
+                        <span className="flex items-start gap-2 text-sm">
+                          <span aria-hidden>{eventIcon(ev.kind)}</span>
+                          <span>{ev.message}</span>
+                        </span>
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          {formatEventTime(ev.at)}
+                        </span>
+                      </button>
+                      {hasMeta && isOpen ? (
+                        <pre className="mt-1.5 text-[11px] bg-background rounded border p-2 overflow-x-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(ev.meta, null, 2)}
+                        </pre>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {events.length > 0 && !exhausted ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loading}
+                onClick={() => {
+                  const last = events[events.length - 1];
+                  if (last) void load(last.at);
+                }}
+              >
+                {loading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+                Pokaż starsze
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      </CollapsibleContent>
     </Collapsible>
   );
 }

@@ -3,6 +3,32 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { setManualLockOnProduct } from "./pipeline-status";
 
+async function logManualEdit(
+  supabase: { from: (t: string) => any },
+  productId: string,
+  message: string,
+  meta?: Record<string, unknown>,
+) {
+  try {
+    const { data: p } = await supabase
+      .from("source_products")
+      .select("project_id")
+      .eq("id", productId)
+      .maybeSingle();
+    const projectId = (p as { project_id?: string } | null)?.project_id;
+    if (!projectId) return;
+    const { logProductEvent } = await import("./product-events.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await logProductEvent(supabaseAdmin, {
+      projectId,
+      productId,
+      kind: "manual_edit",
+      message,
+      meta: meta ?? null,
+    });
+  } catch { /* best-effort */ }
+}
+
 const loadEnrichment = async (
   supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
   enrichmentId: string,
@@ -49,6 +75,7 @@ export const hideImage = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (cur.source_product_id) {
       await setManualLockOnProduct(supabase as never, cur.source_product_id, true);
+      await logManualEdit(supabase as never, cur.source_product_id, "Ukryto zdjęcie", { action: "hide_image", url: data.url });
     }
     return { ok: true, hidden: Array.from(set) };
   });
@@ -72,6 +99,7 @@ export const unhideImage = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (cur.source_product_id) {
       await setManualLockOnProduct(supabase as never, cur.source_product_id, true);
+      await logManualEdit(supabase as never, cur.source_product_id, "Odkryto zdjęcie", { action: "unhide_image", url: data.url });
     }
     return { ok: true, hidden: next };
   });
@@ -94,6 +122,15 @@ export const updateFeatures = createServerFn({ method: "POST" })
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
     await lockByEnrichmentId(supabase as never, data.enrichmentId);
+    try {
+      const { data: en } = await (supabase as any)
+        .from("enrichments")
+        .select("source_product_id")
+        .eq("id", data.enrichmentId)
+        .maybeSingle();
+      const pid = (en as { source_product_id?: string } | null)?.source_product_id;
+      if (pid) await logManualEdit(supabase as never, pid, "Edytowano cechy produktu", { action: "edit_features", count: data.features.length });
+    } catch { /* best-effort */ }
     return { ok: true };
   });
 
@@ -121,6 +158,7 @@ export const hideImageByProduct = createServerFn({ method: "POST" })
       .eq("id", (en as { id: string }).id);
     if (error) throw new Error(error.message);
     await setManualLockOnProduct(supabase as never, data.productId, true);
+    await logManualEdit(supabase as never, data.productId, "Ukryto zdjęcie", { action: "hide_image", url: data.url });
     return { ok: true };
   });
 
@@ -140,6 +178,15 @@ export const setPinnedMainImage = createServerFn({ method: "POST" })
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
     await lockByEnrichmentId(supabase as never, data.enrichmentId);
+    try {
+      const { data: en } = await (supabase as any)
+        .from("enrichments")
+        .select("source_product_id")
+        .eq("id", data.enrichmentId)
+        .maybeSingle();
+      const pid = (en as { source_product_id?: string } | null)?.source_product_id;
+      if (pid) await logManualEdit(supabase as never, pid, data.url ? "Przypięto zdjęcie główne" : "Odpięto zdjęcie główne", { action: "pin_main", url: data.url });
+    } catch { /* best-effort */ }
     return { ok: true };
   });
 
