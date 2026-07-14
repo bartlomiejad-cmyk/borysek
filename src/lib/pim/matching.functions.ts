@@ -112,7 +112,7 @@ function scoreSource(
 
   // Śmieciowe źródło: brak tytułu, brak sensownego opisu, brak zdjęć.
   if (!title && descLen < 40 && imgs === 0) {
-    return { total: -5, producer_boost: false, trusted_boost: false };
+    return { total: -5, producer_boost: false, trusted_boost: false, ean_confirmed: false };
   }
 
   let s = 0;
@@ -127,8 +127,8 @@ function scoreSource(
 
   s += Math.min(imgs, 3);
 
-  const ean = (product.ean ?? "").trim();
-  if (ean && (title.includes(ean) || desc.includes(ean))) s += 2;
+  const ean_confirmed = eanConfirmedFor(product.ean, meta, url);
+  if (ean_confirmed) s += 8;
 
   const host = extractHostname(url);
   const normHost = normalizeDomainToken(host);
@@ -152,7 +152,7 @@ function scoreSource(
     }
   }
 
-  return { total: s, producer_boost, trusted_boost };
+  return { total: s, producer_boost, trusted_boost, ean_confirmed };
 }
 
 /**
