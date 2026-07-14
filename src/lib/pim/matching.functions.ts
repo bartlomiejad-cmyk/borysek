@@ -161,20 +161,35 @@ async function validateSourcesWithAI(
   apiKey: string,
   productName: string,
   productEan: string | null,
-  sources: Array<{ url: string; title: string | null; description: string | null }>,
+  sources: Array<{
+    url: string;
+    title: string | null;
+    description: string | null;
+    ean?: string | null;
+    mpn?: string | null;
+  }>,
 ): Promise<ValidationResult> {
   if (!sources.length) return { keep: new Set(), clustersByUrl: new Map(), ok: true };
   const blocks = sources
     .map((s, idx) => {
-      const desc = (s.description ?? "").slice(0, 800);
-      return `### ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS: ${desc}`;
+      const desc = (s.description ?? "").slice(0, 1500);
+      const lines = [
+        `### ${idx + 1}`,
+        `URL: ${s.url}`,
+        `TYTUŁ: ${s.title ?? ""}`,
+      ];
+      if (s.ean && s.ean.trim()) lines.push(`EAN ŹRÓDŁA: ${s.ean.trim()}`);
+      if (s.mpn && s.mpn.trim()) lines.push(`MPN ŹRÓDŁA: ${s.mpn.trim()}`);
+      lines.push(`OPIS: ${desc}`);
+      return lines.join("\n");
     })
     .join("\n\n");
   const system = [
     "Jesteś walidatorem dopasowań produktów w PIM.",
     "Dla podanego PRODUKTU oraz listy ŹRÓDEŁ (stron internetowych) zdecyduj, które źródła opisują DOKŁADNIE ten sam produkt (ten sam wariant, marka, model, rozmiar/gramatura).",
+    "REGUŁA NADRZĘDNA: jeżeli w danych źródła występuje EAN identyczny z EAN produktu, źródło PASUJE — zaakceptuj je niezależnie od pozostałych heurystyk (nadal przypisz je do właściwego klastra wariantu).",
     "Bardzo restrykcyjnie: jeśli marka, model lub kluczowy wariant (np. nazwa serii, granulacja, kaliber, pojemność, kolor) różni się lub brakuje w źródle — odrzuć źródło.",
-    "Brak frazy z nazwy produktu (np. nazwa marki) w tytule/URL/opisie źródła = źródło NIE pasuje.",
+    "Brak jakiejkolwiek frazy z nazwy produktu w tytule/URL/opisie jest silnym sygnałem ostrzegawczym — odrzuć, CHYBA ŻE inne sygnały (zgodny EAN, zgodny kod producenta/MPN, zgodna kombinacja marka+model w URL) potwierdzają dopasowanie.",
     "Następnie POGRUPUJ zaakceptowane źródła w klastry, gdzie jeden klaster = DOKŁADNIE ten sam wariant fizyczny produktu (te same rozmiar/kolor/gramatura/kaliber).",
     "Różne rozmiary/kolory tego samego modelu = RÓŻNE klastry. Te same wariant z różnych sklepów = TEN SAM klaster.",
     "variant_key: string w formacie \"marka|model|wariant\" małymi literami, np. \"nike|air max 90|white 42\". Gdy wariant nieznany, użyj \"-\".",
