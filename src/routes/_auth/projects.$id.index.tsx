@@ -290,7 +290,7 @@ function ProjectPage() {
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -306,7 +306,9 @@ function ProjectPage() {
                 ? "Opisy Allegro"
                 : job.kind === "PIM_RESCRAPE"
                   ? "Doscrapowanie źródeł"
-                  : "Wizualizacje produktowe";
+                  : job.kind === "PIM_IMAGE_VERIFY"
+                    ? "Weryfikacja zdjęć AI"
+                    : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -316,7 +318,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, vizJob, allegroJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob, refetchProducts]);
 
   useEffect(() => {
     if (!vizActive) return;
