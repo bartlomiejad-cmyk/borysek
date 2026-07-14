@@ -1937,25 +1937,38 @@ function SettingsCard({
   })();
   const [trustedDomains, setTrustedDomains] = useState(initialTrusted);
 
-  const initialSearchProvider: "firecrawl" | "apify" = (() => {
+  const initialSearchProvider: "firecrawl" | "apify" | "both" = (() => {
     const s = project?.settings;
     if (s && typeof s === "object") {
       const v = (s as Record<string, unknown>).search_provider;
       if (v === "apify") return "apify";
+      if (v === "firecrawl") return "firecrawl";
+      if (v === "both") return "both";
     }
-    return "firecrawl";
+    return "both";
   })();
-  const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify">(initialSearchProvider);
-  const [apifyTest, setApifyTest] = useState<{ state: "idle" | "loading" | "ok" | "err"; msg?: string }>({
+  const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify" | "both">(initialSearchProvider);
+  const [apifyTest, setApifyTest] = useState<{
+    state: "idle" | "loading" | "ok" | "err";
+    msg?: string;
+    results?: Array<{ title: string; url: string; domain: string; snippet: string }>;
+  }>({
     state: "idle",
   });
   const testApify = useServerFn(testApifySerp);
   const runApifyTest = async () => {
     setApifyTest({ state: "loading" });
     try {
-      const r = await testApify();
-      if (r.ok) setApifyTest({ state: "ok", msg: `OK — ${r.count} wyników testowych` });
-      else setApifyTest({ state: "err", msg: r.error ?? "Actor nie zwrócił wyników (sprawdź obsługę PL)" });
+      const r = await testApify({ data: {} });
+      if (r.ok) {
+        setApifyTest({
+          state: "ok",
+          msg: `OK — ${r.count} wyników`,
+          results: r.results.map((x) => ({ title: x.title, url: x.url, domain: x.domain, snippet: x.snippet })),
+        });
+      } else {
+        setApifyTest({ state: "err", msg: r.error ?? "Actor nie zwrócił wyników (sprawdź obsługę PL)" });
+      }
     } catch (e) {
       setApifyTest({ state: "err", msg: e instanceof Error ? e.message : String(e) });
     }
