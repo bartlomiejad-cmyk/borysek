@@ -3211,6 +3211,30 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
     .eq("id", enrichment.id);
   if (upErr) throw new Error(upErr.message);
 
+  // Regeneration invalidates prior manual approval.
+  try {
+    const { data: prow } = await supabaseAdmin
+      .from("source_products")
+      .select("review_status")
+      .eq("id", product.id)
+      .maybeSingle();
+    const cur = (prow as { review_status?: string | null } | null)?.review_status ?? null;
+    if (cur === "APPROVED") {
+      await supabaseAdmin
+        .from("source_products")
+        .update({
+          review_status: "NEEDS_REVIEW",
+          approved_at: null,
+          approved_by: null,
+        } as never)
+        .eq("id", product.id);
+      await emit(ctx, {
+        level: "info",
+        message: `[review-reset] ${product.nazwa ?? productId} — zatwierdzenie cofnięte po regeneracji opisu Allegro`,
+      });
+    }
+  } catch { /* best-effort */ }
+
   await emit(ctx, { level: "success", message: `✅ Allegro: opis zapisany (${html.length} znaków)` });
 }
 
