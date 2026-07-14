@@ -3312,7 +3312,12 @@ export async function runPimImageVerify(
     pickBestSameAnchor();
 
   // Pre-flight probe so 404s don't waste Vision calls.
-  const { alive, dead } = await filterAliveImages(supabaseAdmin, enRow.id, toScore, existing);
+  const { alive, dead } = await filterAliveImages(
+    supabaseAdmin as never,
+    enRow.id,
+    toScore,
+    existing as never,
+  );
   toScore = alive;
   if (dead.length) {
     const { data: refreshed } = await supabaseAdmin
