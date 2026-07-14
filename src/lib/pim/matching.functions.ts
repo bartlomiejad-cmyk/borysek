@@ -377,22 +377,27 @@ export const runMatching = createServerFn({ method: "POST" })
     const { data: existingEnRows } = productIds.length
       ? await supabase
           .from("enrichments")
-          .select("source_product_id, picked_urls, score_breakdown, compat_suggested")
+          .select("source_product_id, picked_urls, score_breakdown, compat_suggested, removed_urls")
           .eq("project_id", data.projectId)
           .in("source_product_id", productIds)
       : { data: [] as unknown[] };
     const manualByProduct = new Map<string, string[]>();
     const manualBreakdownByProduct = new Map<string, BreakdownEntry[]>();
+    const removedByProduct = new Map<string, Set<string>>();
     for (const r of (existingEnRows ?? []) as Array<{
       source_product_id: string;
       picked_urls: string[] | null;
       score_breakdown: unknown;
+      removed_urls?: string[] | null;
     }>) {
       const bd = Array.isArray(r.score_breakdown) ? (r.score_breakdown as BreakdownEntry[]) : [];
       const manualEntries = bd.filter((b) => b && (b as { manual?: boolean }).manual === true);
       if (manualEntries.length) {
         manualByProduct.set(r.source_product_id, manualEntries.map((e) => e.url));
         manualBreakdownByProduct.set(r.source_product_id, manualEntries);
+      }
+      if (Array.isArray(r.removed_urls) && r.removed_urls.length) {
+        removedByProduct.set(r.source_product_id, new Set(r.removed_urls));
       }
     }
 
@@ -466,7 +471,9 @@ export const runMatching = createServerFn({ method: "POST" })
       const raw = (urls ?? []).filter((u) => typeof u === "string" && u.length > 0);
       // Union with manual sources — they must never be dropped by rematch.
       const manualUrls = manualByProduct.get(p.id) ?? [];
-      const picked = Array.from(new Set([...manualUrls, ...raw]));
+      const removed = removedByProduct.get(p.id) ?? new Set<string>();
+      // Manual URLs win over "removed" — user explicitly attached them.
+      const picked = Array.from(new Set([...manualUrls, ...raw.filter((u) => !removed.has(u))]));
       if (picked.length) matched++;
       updates.push({
         source_product_id: p.id,
@@ -488,6 +495,10 @@ export const runMatching = createServerFn({ method: "POST" })
       const metaMap = new Map<string, SourceMeta>();
       const confidenceMap = new Map<string, number | null>();
       const descLenMap = new Map<string, number>();
+      // URLs whose LLM cleaner said the page does NOT describe the product
+      // (or hallucination guard triggered). Treated as auto-reject for AI
+      // validation and as junk (score -5) in the scoring stage.
+      const mismatchedByUrl = new Set<string>();
       const productById = new Map(products.map((p) => [p.id, p]));
       // Load pinned_main_url per product so we can skip clustering on manually-pinned products.
       const { data: pinRows } = await supabase
@@ -543,6 +554,9 @@ export const runMatching = createServerFn({ method: "POST" })
             descClean = llm.description || regexClean;
             cleaningMeta = llm.meta;
           }
+          if (cleaningMeta.page_matches_product === false) {
+            mismatchedByUrl.add(rr.url);
+          }
           const mainIn = Array.isArray(rr.images) ? (rr.images as string[]) : [];
           const extraIn = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
           const mainClean = filterImageUrls(mainIn);
@@ -581,6 +595,7 @@ export const runMatching = createServerFn({ method: "POST" })
         const mode = modeById.get(u.source_product_id) ?? "strict";
         if (apiKey) {
           const sources = u.picked_urls
+            .filter((url) => !mismatchedByUrl.has(url))
             .map((url) => ({
               url,
               title: srcMap.get(url)?.title ?? null,
@@ -612,6 +627,17 @@ export const runMatching = createServerFn({ method: "POST" })
             description: null,
             imagesCount: 0,
           };
+          if (mismatchedByUrl.has(url)) {
+            // LLM cleaner declared this page unrelated → junk penalty,
+            // regardless of what the regex sanitizer produced.
+            return {
+              url,
+              total: -5,
+              producer_boost: false,
+              trusted_boost: false,
+              ean_confirmed: false,
+            };
+          }
           const r = scoreSource(
             meta,
             { nazwa: prod.nazwa, ean: prod.ean ?? null, producer },

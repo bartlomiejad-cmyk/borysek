@@ -2196,6 +2196,20 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const useApify = searchProvider === "apify" || searchProvider === "both";
   const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
 
+  // Load URLs the user has explicitly removed for this product — we still
+  // fetch them via search (for audit / debug in query_variants) but never
+  // rescrape them, and matching filters them out at pick-time.
+  const { data: enRowForRemoved } = await supabaseAdmin
+    .from("enrichments")
+    .select("removed_urls")
+    .eq("source_product_id", product.id)
+    .maybeSingle();
+  const removedUrlSet = new Set(
+    ((enRowForRemoved as { removed_urls?: string[] | null } | null)?.removed_urls ?? []).map(
+      (u) => normalizeUrlForDedup(u),
+    ),
+  );
+
   // ---- Firecrawl branch ----
   if (useFirecrawl) {
     for (let vi = 0; vi < variants.length; vi++) {
@@ -2217,10 +2231,28 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
         continue;
       }
+      // Firecrawl's index is noisy for bare-numeric queries; for the EAN
+      // variant (kind "A") keep ONLY hits whose title or snippet contains
+      // the exact EAN. Apify/Google is trusted for the same query.
+      const isEanVariant = v.kind === "A";
+      const eanDigits = isEanVariant ? v.query.replace(/\D/g, "") : "";
+      let droppedByEanFilter = 0;
       let n = 0;
       for (const h of hits) {
         const url = (h.url ?? "").trim();
         if (!url) continue;
+        if (isEanVariant && eanDigits) {
+          const title = (h as { title?: string }).title ?? "";
+          const snip =
+            (h as { description?: string; snippet?: string }).description ??
+            (h as { snippet?: string }).snippet ??
+            "";
+          const hay = `${title} ${snip}`.replace(/\D/g, "");
+          if (!hay.includes(eanDigits)) {
+            droppedByEanFilter++;
+            continue;
+          }
+        }
         upsertResult(vi, url, "firecrawl", {
           title: (h as { title?: string }).title,
           snippet: (h as { description?: string; snippet?: string }).description
@@ -2230,6 +2262,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         n++;
       }
       perVariant[vi].providers.firecrawl = n;
+      if (droppedByEanFilter > 0) {
+        await emit(ctx, {
+          level: "info",
+          message: `   ${nazwa} — Firecrawl [A] "${v.query}": odrzucono ${droppedByEanFilter} wyników bez EAN w tytule/snippet`,
+        });
+      }
     }
   }
 
@@ -2292,22 +2330,56 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     }
 
     if (flat.length) {
-      const capped = flat.slice(0, 40);
+      // Candidate-pool reduction BEFORE AI pre-selection:
+      //   1) Drop marketplace / blacklist hits (they will never scrape well).
+      //   2) Host-level dedup: keep up to 2 URLs per host, prioritized by
+      //      (a) exact EAN present in title/snippet, (b) original SERP
+      //      position. AI pre-selection's output on this pool is then FINAL —
+      //      no host-dedup runs after it, so AI picks always survive.
+      const eanDigits = (product.ean ?? "").replace(/\D/g, "");
+      const hasEanInSnippet = (r: { title: string; snippet: string }) => {
+        if (!eanDigits) return false;
+        const hay = `${r.title} ${r.snippet}`.replace(/\D/g, "");
+        return hay.includes(eanDigits);
+      };
+      const preFiltered = flat.filter((r) => !isMarketplaceUrl(r.url, extraBlacklist));
+      const byHost = new Map<string, typeof preFiltered>();
+      for (const r of preFiltered) {
+        const h = r.domain || (() => { try { return new URL(r.url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+        if (!h) continue;
+        const arr = byHost.get(h) ?? [];
+        arr.push(r);
+        byHost.set(h, arr);
+      }
+      const dedupPool: typeof preFiltered = [];
+      for (const [, arr] of byHost) {
+        const sorted = arr.slice().sort((a, b) => {
+          const ea = hasEanInSnippet(a) ? 1 : 0;
+          const eb = hasEanInSnippet(b) ? 1 : 0;
+          if (ea !== eb) return eb - ea;
+          return a.i - b.i; // lower SERP position wins
+        });
+        dedupPool.push(...sorted.slice(0, 2));
+      }
+      // Preserve original SERP order in the pool we send to the AI so the
+      // prompt's "position matters" heuristic still holds.
+      dedupPool.sort((a, b) => a.i - b.i);
+      const capped = dedupPool.slice(0, 40);
       const preselect = await preselectSerpResults({
         product: { nazwa, ean: product.ean ?? null, producent, kod_producenta: mpn },
         items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
       });
-      const byI = new Map(flat.map((f) => [f.i, f]));
+      const byI = new Map(capped.map((f) => [f.i, f]));
       type Pick = { url: string; why?: string; vi: number };
       let picks: Pick[] = [];
       if (preselect.ok && preselect.picks.length) {
         picks = preselect.picks
           .map((p): Pick | null => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi } : null; })
           .filter((v): v is Pick => v !== null);
-        aiPreselectMeta = { total: flat.length, picked: picks.length };
+        aiPreselectMeta = { total: capped.length, picked: picks.length };
       } else {
-        picks = flat.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
-        aiPreselectMeta = { total: flat.length, picked: picks.length, error: preselect.error ?? "empty" };
+        picks = capped.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
+        aiPreselectMeta = { total: capped.length, picked: picks.length, error: preselect.error ?? "empty" };
       }
       for (const p of picks) {
         upsertResult(p.vi, p.url, "apify", { ai_pick: true, ai_reason: p.why });
@@ -2422,7 +2494,17 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   }
   await supabaseAdmin.from("search_results").insert(rowsToInsert as never);
 
-  // 3) Filter out marketplaces / blacklist, dedup po hoście (max 1 URL/host), top 5.
+  // 3) Post-merge filter. Marketplace/blacklist rules still apply to
+  //    every URL. Host-level dedup was already done pre-preselect on the
+  //    Apify pool — DO NOT run it again on AI picks. We still dedup
+  //    Firecrawl-only URLs by host (max 1/host) so the scrape budget isn't
+  //    burned on near-duplicate shop mirrors. AI picks are always kept.
+  const aiPickUrls = new Set<string>();
+  for (const b of perVariant) {
+    for (const r of b.results) {
+      if (r.ai_pick) aiPickUrls.add(normalizeUrlForDedup(r.url));
+    }
+  }
   const seenHosts = new Set<string>();
   const markFiltered = (url: string, reason: "marketplace" | "host_dup") => {
     const key = normalizeUrlForDedup(url);
@@ -2433,13 +2515,20 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   };
   const filtered: string[] = [];
   for (const u of allUrls) {
+    if (removedUrlSet.has(normalizeUrlForDedup(u))) { markFiltered(u, "marketplace"); continue; }
     if (isMarketplaceUrl(u, extraBlacklist)) { markFiltered(u, "marketplace"); continue; }
     const h = (() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } })();
     if (!h) { markFiltered(u, "marketplace"); continue; }
-    if (seenHosts.has(h)) { markFiltered(u, "host_dup"); continue; }
+    const isAiPick = aiPickUrls.has(normalizeUrlForDedup(u));
+    if (!isAiPick) {
+      if (seenHosts.has(h)) { markFiltered(u, "host_dup"); continue; }
+    }
     seenHosts.add(h);
-    if (filtered.length < 5) filtered.push(u);
-    else markFiltered(u, "host_dup");
+    if (isAiPick || filtered.length < 5) {
+      filtered.push(u);
+    } else {
+      markFiltered(u, "host_dup");
+    }
   }
   await emit(ctx, {
     level: filtered.length ? "info" : "warn",

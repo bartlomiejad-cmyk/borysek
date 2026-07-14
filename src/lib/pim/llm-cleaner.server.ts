@@ -22,6 +22,13 @@ export type CleaningMeta = {
   cleaned_by: "llm" | "regex";
   confidence: number | null;
   removed_sections: string[];
+  /**
+   * When the LLM explicitly says the scraped HTML does NOT describe this
+   * product (different category / article), we keep the regex output as
+   * `description` but tag the source so downstream code can apply the
+   * junk penalty and skip AI validation.
+   */
+  page_matches_product?: boolean;
 };
 
 export type LlmCleanResult = {
@@ -44,6 +51,53 @@ function regexFallback(rawHtml: string, reason: string): LlmCleanResult {
     description,
     features: [],
     meta: { cleaned_by: "regex", confidence: null, removed_sections: [] },
+  };
+}
+
+/**
+ * Tokens from the product name that are "distinctive enough" to serve as
+ * a fingerprint — used by the hallucination guard. Skips short tokens and
+ * common Polish stop-words.
+ */
+const NAME_STOPWORDS = new Set([
+  "do", "dla", "the", "and", "oraz", "lub", "na", "od", "ze", "za", "pro", "plus",
+]);
+function distinctiveTokens(name: string | null | undefined): string[] {
+  if (!name) return [];
+  return name
+    .toLowerCase()
+    .split(/[\s,\-_/()]+/)
+    .map((t) => t.replace(/[.:;]+$/g, "").trim())
+    .filter((t) => t.length >= 4 && !NAME_STOPWORDS.has(t));
+}
+
+function isHallucinated(
+  cleanedHtml: string,
+  preClean: string,
+  productName: string | null | undefined,
+): boolean {
+  const tokens = distinctiveTokens(productName);
+  if (!tokens.length) return false;
+  const outLC = cleanedHtml.toLowerCase();
+  const inLC = preClean.toLowerCase();
+  // Output "talks about" the product (mentions name tokens) but the input
+  // text mentions none of them — the model must have invented content.
+  const outMentions = tokens.some((t) => outLC.includes(t));
+  const inMentions = tokens.some((t) => inLC.includes(t));
+  return outMentions && !inMentions;
+}
+
+function pageMismatchResult(rawHtml: string): LlmCleanResult {
+  const description = sanitizeProductDescription(rawHtml);
+  return {
+    description,
+    features: [],
+    meta: {
+      cleaned_by: "llm",
+      confidence: 0,
+      removed_sections: [],
+      page_matches_product: false,
+    },
   };
 }
 
@@ -76,7 +130,9 @@ export async function llmCleanDescription(opts: {
     "Preserve the HTML structure of the remaining content using only these tags: h3, p, ul, li, strong, table, tr, td.",
     "OUTPUT LANGUAGE: description_html MUST be in Polish. If the source is in another language, translate to natural Polish while preserving literally: product name, brand, model, variant, units, calibers, weights and technical designations. Do not add commercial information absent from the source.",
     "Features keys must also be in Polish (np. \"Waga\", \"Kaliber\", \"Materiał\").",
-    'Output JSON: { "description_html": string, "features": [{"key": string, "value": string}], "confidence": number 0-1, "removed_sections": string[] }.',
+    "Jeżeli dostarczony HTML NIE opisuje tego produktu (inna kategoria, inny artykuł), zwróć page_matches_product=false, description_html=\"\" i confidence=0.",
+    "description_html może zawierać WYŁĄCZNIE treść obecną w dostarczonym HTML — nigdy nie uzupełniaj braków wiedzą o produkcie z nagłówka/kontekstu.",
+    'Output JSON: { "page_matches_product": boolean, "description_html": string, "features": [{"key": string, "value": string}], "confidence": number 0-1, "removed_sections": string[] }.',
   ].join("\n");
 
   try {
@@ -102,6 +158,7 @@ export async function llmCleanDescription(opts: {
     };
     const content = json.choices?.[0]?.message?.content ?? "{}";
     let parsed: {
+      page_matches_product?: unknown;
       description_html?: unknown;
       features?: unknown;
       confidence?: unknown;
@@ -112,6 +169,11 @@ export async function llmCleanDescription(opts: {
     } catch (e) {
       return regexFallback(opts.rawHtml, `invalid JSON: ${e instanceof Error ? e.message : e}`);
     }
+    // Explicit "this page is not about that product" signal.
+    if (parsed.page_matches_product === false) {
+      console.warn(`[llm-cleaner] page_matches_product=false for "${opts.productName ?? ""}"`);
+      return pageMismatchResult(opts.rawHtml);
+    }
     const rawOut = typeof parsed.description_html === "string" ? parsed.description_html : "";
     if (!rawOut) return regexFallback(opts.rawHtml, "empty description_html");
     if (FORBIDDEN_TAGS_RE.test(rawOut)) {
@@ -120,6 +182,15 @@ export async function llmCleanDescription(opts: {
     const cleaned = whitelistSanitize(rawOut).replace(/\s{2,}/g, " ").trim();
     if (cleaned.length < MIN_OUTPUT_CHARS || cleaned.length > MAX_OUTPUT_CHARS) {
       return regexFallback(opts.rawHtml, `length out of bounds (${cleaned.length})`);
+    }
+    // Post-validation hallucination guard: the cleaned output mentions the
+    // product name but the input pre-clean text does not — the model
+    // fabricated the description. Treat exactly like page_matches_product=false.
+    if (isHallucinated(cleaned, preClean, opts.productName)) {
+      console.warn(
+        `[llm-cleaner] hallucination-guard triggered for "${opts.productName ?? ""}" — output mentions product tokens absent from input`,
+      );
+      return pageMismatchResult(opts.rawHtml);
     }
     const confidence =
       typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
@@ -151,7 +222,12 @@ export async function llmCleanDescription(opts: {
     return {
       description: cleaned,
       features,
-      meta: { cleaned_by: "llm", confidence, removed_sections: removed },
+      meta: {
+        cleaned_by: "llm",
+        confidence,
+        removed_sections: removed,
+        page_matches_product: true,
+      },
     };
   } catch (e) {
     return regexFallback(opts.rawHtml, e instanceof Error ? e.message : String(e));

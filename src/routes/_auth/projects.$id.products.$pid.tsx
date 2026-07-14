@@ -28,6 +28,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { attachManualSources, setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
+import { removePickedSource } from "@/lib/pim/compat.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,7 +46,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye, CheckCircle2, X } from "lucide-react";
 import { ChevronDown, FileText, History } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -102,6 +103,7 @@ function ProductDetail() {
   const resetSourcesFn = useServerFn(resetProductSources);
   const deleteProductsFn = useServerFn(deleteProducts);
   const attachManualFn = useServerFn(attachManualSources);
+  const removeSourceFn = useServerFn(removePickedSource);
   const setModeFn = useServerFn(setMatchingMode);
   const rerunMatchFn = useServerFn(rerunMatchingForProduct);
   const updateNotesFn = useServerFn(updateProductNotes);
@@ -180,6 +182,22 @@ function ProductDetail() {
   const [manualUrlInput, setManualUrlInput] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
+  const [removingSource, setRemovingSource] = useState<string | null>(null);
+
+  const onRemoveSource = async (url: string) => {
+    if (removingSource) return;
+    if (!confirm("Usunąć to źródło z tego produktu? Nie będzie brane pod uwagę w kolejnych dopasowaniach.")) return;
+    setRemovingSource(url);
+    try {
+      await removeSourceFn({ data: { projectId: id, productId: pid, url } });
+      toast.success("Źródło usunięte");
+      invalidate();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się usunąć źródła"));
+    } finally {
+      setRemovingSource(null);
+    }
+  };
 
   useEffect(() => {
     const n = ((data as { product?: { product_notes?: string | null } } | undefined)?.product?.product_notes ?? "") || "";
@@ -1805,6 +1823,23 @@ function ProductDetail() {
                       <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
                         {combined.length} zdj.
                       </span>
+                      <button
+                        type="button"
+                        title="Usuń to źródło z produktu"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveSource(s.url);
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        disabled={removingSource === s.url}
+                        className="shrink-0 h-6 w-6 inline-flex items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+                      >
+                        {removingSource === s.url ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <X className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                       <ChevronDown
                         className={cn(
                           "h-4 w-4 text-muted-foreground transition-transform shrink-0",
