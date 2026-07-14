@@ -2103,11 +2103,14 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   const { data: project } = await supabaseAdmin
     .from("projects")
-    .select("blacklist, strategy")
+    .select("blacklist, strategy, settings")
     .eq("id", product.project_id)
     .single();
   const extraBlacklist = ((project?.blacklist as string[] | null) ?? []);
   const strategy = ((project?.strategy as QueryStrategy | null) ?? "NAZWA") as QueryStrategy;
+  const projectSettings = (project?.settings as Record<string, unknown> | null) ?? {};
+  const searchProvider: "firecrawl" | "apify" =
+    projectSettings.search_provider === "apify" ? "apify" : "firecrawl";
 
   // Producent + MPN mogą być w raw.imported_extract (import z URL) lub — dla
   // CSV — częściowo w `source_products.kod` (kod producenta lub sklepu).
@@ -2144,6 +2147,101 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   // 1) Search per wariant.
   const perVariantUrls: Array<{ variant: string; kind: string; urls: string[] }> = [];
   const mergedByNorm = new Map<string, string>(); // normalized -> original URL (first-seen)
+  // Apify path: SERP + AI preselection. Firecrawl path: original per-variant search.
+  let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
+  if (searchProvider === "apify") {
+    let buckets: Array<{ query: string; results: SerpResult[] }> = [];
+    try {
+      buckets = await runSerpSearch(variants.map((v) => v.query), {
+        country: "PL",
+        language: "pl",
+        resultsPerQuery: 100,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await emit(ctx, {
+        level: "warn",
+        message: `⚠️ ${nazwa} — Apify SERP: ${msg}. Fallback: Firecrawl search.`,
+      });
+      buckets = [];
+    }
+
+    // Aggregate all SERP results across variants, keep first-seen order.
+    const flat: Array<{ i: number; title: string; snippet: string; url: string; domain: string; variantKind: string; variantQuery: string }> = [];
+    const seenUrl = new Set<string>();
+    let idx = 0;
+    for (const v of variants) {
+      const bucket = buckets.find((b) => b.query.trim().toLowerCase() === v.query.trim().toLowerCase())
+        ?? buckets.shift();
+      const results = bucket?.results ?? [];
+      const urls: string[] = [];
+      for (const r of results) {
+        const key = normalizeUrlForDedup(r.url);
+        if (seenUrl.has(key)) continue;
+        seenUrl.add(key);
+        urls.push(r.url);
+        idx++;
+        flat.push({
+          i: idx,
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+          domain: r.domain,
+          variantKind: v.kind,
+          variantQuery: v.query,
+        });
+      }
+      perVariantUrls.push({ variant: v.query, kind: v.kind, urls });
+    }
+
+    if (flat.length) {
+      // AI preselection — cap 40, keep picks order.
+      const capped = flat.slice(0, 40);
+      const preselect = await preselectSerpResults({
+        product: {
+          nazwa,
+          ean: product.ean ?? null,
+          producent,
+          kod_producenta: mpn,
+        },
+        items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
+      });
+      let pickedUrls: string[] = [];
+      if (preselect.ok && preselect.picks.length) {
+        const byI = new Map(flat.map((f) => [f.i, f]));
+        pickedUrls = preselect.picks
+          .map((p) => byI.get(p.i)?.url)
+          .filter((u): u is string => !!u);
+        aiPreselectMeta = { total: flat.length, picked: pickedUrls.length };
+      } else {
+        // Fallback: keep the raw SERP order (up to 20) if preselection failed.
+        pickedUrls = flat.slice(0, 20).map((f) => f.url);
+        aiPreselectMeta = {
+          total: flat.length,
+          picked: pickedUrls.length,
+          error: preselect.error ?? "empty",
+        };
+      }
+      for (const u of pickedUrls) {
+        const key = normalizeUrlForDedup(u);
+        if (!mergedByNorm.has(key)) mergedByNorm.set(key, u);
+      }
+      await logProductEvent(supabaseAdmin, {
+        projectId: product.project_id,
+        productId: product.id,
+        kind: "ai_preselect",
+        message: `AI preselekcja: ${aiPreselectMeta.picked}/${aiPreselectMeta.total}${aiPreselectMeta.error ? ` (fallback: ${aiPreselectMeta.error})` : ""}`,
+        meta: { model: "google/gemini-2.5-flash-lite", count: aiPreselectMeta.picked },
+      });
+      await emit(ctx, {
+        level: "info",
+        message: `🎯 ${nazwa} — Apify SERP: ${flat.length} wyników, AI wybrała ${pickedUrls.length}${aiPreselectMeta.error ? " (fallback)" : ""}`,
+      });
+    }
+  }
+
+  // Firecrawl path (also used as fallback when Apify returned zero merged urls).
+  if (mergedByNorm.size === 0) {
   for (const v of variants) {
     let hits: FirecrawlSearchHit[] = [];
     try {
@@ -2162,11 +2260,15 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       continue;
     }
     const urls = hits.map((h) => (h.url ?? "").trim()).filter(Boolean);
-    perVariantUrls.push({ variant: v.query, kind: v.kind, urls });
+    // Avoid double-counting if apify path also filled perVariantUrls.
+    if (!perVariantUrls.some((pv) => pv.variant === v.query && pv.kind === v.kind)) {
+      perVariantUrls.push({ variant: v.query, kind: v.kind, urls });
+    }
     for (const u of urls) {
       const key = normalizeUrlForDedup(u);
       if (!mergedByNorm.has(key)) mergedByNorm.set(key, u);
     }
+  }
   }
 
   const allUrls = Array.from(mergedByNorm.values());
@@ -2177,7 +2279,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       productId: product.id,
       kind: "discovery_search",
       message: `Wyszukano źródła: ${variants.length} zapytań, 0 wyników`,
-      meta: { variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })) },
+      meta: {
+        variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })),
+      },
     });
     return;
   }
@@ -2187,7 +2291,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     productId: product.id,
     kind: "discovery_search",
     message: `Wyszukano źródła: ${variants.length} zapytań, ${allUrls.length} unikalnych adresów`,
-    meta: { variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })) },
+    meta: {
+      variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })),
+    },
   });
 
   // 2) Persist raw search result. Wstawiamy wiersz per term używany przez
