@@ -671,7 +671,7 @@ export type ImageScore = z.infer<typeof ImageScoreSchema> & {
  * Returns the ordered alive subset — safe to pass to AI Gateway as
  * `image_url` blocks.
  */
-async function filterAliveImages(
+export async function filterAliveImages(
   supabase: import("@supabase/supabase-js").SupabaseClient,
   enrichmentId: string,
   urls: string[],
@@ -733,7 +733,7 @@ async function filterAliveImages(
 }
 
 /** Current identity check schema version. Bump when prompt semantics change. */
-const IDENTITY_VERSION = 2;
+export const IDENTITY_VERSION = 2;
 
 const SCORE_SYSTEM_PROMPT =
   "Jesteś ekspertem e-commerce. Oceń kompozycję zdjęcia pod kątem przydatności jako główna miniaturka produktu w sklepie. Zwróć surowy JSON według podanego schematu.";
@@ -765,7 +765,7 @@ function buildScoreUserText(productName: string, brand: string, hasReference: bo
   ].filter(Boolean).join("\n");
 }
 
-async function scoreOneImage(
+export async function scoreOneImage(
   apiKey: string,
   url: string,
   productName: string,

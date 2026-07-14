@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { pickImages, pickThumbsForList, type ImageMeta, type ImageScores } from "./images";
+import { getVisibleGallery, type GalleryImageScore } from "./gallery";
 import { sanitizeAllegroHtml } from "./seo";
 
 export const exportProject = createServerFn({ method: "GET" })
@@ -82,17 +83,26 @@ export const exportProject = createServerFn({ method: "GET" })
       const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
       const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
       const scores = ((e as unknown as { image_scores?: ImageScores } | undefined)?.image_scores ?? {}) as ImageScores;
+      const identityScores = ((e as unknown as { image_scores?: Record<string, GalleryImageScore> } | undefined)?.image_scores ?? {}) as Record<string, GalleryImageScore>;
+      const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
       const all: string[] = [];
       for (const u of urls) {
         for (const img of imgMap.get(u) ?? []) {
           if (!all.includes(img)) all.push(img);
         }
       }
+      // Only export images the AI accepted (identity=same or unscored,
+      // banners/rejected/unsure filtered) so clients never receive verdicts
+      // marked as belonging to a different product.
+      const { accepted } = getVisibleGallery(all, {
+        hidden_images: Array.from(hidden),
+        image_scores: identityScores,
+        pinned_main_url: pinned,
+      });
       // Scrapowane zdjęcia ze źródeł — bez wymuszania regen. URL AI ma własną kolumnę.
-      const images = pickImages(all, meta, hidden, scores);
+      const images = pickImages(accepted, meta, hidden, scores);
       // Te same URL-e i kolejność co widok listy produktów (pinned > >=600 > reszta).
-      const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
-      const listImages = pickThumbsForList(all, meta, hidden, pinned, 12);
+      const listImages = pickThumbsForList(accepted, meta, hidden, pinned, 12);
       const regen = ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image) ?? "";
       // Allegro main image MUST come from the regen pipeline (pinned or FAL
       // white-background regen) — never from ai_gallery_urls, which contains

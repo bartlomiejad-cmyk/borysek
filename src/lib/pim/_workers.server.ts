@@ -3179,3 +3179,197 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
 
   await emit(ctx, { level: "success", message: `✅ Allegro: opis zapisany (${html.length} znaków)` });
 }
+
+// ---------------------------------------------------------------------------
+// runPimImageVerify — bulk AI image identity verification for a single product.
+// Mirrors `analyzeProductImages` (ai.functions.ts) but runs under supabaseAdmin
+// on the worker. Reuses the exact same scoring helper (`scoreOneImage`) and
+// identity-version cache so results are indistinguishable from the per-product
+// "Zweryfikuj zdjęcia ponownie" action. Respects manual_keep and hidden_images.
+// Failures are logged and reported but do not stop the wider bulk job.
+// ---------------------------------------------------------------------------
+export async function runPimImageVerify(
+  productId: string,
+  ctx?: WorkerCtx,
+  opts?: { force?: boolean },
+): Promise<void> {
+  const force = opts?.force === true;
+  const { scoreOneImage, filterAliveImages, IDENTITY_VERSION, type: _t } = await import("./ai.functions").then(
+    (m) => ({
+      scoreOneImage: m.scoreOneImage,
+      filterAliveImages: m.filterAliveImages,
+      IDENTITY_VERSION: m.IDENTITY_VERSION,
+      type: null as unknown,
+    }),
+  );
+
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+  // Product info drives the identity prompt.
+  const { data: product, error: pErr } = await supabaseAdmin
+    .from("source_products")
+    .select("id, nazwa, raw")
+    .eq("id", productId)
+    .maybeSingle();
+  if (pErr) throw new Error(pErr.message);
+  if (!product) throw new Error("Product not found");
+  const rawObj = ((product as { raw?: Record<string, unknown> | null }).raw ?? {}) as Record<string, unknown>;
+  const importedExtract = (rawObj as { imported_extract?: { marka?: string; producent?: string } })
+    .imported_extract ?? {};
+  const brand = String(importedExtract.marka ?? importedExtract.producent ?? "").trim();
+  const productName = String((product as { nazwa?: string }).nazwa ?? "").trim();
+
+  const { data: enrichment, error: eErr } = await supabaseAdmin
+    .from("enrichments")
+    .select("id, picked_urls, image_scores, pinned_main_url, regenerated_main_image, hidden_images")
+    .eq("source_product_id", productId)
+    .maybeSingle();
+  if (eErr) throw new Error(eErr.message);
+  if (!enrichment) {
+    await emit(ctx, { level: "warn", message: "Pominięto: brak rekordu enrichment (uruchom Dopasowanie)" });
+    return;
+  }
+  const enRow = enrichment as unknown as {
+    id: string;
+    picked_urls?: string[] | null;
+    image_scores?: Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }> | null;
+    pinned_main_url?: string | null;
+    regenerated_main_image?: string | null;
+    hidden_images?: string[] | null;
+  };
+
+  // Gather all image URLs (main + extras) from the product's source rows.
+  const pickedUrls = (enRow.picked_urls ?? []) as string[];
+  if (!pickedUrls.length) {
+    await emit(ctx, { level: "info", message: "Brak źródeł do weryfikacji" });
+    return;
+  }
+  const { data: sources } = await supabaseAdmin
+    .from("product_sources")
+    .select("url, image_url, extra_image_urls")
+    .in("url", pickedUrls);
+  const allUrls: string[] = [];
+  for (const s of (sources ?? []) as Array<{ image_url: string | null; extra_image_urls: string[] | null }>) {
+    if (s.image_url) allUrls.push(s.image_url);
+    for (const u of s.extra_image_urls ?? []) allUrls.push(u);
+  }
+  const hidden = new Set((enRow.hidden_images ?? []) as string[]);
+  const existing = (enRow.image_scores ?? {}) as Record<
+    string,
+    { manual_keep?: boolean; identity_v?: number; dead?: boolean }
+  >;
+  const uniq = Array.from(new Set(allUrls.filter((u) => !hidden.has(u))));
+  if (!uniq.length) {
+    await emit(ctx, { level: "info", message: "Brak zdjęć do weryfikacji" });
+    return;
+  }
+
+  const needsCheck = (u: string): boolean => {
+    const prev = existing[u];
+    if (!prev) return true;
+    if (prev.manual_keep === true) return false;
+    if (prev.dead === true && !force) return false;
+    if (force) return true;
+    return (prev.identity_v ?? 0) < IDENTITY_VERSION;
+  };
+  let toScore = uniq.filter(needsCheck);
+  let currentScores = existing as Record<string, unknown> as Record<string, {
+    manual_keep?: boolean;
+    identity_v?: number;
+    dead?: boolean;
+  }>;
+
+  if (!toScore.length) {
+    await emit(ctx, {
+      level: "info",
+      message: "Wszystkie zdjęcia mają już aktualną weryfikację (użyj „wymuś" aby powtórzyć)",
+    });
+    return;
+  }
+
+  // Anchor picking — mirror analyzeProductImages exactly.
+  const pickBestSameAnchor = (): string | null => {
+    let bestUrl: string | null = null;
+    let bestScore = -Infinity;
+    for (const [u, s] of Object.entries(existing) as Array<[
+      string,
+      { identity?: string; is_banner_or_trash?: boolean; is_central?: number; is_clean?: number } | undefined,
+    ]>) {
+      if (!s || s.identity !== "same" || s.is_banner_or_trash) continue;
+      const score = (s.is_central ?? 0) + (s.is_clean ?? 0);
+      if (score > bestScore) {
+        bestScore = score;
+        bestUrl = u;
+      }
+    }
+    return bestUrl;
+  };
+  const regen = enRow.regenerated_main_image;
+  const anchorUrl: string | null =
+    (enRow.pinned_main_url && enRow.pinned_main_url !== "__imported__" ? enRow.pinned_main_url : null) ??
+    (regen && regen !== "__imported__" ? regen : null) ??
+    pickBestSameAnchor();
+
+  // Pre-flight probe so 404s don't waste Vision calls.
+  const { alive, dead } = await filterAliveImages(supabaseAdmin, enRow.id, toScore, existing);
+  toScore = alive;
+  if (dead.length) {
+    const { data: refreshed } = await supabaseAdmin
+      .from("enrichments")
+      .select("image_scores")
+      .eq("id", enRow.id)
+      .maybeSingle();
+    currentScores =
+      ((refreshed as { image_scores?: Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }> } | null)?.image_scores ??
+        existing) as Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }>;
+    await emit(ctx, {
+      level: "warn",
+      message: `Pominięto ${dead.length} martwych URL-i (404/timeout)`,
+    });
+  }
+
+  if (!toScore.length) {
+    await emit(ctx, { level: "info", message: "Brak żywych zdjęć do weryfikacji" });
+    return;
+  }
+
+  await emit(ctx, {
+    level: "info",
+    message: `Analiza AI: ${toScore.length} zdjęć${anchorUrl ? " (z obrazem referencyjnym)" : ""}`,
+  });
+
+  const CONCURRENCY = 5;
+  const merged: Record<string, unknown> = { ...currentScores };
+  let failed = 0;
+  let succeeded = 0;
+  for (let i = 0; i < toScore.length; i += CONCURRENCY) {
+    const batch = toScore.slice(i, i + CONCURRENCY);
+    const settled = await Promise.allSettled(
+      batch.map((u) => scoreOneImage(apiKey, u, productName, brand, anchorUrl && anchorUrl !== u ? anchorUrl : null)),
+    );
+    settled.forEach((r, idx) => {
+      const url = batch[idx];
+      if (r.status === "fulfilled") {
+        const prevManual = (currentScores[url] as { manual_keep?: boolean } | undefined)?.manual_keep;
+        merged[url] = prevManual ? { ...r.value, manual_keep: true } : r.value;
+        succeeded += 1;
+      } else {
+        failed += 1;
+      }
+    });
+  }
+
+  if (succeeded > 0) {
+    const { error: upErr } = await supabaseAdmin
+      .from("enrichments")
+      .update({ image_scores: merged as never } as never)
+      .eq("id", enRow.id);
+    if (upErr) throw new Error(upErr.message);
+  }
+
+  await emit(ctx, {
+    level: failed > 0 && succeeded === 0 ? "error" : "success",
+    message: `✅ Weryfikacja: OK ${succeeded}, błędy ${failed}`,
+  });
+}

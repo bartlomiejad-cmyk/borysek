@@ -246,7 +246,15 @@ function pickThumb(p: SharePublicProduct): string | null {
   const regen = resolveRegenUrl(en.regenerated_main_image);
   if (regen) return regen;
   const hidden = new Set(en.hidden_images ?? []);
-  const first = (en.picked_urls ?? []).find((u) => !hidden.has(u));
+  const scores = en.image_scores ?? {};
+  const first = (en.picked_urls ?? []).find((u) => {
+    if (hidden.has(u)) return false;
+    const s = scores[u];
+    if (!s) return true;
+    if (s.manual_keep === true) return true;
+    if (s.is_banner_or_trash || s.dead) return false;
+    return s.identity !== "different" && s.identity !== "unsure";
+  });
   return first ?? null;
 }
 
@@ -277,7 +285,17 @@ function ProductCard({
     ...((product.enrichment?.picked_urls ?? []) as string[]),
   ]
     .filter((u, i, a) => u && a.indexOf(u) === i)
-    .filter((u) => !(product.enrichment?.hidden_images ?? []).includes(u));
+    .filter((u) => !(product.enrichment?.hidden_images ?? []).includes(u))
+    // Never show clients images the AI verdict marked as belonging to a
+    // different product or as an unsure/banner/dead reference.
+    .filter((u) => {
+      const s = (product.enrichment?.image_scores ?? {})[u];
+      if (!s) return true;
+      if (s.manual_keep === true) return true;
+      if (s.is_banner_or_trash === true) return false;
+      if (s.dead === true) return false;
+      return s.identity !== "different" && s.identity !== "unsure";
+    });
 
   const previewHref = `/share/${token}/p/${product.id}`;
 

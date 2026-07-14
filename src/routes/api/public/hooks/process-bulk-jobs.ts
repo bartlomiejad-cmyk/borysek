@@ -9,6 +9,7 @@ import {
   runPimVisualization,
   runPimAllegroDescription,
   runPimRescrape,
+  runPimImageVerify,
   type WorkerCtx,
 } from "@/lib/pim/_workers.server";
 
@@ -24,7 +25,8 @@ type JobKind =
   | "PHOTO_TOOL_EDIT_IMAGE"
   | "PIM_VISUALIZATIONS"
   | "PIM_ALLEGRO_DESCRIPTION"
-  | "PIM_RESCRAPE";
+  | "PIM_RESCRAPE"
+  | "PIM_IMAGE_VERIFY";
 
 type BulkJobRow = {
   id: string;
@@ -89,6 +91,11 @@ async function processItem(
       return { complete: true };
     case "PIM_RESCRAPE":
       await runPimRescrape(productId, ctx);
+      return { complete: true };
+    case "PIM_IMAGE_VERIFY":
+      await runPimImageVerify(productId, ctx, {
+        force: payload?.force === true,
+      });
       return { complete: true };
     default:
       throw new Error(`Unknown job kind: ${kind as string}`);
