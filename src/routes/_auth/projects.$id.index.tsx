@@ -124,6 +124,8 @@ import {
   type PimPipelineStatus,
 } from "@/lib/pim/pipeline-status";
 import { setManualLock } from "@/lib/pim/enrichments.functions";
+import { approveProduct, unapproveProduct, bulkApprovePass } from "@/lib/pim/review.functions";
+import { CheckCircle2, Undo2 } from "lucide-react";
 
 const searchSchema = z.object({
   page: z.number().min(1).catch(1),
@@ -184,6 +186,9 @@ function ProjectPage() {
   const setLockFn = useServerFn(setManualLock);
   const deleteProductsFn = useServerFn(deleteProducts);
   const summaryFn = useServerFn(getPipelineSummary);
+  const approveFn = useServerFn(approveProduct);
+  const unapproveFn = useServerFn(unapproveProduct);
+  const bulkApprovePassFn = useServerFn(bulkApprovePass);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -666,8 +671,8 @@ function ProjectPage() {
     }
   };
 
-  const exportFile = async (fmt: "csv" | "xlsx") => {
-    const allRows = await exportFn({ data: { projectId: id } });
+  const exportFile = async (fmt: "csv" | "xlsx", approvedOnly = false) => {
+    const allRows = await exportFn({ data: { projectId: id, approvedOnly } });
     const rows =
       selectedIds.size > 0
         ? allRows.filter((r: Record<string, unknown>) => {
@@ -768,6 +773,13 @@ function ProjectPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => exportFile("xlsx")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => exportFile("csv", true)}>
+                <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true)}>
+                <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1227,6 +1239,37 @@ function ProjectPage() {
               </Button>
             </div>
           )}
+          {filter === "REVIEW" && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">
+                Masowe zatwierdzanie produktów z audytem <b>Pass</b>. Pomija już zatwierdzone.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-emerald-500/60 text-emerald-700 dark:text-emerald-300"
+                onClick={async () => {
+                  const ids = selectedIds.size > 0 ? [...selectedIds] : undefined;
+                  const t = toast.loading("Zatwierdzam produkty z Pass…");
+                  try {
+                    const res = await bulkApprovePassFn({ data: { projectId: id, productIds: ids } });
+                    toast.success(
+                      res.approved === 0
+                        ? "Brak produktów z audytem Pass do zatwierdzenia"
+                        : `Zatwierdzono ${res.approved} produkt${res.approved === 1 ? "" : "ów"}`,
+                      { id: t },
+                    );
+                    refetchProducts();
+                    qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                  } catch (e) {
+                    toast.error(friendlyError(e, "Nie udało się zatwierdzić"), { id });
+                  }
+                }}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-1" /> Zatwierdź wszystkie z wynikiem Pass
+              </Button>
+            </div>
+          )}
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -1383,6 +1426,19 @@ function ProjectPage() {
                             </Badge>
                           );
                         })()}
+                        {(() => {
+                          const rs = ((p as { review_status?: string | null }).review_status ?? "NONE") as string;
+                          if (rs !== "APPROVED") return null;
+                          return (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0 border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              title="Produkt zatwierdzony"
+                            >
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Zatwierdzony
+                            </Badge>
+                          );
+                        })()}
                       </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
@@ -1447,6 +1503,42 @@ function ProjectPage() {
                             <ArrowRight className="h-4 w-4" />
                           </Link>
                         </Button>
+                        {(() => {
+                          const rs = ((p as { review_status?: string | null }).review_status ?? "NONE") as string;
+                          if (rs === "APPROVED") {
+                            return (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Cofnij zatwierdzenie"
+                                onClick={async () => {
+                                  await unapproveFn({ data: { productId: p.id } });
+                                  toast.success("Cofnięto zatwierdzenie");
+                                  refetchProducts();
+                                  qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                                }}
+                              >
+                                <Undo2 className="h-4 w-4" />
+                              </Button>
+                            );
+                          }
+                          return (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Zatwierdź produkt"
+                              className="text-emerald-700 dark:text-emerald-300 hover:text-emerald-800"
+                              onClick={async () => {
+                                await approveFn({ data: { productId: p.id } });
+                                toast.success("Zatwierdzono");
+                                refetchProducts();
+                                qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                              }}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </Button>
+                          );
+                        })()}
                         <Button
                           size="sm"
                           variant="ghost"

@@ -744,6 +744,30 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .update(updatePayload as never)
       .eq("id", enrichment.id);
     if (error) throw new Error(error.message);
+    // Regeneration invalidates a prior manual approval — demote APPROVED to
+    // NEEDS_REVIEW so reviewers re-check the new golden record.
+    try {
+      const { data: prow } = await supabaseAdmin
+        .from("source_products")
+        .select("review_status")
+        .eq("id", product.id)
+        .maybeSingle();
+      const cur = (prow as { review_status?: string | null } | null)?.review_status ?? null;
+      if (cur === "APPROVED") {
+        await supabaseAdmin
+          .from("source_products")
+          .update({
+            review_status: "NEEDS_REVIEW",
+            approved_at: null,
+            approved_by: null,
+          } as never)
+          .eq("id", product.id);
+        await emit(ctx, {
+          level: "info",
+          message: `[review-reset] ${product.nazwa ?? productId} — zatwierdzenie cofnięte po regeneracji`,
+        });
+      }
+    } catch { /* review-reset is best-effort */ }
     await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
     await advancePipelineStatus(supabaseAdmin as never, product.id, "GOLDEN_READY");
   } catch (e) {
@@ -3186,6 +3210,30 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
     } as never)
     .eq("id", enrichment.id);
   if (upErr) throw new Error(upErr.message);
+
+  // Regeneration invalidates prior manual approval.
+  try {
+    const { data: prow } = await supabaseAdmin
+      .from("source_products")
+      .select("review_status")
+      .eq("id", product.id)
+      .maybeSingle();
+    const cur = (prow as { review_status?: string | null } | null)?.review_status ?? null;
+    if (cur === "APPROVED") {
+      await supabaseAdmin
+        .from("source_products")
+        .update({
+          review_status: "NEEDS_REVIEW",
+          approved_at: null,
+          approved_by: null,
+        } as never)
+        .eq("id", product.id);
+      await emit(ctx, {
+        level: "info",
+        message: `[review-reset] ${product.nazwa ?? productId} — zatwierdzenie cofnięte po regeneracji opisu Allegro`,
+      });
+    }
+  } catch { /* best-effort */ }
 
   await emit(ctx, { level: "success", message: `✅ Allegro: opis zapisany (${html.length} znaków)` });
 }

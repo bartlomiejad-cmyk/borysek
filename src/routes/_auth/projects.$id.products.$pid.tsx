@@ -9,6 +9,7 @@ import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
 import { runAuditForProduct } from "@/lib/pim/audit.functions";
+import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
@@ -31,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye, CheckCircle2 } from "lucide-react";
 import { ChevronDown, FileText } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -74,6 +75,8 @@ function ProductDetail() {
   const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const auditFn = useServerFn(runAuditForProduct);
+  const approveFn = useServerFn(approveProduct);
+  const unapproveFn = useServerFn(unapproveProduct);
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
@@ -1253,19 +1256,53 @@ function ProductDetail() {
                           </span>
                         )}
                       </CollapsibleTrigger>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!enrichment || audit.isPending}
-                        onClick={() => audit.mutate()}
-                      >
-                        {audit.isPending ? (
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                        )}
-                        {auditData ? "Uruchom ponownie" : "Uruchom audyt"}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const rs = ((data?.product as { review_status?: string | null } | undefined)?.review_status ?? "NONE") as string;
+                          if (rs === "APPROVED") {
+                            return (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-emerald-500/60 text-emerald-700 dark:text-emerald-300"
+                                onClick={async () => {
+                                  await unapproveFn({ data: { productId: pid } });
+                                  toast.success("Cofnięto zatwierdzenie");
+                                  invalidate();
+                                }}
+                              >
+                                <Undo2 className="h-3 w-3 mr-1" /> Cofnij zatwierdzenie
+                              </Button>
+                            );
+                          }
+                          return (
+                            <Button
+                              size="sm"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={async () => {
+                                await approveFn({ data: { productId: pid } });
+                                toast.success("Produkt zatwierdzony");
+                                invalidate();
+                              }}
+                            >
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Zatwierdź produkt
+                            </Button>
+                          );
+                        })()}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!enrichment || audit.isPending}
+                          onClick={() => audit.mutate()}
+                        >
+                          {audit.isPending ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3 mr-1" />
+                          )}
+                          {auditData ? "Uruchom ponownie" : "Uruchom audyt"}
+                        </Button>
+                      </div>
                     </div>
                     <CollapsibleContent className="mt-2 space-y-2 text-xs">
                       {!auditData && (

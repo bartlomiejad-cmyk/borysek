@@ -91,6 +91,7 @@ export const upsertProjectShare = createServerFn({ method: "POST" })
       projectId: z.string().uuid(),
       password: z.string().min(4).max(200),
       rotateToken: z.boolean().optional(),
+      approvedOnly: z.boolean().optional(),
     }).parse(i),
   )
   .handler(async ({ data, context }) => {
@@ -117,20 +118,22 @@ export const upsertProjectShare = createServerFn({ method: "POST" })
 
     if (existing) {
       const token = data.rotateToken ? genToken() : (existing as { token: string }).token;
+      const patch: Record<string, unknown> = {
+        password_hash,
+        salt,
+        password_updated_at: new Date().toISOString(),
+        is_active: true,
+        token,
+      };
+      if (typeof data.approvedOnly === "boolean") patch.approved_only = data.approvedOnly;
       const { data: updated, error } = await supabase
         .from("project_shares")
-        .update({
-          password_hash,
-          salt,
-          password_updated_at: new Date().toISOString(),
-          is_active: true,
-          token,
-        } as never)
+        .update(patch as never)
         .eq("id", (existing as { id: string }).id)
-        .select("token, is_active")
+        .select("token, is_active, approved_only")
         .single();
       if (error) throw new Error(error.message);
-      return updated as { token: string; is_active: boolean };
+      return updated as { token: string; is_active: boolean; approved_only: boolean };
     }
 
     const token = genToken();
@@ -142,11 +145,12 @@ export const upsertProjectShare = createServerFn({ method: "POST" })
         password_hash,
         salt,
         created_by: userId,
+        approved_only: data.approvedOnly ?? false,
       } as never)
-      .select("token, is_active")
+      .select("token, is_active, approved_only")
       .single();
     if (error) throw new Error(error.message);
-    return inserted as { token: string; is_active: boolean };
+    return inserted as { token: string; is_active: boolean; approved_only: boolean };
   });
 
 export const getProjectShare = createServerFn({ method: "GET" })
@@ -156,11 +160,11 @@ export const getProjectShare = createServerFn({ method: "GET" })
     const { supabase } = context;
     const { data: row } = await supabase
       .from("project_shares")
-      .select("token, is_active, password_updated_at, created_at")
+      .select("token, is_active, approved_only, password_updated_at, created_at")
       .eq("project_id", data.projectId)
       .maybeSingle();
     return row as
-      | { token: string; is_active: boolean; password_updated_at: string; created_at: string }
+      | { token: string; is_active: boolean; approved_only: boolean; password_updated_at: string; created_at: string }
       | null;
   });
 
@@ -174,6 +178,21 @@ export const setShareActive = createServerFn({ method: "POST" })
     const { error } = await supabase
       .from("project_shares")
       .update({ is_active: data.active } as never)
+      .eq("project_id", data.projectId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const setShareApprovedOnly = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({ projectId: z.string().uuid(), approvedOnly: z.boolean() }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { error } = await supabase
+      .from("project_shares")
+      .update({ approved_only: data.approvedOnly } as never)
       .eq("project_id", data.projectId);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -235,7 +254,7 @@ async function loadShareForPublic(token: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data, error } = await supabaseAdmin
     .from("project_shares")
-    .select("token, project_id, password_hash, salt, password_updated_at, is_active")
+    .select("token, project_id, password_hash, salt, password_updated_at, is_active, approved_only")
     .eq("token", token)
     .maybeSingle();
   if (error || !data) return null;
@@ -246,6 +265,7 @@ async function loadShareForPublic(token: string) {
     salt: string;
     password_updated_at: string;
     is_active: boolean;
+    approved_only: boolean;
   };
 }
 
@@ -295,7 +315,7 @@ export const listShareProducts = createServerFn({ method: "POST" })
       .select("name")
       .eq("id", share.project_id)
       .maybeSingle();
-    const { data: products, error } = await supabaseAdmin
+    let productQ = supabaseAdmin
       .from("source_products")
       .select(`
         id,
@@ -317,7 +337,9 @@ export const listShareProducts = createServerFn({ method: "POST" })
           status
         )
       `)
-      .eq("project_id", share.project_id)
+      .eq("project_id", share.project_id);
+    if (share.approved_only) productQ = productQ.eq("review_status", "APPROVED");
+    const { data: products, error } = await productQ
       .order("nazwa", { ascending: true })
       .limit(2000);
     if (error) throw new Error(error.message);
@@ -405,6 +427,26 @@ export const submitShareFeedback = createServerFn({ method: "POST" })
       .select("id, created_at")
       .single();
     if (error) throw new Error(error.message);
+    // Client-reported "needs fix" on a specific product demotes it back to
+    // NEEDS_REVIEW so the review pipeline picks it up again. Only when the
+    // current status is APPROVED or NONE — never overwrite AI_FLAGGED.
+    if (data.kind === "needs_fix" && data.productId) {
+      const { data: cur } = await supabaseAdmin
+        .from("source_products")
+        .select("review_status")
+        .eq("id", data.productId)
+        .maybeSingle();
+      const rs = (cur as { review_status?: string | null } | null)?.review_status ?? "NONE";
+      if (rs === "APPROVED" || rs === "NONE") {
+        await supabaseAdmin
+          .from("source_products")
+          .update({
+            review_status: "NEEDS_REVIEW",
+            ...(rs === "APPROVED" ? { approved_at: null, approved_by: null } : {}),
+          } as never)
+          .eq("id", data.productId);
+      }
+    }
     return row as { id: string; created_at: string };
   });
 
