@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { probeManySizes } from "./image-size.server";
+import { probeImageUrls } from "./image-probe.server";
 import {
   slugifyPl,
   clampName,
@@ -554,7 +555,7 @@ export const verifyProduct = createServerFn({ method: "POST" })
 
     const { data: enrichment } = await supabase
       .from("enrichments")
-      .select("id, picked_urls, golden_name, golden_features, hidden_images")
+      .select("id, picked_urls, golden_name, golden_features, hidden_images, image_scores")
       .eq("source_product_id", product.id)
       .maybeSingle();
     if (!enrichment) throw new Error("No enrichment record. Run matching first.");
@@ -579,6 +580,20 @@ export const verifyProduct = createServerFn({ method: "POST" })
       }
     }
     images = images.slice(0, 6);
+
+    // Pre-flight: drop stale URLs (404, unreachable) before the gateway
+    // fetches them server-side — one dead image makes the whole call 400.
+    const existingScores = ((enrichment as { image_scores?: Record<string, ImageScore> | null })
+      .image_scores ?? {}) as Record<string, ImageScore>;
+    if (images.length) {
+      const { alive } = await filterAliveImages(
+        supabase,
+        (enrichment as { id: string }).id,
+        images,
+        existingScores,
+      );
+      images = alive;
+    }
 
     const name = (enrichment as { golden_name?: string | null }).golden_name ?? product.nazwa ?? "";
     const features = ((enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features ?? []);
@@ -638,7 +653,84 @@ export type ImageScore = z.infer<typeof ImageScoreSchema> & {
    * v2 = anchor-image + broader "same/different/unsure" definitions.
    */
   identity_v?: number;
+  /**
+   * True when a pre-flight HEAD probe (or gateway upstream_error) proved this
+   * URL is unreachable / returns 4xx. Cached to skip both HEAD and AI calls
+   * on subsequent runs. Manually accepted (manual_keep) images are never
+   * flipped to dead automatically.
+   */
+  dead?: boolean;
 };
+
+/**
+ * Filter a list of image URLs to those we believe are still reachable.
+ * Consults the enrichments.image_scores cache first ("dead:true" → skip
+ * without network), then runs bounded-parallel HEAD probes on the remainder
+ * and writes new dead markers back so the next run is free.
+ *
+ * Returns the ordered alive subset — safe to pass to AI Gateway as
+ * `image_url` blocks.
+ */
+async function filterAliveImages(
+  supabase: import("@supabase/supabase-js").SupabaseClient,
+  enrichmentId: string,
+  urls: string[],
+  currentScores: Record<string, ImageScore>,
+): Promise<{ alive: string[]; dead: string[] }> {
+  if (!urls.length) return { alive: [], dead: [] };
+
+  const cachedDead: string[] = [];
+  const toProbe: string[] = [];
+  for (const u of urls) {
+    const prev = currentScores[u];
+    if (prev?.dead === true && prev.manual_keep !== true) {
+      cachedDead.push(u);
+    } else {
+      toProbe.push(u);
+    }
+  }
+
+  let probedDead: string[] = [];
+  let alive = urls.filter((u) => !cachedDead.includes(u));
+  if (toProbe.length) {
+    const result = await probeImageUrls(toProbe, { timeoutMs: 4000, concurrency: 8 });
+    probedDead = result.dead;
+    if (probedDead.length) {
+      const nowIso = new Date().toISOString();
+      const merged: Record<string, ImageScore> = { ...currentScores };
+      for (const u of probedDead) {
+        const prev = merged[u];
+        if (prev?.manual_keep === true) continue;
+        merged[u] = {
+          ...(prev ?? {
+            is_central: 0,
+            is_clean: 0,
+            has_packaging: 0,
+            is_banner_or_trash: false,
+            identity: "unsure" as const,
+          }),
+          dead: true,
+          scored_at: nowIso,
+        };
+      }
+      try {
+        await supabase
+          .from("enrichments")
+          .update({ image_scores: merged as never } as never)
+          .eq("id", enrichmentId);
+      } catch (e) {
+        console.warn("[image-probe] failed to persist dead markers", e);
+      }
+      alive = alive.filter((u) => !probedDead.includes(u));
+    }
+  }
+
+  const dead = [...cachedDead, ...probedDead];
+  if (dead.length) {
+    console.log(`[image-probe] enrichment ${enrichmentId}: skipping ${dead.length} dead url(s)`);
+  }
+  return { alive, dead };
+}
 
 /** Current identity check schema version. Bump when prompt semantics change. */
 const IDENTITY_VERSION = 2;
@@ -801,26 +893,48 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       const prev = existing[u];
       if (!prev) return true;
       if (prev.manual_keep === true) return false;
+      // Known-dead URLs are cached; re-probe only on explicit revalidate.
+      if (prev.dead === true && !data.revalidate) return false;
       if (data.revalidate) return true;
       return (prev.identity_v ?? 0) < IDENTITY_VERSION;
     };
-    const toScore = data.urls.filter(needsCheck);
+    let toScore = data.urls.filter(needsCheck);
+    let currentScores: Record<string, ImageScore> = existing;
+
+    // Pre-flight so a stale URL doesn't blow up the whole scoring batch
+    // with `upstream_error: 404 status code when fetching image from URL`.
+    if (toScore.length) {
+      const { alive, dead } = await filterAliveImages(supabase, enRow.id, toScore, existing);
+      toScore = alive;
+      if (dead.length) {
+        // Re-read so the merged writeback below preserves the dead markers
+        // we just persisted.
+        const { data: refreshed } = await supabase
+          .from("enrichments")
+          .select("image_scores")
+          .eq("id", enRow.id)
+          .maybeSingle();
+        currentScores =
+          ((refreshed as { image_scores?: Record<string, ImageScore> } | null)?.image_scores ??
+            existing) as Record<string, ImageScore>;
+      }
+    }
 
     if (!toScore.length) {
-      return { scores: existing, source: "cache" as const, failed: [] as string[] };
+      return { scores: currentScores, source: "cache" as const, failed: [] as string[] };
     }
 
     const settled = await Promise.allSettled(
       toScore.map((u) => scoreOneImage(apiKey, u, productName, brand, anchorUrl && anchorUrl !== u ? anchorUrl : null)),
     );
-    const merged: Record<string, ImageScore> = { ...existing };
+    const merged: Record<string, ImageScore> = { ...currentScores };
     const failed: string[] = [];
     settled.forEach((r, idx) => {
       const url = toScore[idx];
       if (r.status === "fulfilled") {
         // Preserve manual_keep if it was somehow set on this URL between
         // read and write (defence in depth — the filter above already skips).
-        const prevManual = existing[url]?.manual_keep;
+        const prevManual = currentScores[url]?.manual_keep;
         merged[url] = prevManual ? { ...r.value, manual_keep: true } : r.value;
       } else {
         failed.push(url);
@@ -978,16 +1092,18 @@ export const analyzeProductImagesForPrompt = createServerFn({ method: "POST" })
 
     const { data: enrichment } = await supabase
       .from("enrichments")
-      .select("picked_urls, golden_name, golden_features, pinned_main_url, regenerated_main_image")
+      .select("id, picked_urls, golden_name, golden_features, pinned_main_url, regenerated_main_image, image_scores")
       .eq("source_product_id", product.id)
       .maybeSingle();
 
     const en = (enrichment ?? {}) as {
+      id?: string;
       picked_urls?: string[] | null;
       golden_name?: string | null;
       golden_features?: unknown;
       pinned_main_url?: string | null;
       regenerated_main_image?: string | null;
+      image_scores?: Record<string, ImageScore> | null;
     };
 
     const candidates: string[] = [];
@@ -998,8 +1114,20 @@ export const analyzeProductImagesForPrompt = createServerFn({ method: "POST" })
     for (const u of en.picked_urls ?? []) {
       if (u && u !== "__imported__") candidates.push(u);
     }
-    const urls = Array.from(new Set(candidates)).slice(0, 4);
+    let urls = Array.from(new Set(candidates)).slice(0, 4);
     if (!urls.length) throw new Error("Brak zdjęć produktu do analizy");
+
+    // Pre-flight: drop dead URLs so gateway doesn't 400 on a 404 image.
+    if (en.id) {
+      const { alive } = await filterAliveImages(
+        supabase,
+        en.id,
+        urls,
+        (en.image_scores ?? {}) as Record<string, ImageScore>,
+      );
+      if (alive.length) urls = alive;
+    }
+    if (!urls.length) throw new Error("Brak dostępnych zdjęć — wszystkie źródła zwracają 404.");
 
     const productName = (en.golden_name ?? product.nazwa ?? "").trim() || "(bez nazwy)";
     const features = Array.isArray(en.golden_features)
