@@ -952,6 +952,14 @@ function ProjectPage() {
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() => setVerifyOpen(true)}
+                disabled={!!verifyActive}
+              >
+                <RefreshCw className="h-4 w-4 mr-1" /> Weryfikuj zdjęcia AI
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => generateAllegroAll([...selectedIds])}
                 disabled={!!allegroActive}
               >
