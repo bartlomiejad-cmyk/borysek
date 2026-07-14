@@ -3076,16 +3076,26 @@ export async function runPimVisualization(
     constraints_hash?: string;
     manual?: boolean;
     source?: "vision" | "fallback_project" | "fallback_generic";
+    has_text?: boolean;
+    color_anchor_en?: string;
+    reference_urls?: string[];
+    consistency_at?: string;
   };
   const existingMeta = (e.image_meta ?? {}) as Record<string, unknown>;
   const cached = existingMeta.viz_analysis as VizAnalysisRec | undefined;
 
   let analysisPl: { style: string; requirements: string } | null = null;
   let analysisSource: VizAnalysisRec["source"] = "vision";
+  let hasText = true;
+  let colorAnchorEn = "";
+  let cachedReferenceUrls: string[] | null = null;
 
   // 1) Manual overrides are never touched.
   if (cached?.manual && cached.style && cached.requirements) {
     analysisPl = { style: cached.style, requirements: cached.requirements };
+    hasText = cached.has_text ?? true;
+    colorAnchorEn = cached.color_anchor_en ?? "";
+    cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
     await emit(ctx, { level: "info", message: `   • używam ręcznej analizy sceny (manual override)` });
   } else if (
     !forceReanalyze &&
@@ -3098,6 +3108,9 @@ export async function runPimVisualization(
     // 2) Cached analysis for the same source set.
     analysisPl = { style: cached.style, requirements: cached.requirements };
     analysisSource = cached.source ?? "vision";
+    hasText = cached.has_text ?? true;
+    colorAnchorEn = cached.color_anchor_en ?? "";
+    cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
     await emit(ctx, { level: "info", message: `   • używam zapisanej analizy sceny (cache)` });
   } else if (analysisUrls.length) {
     // 3) Fresh vision analysis — up to 1 retry on API error.
@@ -3114,6 +3127,8 @@ export async function runPimVisualization(
           projectConstraintsPl,
         });
         analysisPl = { style: out.style, requirements: out.requirements };
+        hasText = out.has_text;
+        colorAnchorEn = out.color_anchor_en;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (attempt === 0) {
@@ -3144,6 +3159,43 @@ export async function runPimVisualization(
 
   // Persist the analysis (unless it's a preserved manual override) so
   // re-runs skip the Gemini call while the source set is unchanged.
+  //
+  // Reference consistency: pick up to 3 refs from analysisUrls; if we have
+  // 2+ candidates, ask Gemini once which are visually consistent with the
+  // first (top-priority) reference. Cache the URL list on viz_analysis.
+  let referenceUrlsForFal: string[] = [];
+  if (cachedReferenceUrls && cachedReferenceUrls.length) {
+    // Reuse only if every cached URL is still in analysisUrls (source set stable).
+    const set = new Set(analysisUrls);
+    if (cachedReferenceUrls.every((u) => set.has(u))) {
+      referenceUrlsForFal = cachedReferenceUrls.slice(0, 3);
+      await emit(ctx, { level: "info", message: `   • referencje: cache (${referenceUrlsForFal.length})` });
+    }
+  }
+  if (!referenceUrlsForFal.length && analysisUrls.length) {
+    const shortlist = analysisUrls.slice(0, 3);
+    if (shortlist.length === 1) {
+      referenceUrlsForFal = shortlist;
+    } else {
+      try {
+        const apiKey2 = process.env.LOVABLE_API_KEY!;
+        const consistent = await runReferenceConsistencyCheck(apiKey2, shortlist);
+        referenceUrlsForFal = consistent.map((i) => shortlist[i]).filter(Boolean);
+        if (referenceUrlsForFal.length < shortlist.length) {
+          await emit(ctx, {
+            level: "info",
+            message: `   • spójność referencji: ${referenceUrlsForFal.length}/${shortlist.length} pasuje do referencji głównej`,
+          });
+        }
+      } catch {
+        // Fail-safe: use only the top reference so we never mix inconsistent images.
+        referenceUrlsForFal = shortlist.slice(0, 1);
+        await emit(ctx, { level: "warn", message: `   ⚠ nie udało się sprawdzić spójności referencji — używam tylko głównego zdjęcia` });
+      }
+    }
+    if (!referenceUrlsForFal.length) referenceUrlsForFal = shortlist.slice(0, 1);
+  }
+
   if (!cached?.manual && analysisSource !== "fallback_generic") {
     const nextMeta: Record<string, unknown> = {
       ...existingMeta,
@@ -3155,6 +3207,10 @@ export async function runPimVisualization(
         constraints_hash: constraintsHash,
         source: analysisSource,
         manual: false,
+        has_text: hasText,
+        color_anchor_en: colorAnchorEn,
+        reference_urls: referenceUrlsForFal,
+        consistency_at: new Date().toISOString(),
       } satisfies VizAnalysisRec,
     };
     await supabaseAdmin
