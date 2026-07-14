@@ -5,13 +5,14 @@ import { probeManySizes } from "./image-size.server";
 import {
   slugifyPl,
   clampName,
-  clampMetaDescription,
   dedupeKeywords,
   GOLDEN_SEO_SYSTEM_PROMPT,
   sanitizeGoldenDescriptionHtml,
   ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
   sanitizeAllegroDescriptionHtml,
   buildClientGuidelinesBlock,
+  finalizeMetaDescription,
+  SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
 
 const MODEL = "google/gemini-3-flash-preview";
@@ -79,6 +80,7 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
       .max(60)
       .optional()
       .default([]),
+    data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
   });
   return schema.parse(parsed);
 };
