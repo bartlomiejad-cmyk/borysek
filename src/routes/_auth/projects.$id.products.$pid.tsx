@@ -1714,6 +1714,11 @@ function ProductDetail() {
                               EAN potwierdzony
                             </span>
                           )}
+                          {manualByUrl.get(s.url) && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-medium align-middle">
+                              ręczne
+                            </span>
+                          )}
                         </div>
                         <a
                           href={s.url}
