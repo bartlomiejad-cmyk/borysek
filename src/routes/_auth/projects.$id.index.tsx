@@ -33,6 +33,7 @@ import {
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
 import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import { testApifySerp } from "@/lib/pim/apify.functions";
 import { deleteProducts } from "@/lib/pim/products.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
