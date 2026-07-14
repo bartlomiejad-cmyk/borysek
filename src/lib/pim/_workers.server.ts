@@ -3338,7 +3338,16 @@ export async function runPimVisualization(
     return status === 422 || /\b422\b|could not generate|given prompts and images/i.test(msg);
   };
 
-  const buildRequest = (mode: PimVisualizationSlot["mode"]) => {
+  // Colour-anchoring sentence for textless products. Adds concrete named
+  // colours (from vision analysis) so the model doesn't invent a black core.
+  const colourAnchorSentence = !hasText && colorAnchorEn
+    ? ` COLOUR ANCHOR (authoritative): ${colorAnchorEn}. The product's surfaces MUST match these exact named colours in the output.`
+    : "";
+
+  const buildRequest = (mode: PimVisualizationSlot["mode"], extraSuffix?: string) => {
+    const suffix = [colourAnchorSentence, extraSuffix ? ` RETRY CORRECTION: ${extraSuffix}` : ""]
+      .filter(Boolean)
+      .join("");
     if (mode === "safe-edit") {
       const safePrompt = [
         `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
@@ -3346,7 +3355,7 @@ export async function runPimVisualization(
         `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
         projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp, no motion blur, no text overlays, no watermarks.`,
-      ].filter(Boolean).join(" ");
+      ].filter(Boolean).join(" ") + suffix;
       return {
         path: "fal-ai/nano-banana-pro/edit",
         body: {
@@ -3367,7 +3376,7 @@ export async function runPimVisualization(
         `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
         projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
-      ].filter(Boolean).join(" ");
+      ].filter(Boolean).join(" ") + suffix;
       return {
         path: "fal-ai/nano-banana-pro",
         body: {
@@ -3382,7 +3391,7 @@ export async function runPimVisualization(
     return {
       path: "fal-ai/nano-banana-pro/edit",
       body: {
-        prompt: lifePrompt,
+        prompt: `${lifePrompt}${suffix}`,
         image_urls: [] as string[],
         aspect_ratio: "1:1",
         resolution: targetResolution,
@@ -3393,10 +3402,14 @@ export async function runPimVisualization(
   };
 
   const cleanupSource = async (state: PimVisualizationSlot) => {
-    if (!state.sourcePath) return;
+    const paths = [
+      ...(state.sourcePaths ?? []),
+      ...(state.sourcePath ? [state.sourcePath] : []),
+    ];
+    if (!paths.length) return;
     await supabaseAdmin.storage
       .from("regenerated-images")
-      .remove([state.sourcePath])
+      .remove(paths)
       .catch(() => undefined);
   };
 
