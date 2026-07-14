@@ -12,7 +12,12 @@ import { runAuditForProduct } from "@/lib/pim/audit.functions";
 import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
-import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
+import {
+  regenerateMainImage,
+  clearRegeneratedImage,
+  acceptThumbnailCandidate,
+  rejectThumbnailCandidate,
+} from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
@@ -80,6 +85,8 @@ function ProductDetail() {
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
+  const acceptQcFn = useServerFn(acceptThumbnailCandidate);
+  const rejectQcFn = useServerFn(rejectThumbnailCandidate);
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
@@ -415,6 +422,17 @@ function ProductDetail() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
+  const acceptQcMut = useMutation({
+    mutationFn: (enrichmentId: string) => acceptQcFn({ data: { enrichmentId } }),
+    onSuccess: () => { toast.success("Zaakceptowano kandydata miniatury"); invalidate(); },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się zaakceptować kandydata")),
+  });
+  const rejectQcMut = useMutation({
+    mutationFn: (enrichmentId: string) => rejectQcFn({ data: { enrichmentId } }),
+    onSuccess: () => { toast.success("Kandydat odrzucony"); invalidate(); },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się odrzucić kandydata")),
+  });
+
   const pinMut = useMutation({
     mutationFn: (vars: { enrichmentId: string; url: string | null }) => pinFn({ data: vars }),
     onSuccess: () => { invalidate(); },
@@ -747,6 +765,64 @@ function ProductDetail() {
                     <div className="text-muted-foreground">
                       Zalecane min. 800×800px do regeneracji e-commerce.
                       {largeAlt ? " Dostępny większy wariant tego samego zdjęcia." : ""}
+                    </div>
+                  </div>
+                );
+              })()}
+              {(() => {
+                const qc = ((imageMeta as unknown as { thumbnail_qc?: {
+                  bg_white?: boolean;
+                  product_intact?: boolean;
+                  framing_ok?: boolean;
+                  issues?: string[];
+                  candidate_url?: string | null;
+                  attempts?: number;
+                } }).thumbnail_qc) ?? null;
+                if (!qc) return null;
+                const candidate = qc.candidate_url ?? null;
+                if (!candidate) return null;
+                const reasons: string[] = [];
+                if (qc.bg_white === false) reasons.push("tło nie jest białe");
+                if (qc.product_intact === false) reasons.push("produkt zmieniony vs. referencja");
+                if (qc.framing_ok === false) reasons.push("kadr poza normą");
+                const reasonsText = reasons.length ? reasons.join(", ") : "kontrola jakości";
+                return (
+                  <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-[11px] space-y-2">
+                    <div className="font-medium text-amber-800 dark:text-amber-300">
+                      Nowa miniatura nie przeszła kontroli jakości ({reasonsText})
+                    </div>
+                    {qc.issues && qc.issues.length > 0 && (
+                      <ul className="list-disc pl-4 text-muted-foreground">
+                        {qc.issues.slice(0, 3).map((iss, idx) => (
+                          <li key={idx}>{iss}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <a href={candidate} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={candidate}
+                        alt="Kandydat miniatury"
+                        className="w-full max-h-56 object-contain rounded border bg-white"
+                      />
+                    </a>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!enrichment || rejectQcMut.isPending || acceptQcMut.isPending}
+                        onClick={() => enrichment && rejectQcMut.mutate(enrichment.id)}
+                      >
+                        {rejectQcMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                        Odrzuć
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!enrichment || acceptQcMut.isPending || rejectQcMut.isPending}
+                        onClick={() => enrichment && acceptQcMut.mutate(enrichment.id)}
+                      >
+                        {acceptQcMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                        Użyj mimo to
+                      </Button>
                     </div>
                   </div>
                 );

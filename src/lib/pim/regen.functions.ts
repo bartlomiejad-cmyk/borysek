@@ -244,3 +244,96 @@ export const clearRegeneratedImage = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+/**
+ * Accept a QC-flagged thumbnail candidate that the worker kept aside.
+ * Promotes it to the final regenerated slot (and pinned when not locked),
+ * clears the candidate URL so the editor hint disappears.
+ */
+export const acceptThumbnailCandidate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ enrichmentId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }) => {
+    const { data: enr } = await context.supabase
+      .from("enrichments")
+      .select("id, source_product_id, image_meta")
+      .eq("id", data.enrichmentId)
+      .maybeSingle();
+    if (!enr) throw new Error("Nie znaleziono enrichmenta");
+    const meta = ((enr as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
+    const qc = meta.thumbnail_qc as { candidate_url?: string | null } | undefined;
+    const candidateUrl = qc?.candidate_url ?? null;
+    if (!candidateUrl) throw new Error("Brak kandydata do zatwierdzenia");
+
+    // Copy candidate object bytes into the final path so the URL is stable.
+    const finalPath = `${data.enrichmentId}.png`;
+    const candidatePath = `${data.enrichmentId}.candidate.png`;
+    const { data: dl, error: dlErr } = await supabaseAdmin.storage
+      .from("regenerated-images")
+      .download(candidatePath);
+    if (dlErr || !dl) throw new Error(`Nie udało się pobrać kandydata: ${dlErr?.message ?? "brak pliku"}`);
+    const bytes = new Uint8Array(await dl.arrayBuffer());
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([`${data.enrichmentId}.webp`, `${data.enrichmentId}.jpg`])
+      .catch(() => undefined);
+    const { error: upErr } = await supabaseAdmin.storage
+      .from("regenerated-images")
+      .upload(finalPath, bytes, { contentType: "image/png", upsert: true });
+    if (upErr) throw new Error(`Upload zaakceptowany: ${upErr.message}`);
+    const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(finalPath);
+    const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    // Product lock check (never overwrite pinned on locked product).
+    const productId = (enr as { source_product_id: string }).source_product_id;
+    const { data: prod } = await context.supabase
+      .from("source_products")
+      .select("manual_lock")
+      .eq("id", productId)
+      .maybeSingle();
+    const locked = !!(prod as { manual_lock?: boolean } | null)?.manual_lock;
+
+    const nextMeta = { ...meta, thumbnail_qc: { ...(qc ?? {}), candidate_url: null } };
+    const patch: Record<string, unknown> = {
+      regenerated_main_image: publicUrl,
+      image_meta: nextMeta,
+    };
+    if (!locked) patch.pinned_main_url = publicUrl;
+    const { error: dbErr } = await context.supabase
+      .from("enrichments")
+      .update(patch as never)
+      .eq("id", data.enrichmentId);
+    if (dbErr) throw new Error(dbErr.message);
+
+    await supabaseAdmin.storage.from("regenerated-images").remove([candidatePath]).catch(() => undefined);
+    return { url: publicUrl };
+  });
+
+/**
+ * Reject a QC-flagged thumbnail candidate. Deletes the temp file and clears
+ * the candidate marker; the existing regenerated_main_image stays untouched.
+ */
+export const rejectThumbnailCandidate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ enrichmentId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }) => {
+    const { data: enr } = await context.supabase
+      .from("enrichments")
+      .select("id, image_meta")
+      .eq("id", data.enrichmentId)
+      .maybeSingle();
+    if (!enr) throw new Error("Nie znaleziono enrichmenta");
+    const meta = ((enr as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
+    const qc = (meta.thumbnail_qc as Record<string, unknown> | undefined) ?? {};
+    const nextMeta = { ...meta, thumbnail_qc: { ...qc, candidate_url: null } };
+    const { error } = await context.supabase
+      .from("enrichments")
+      .update({ image_meta: nextMeta as never } as never)
+      .eq("id", data.enrichmentId);
+    if (error) throw new Error(error.message);
+    await supabaseAdmin.storage
+      .from("regenerated-images")
+      .remove([`${data.enrichmentId}.candidate.png`])
+      .catch(() => undefined);
+    return { ok: true };
+  });

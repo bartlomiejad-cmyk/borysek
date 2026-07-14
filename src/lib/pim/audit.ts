@@ -69,6 +69,18 @@ export type AuditInput = {
     watermark_urls?: string[];
     name_mismatch?: boolean;
   } | null;
+  /**
+   * Post-generation Vision QC result for the regenerated thumbnail
+   * (persisted on `enrichments.image_meta.thumbnail_qc`). When present,
+   * failing checks demote `main_image_ok` to a warning.
+   */
+  thumbnail_qc?: {
+    bg_white?: boolean;
+    product_intact?: boolean;
+    framing_ok?: boolean;
+    issues?: string[];
+    candidate_url?: string | null;
+  } | null;
 };
 
 // --- Helpers ---------------------------------------------------------------
@@ -180,15 +192,24 @@ export function auditChecks(input: AuditInput): AuditCheck[] {
     const s = input.image_scores?.[mainUrl];
     const isTrash = !!s?.is_banner_or_trash;
     const isDifferent = (s?.identity ?? "") === "different";
+    // Extra warning: post-generation Vision QC of the regenerated thumbnail.
+    const qc = input.thumbnail_qc ?? null;
+    const qcFailures: string[] = [];
+    if (qc) {
+      if (qc.bg_white === false) qcFailures.push("tło nie jest białe");
+      if (qc.product_intact === false) qcFailures.push("produkt zmieniony vs. referencja");
+      if (qc.framing_ok === false) qcFailures.push("kadrowanie poza normą");
+    }
+    const baseIssues = [
+      isTrash ? "główne zdjęcie oznaczone jako banner/śmieć" : "",
+      isDifferent ? "AI ocenia, że to inny produkt" : "",
+    ].filter(Boolean);
+    const allIssues = [...baseIssues, ...(qcFailures.length ? [`QC miniatury: ${qcFailures.join(", ")}`] : [])];
     checks.push({
       check: "main_image_ok",
-      ok: !isTrash && !isDifferent,
+      ok: !isTrash && !isDifferent && qcFailures.length === 0,
       severity: "warn",
-      detail: isTrash
-        ? "główne zdjęcie oznaczone jako banner/śmieć"
-        : isDifferent
-          ? "AI ocenia, że to inny produkt"
-          : undefined,
+      detail: allIssues.length ? allIssues.join("; ") : undefined,
     });
   }
 

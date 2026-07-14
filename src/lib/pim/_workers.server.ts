@@ -29,6 +29,14 @@ import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
 import { advancePipelineStatus } from "./pipeline-status";
 import {
+  runThumbnailQc,
+  buildCorrectionSentence,
+  qcScore,
+  qcAllPass,
+  type ThumbnailQcResult,
+  type ThumbnailQcPersisted,
+} from "./thumbnail-qc";
+import {
   auditChecks,
   AUDIT_SYSTEM_PROMPT,
   buildAuditUserPrompt,
@@ -1033,36 +1041,132 @@ export async function runRegenerateMedia(
   const preparedMain: { url: string; path: string }[] = [];
   try {
     for (const u of mainSourceUrls) preparedMain.push(await prepareFalSource(enrichment.id, u));
-    const mainResp = await callFal(
-      "fal-ai/bytedance/seedream/v4/edit",
-      {
-        image_urls: preparedMain.map((p) => p.url),
-        prompt: mainPrompt,
-        image_size: { width: settings.target_resolution, height: settings.target_resolution },
-        num_images: 1,
-        sync_mode: true,
-        enable_safety_checker: true,
-        output_format: "jpeg",
-      },
-      FAL_KEY,
-    );
-    const mainUrl = mainResp.images?.[0]?.url;
-    if (!mainUrl) throw new Error("FAL nie zwróciło głównego zdjęcia");
+    // -----------------------------------------------------------------------
+    // Generate the packshot with up to 3 attempts (initial + 2 QC retries).
+    // Each attempt uploads to a candidate path so Gemini can fetch the URL,
+    // then Vision compares against the source reference. Best attempt wins;
+    // tiebreak by `bg_white`. When QC still fails after retries AND a previous
+    // main image exists, we do NOT auto-replace it — the candidate is kept
+    // for the user to accept / reject from the editor UI.
+    // -----------------------------------------------------------------------
+    const referenceForQc = mainSourceUrls[0];
+    type Attempt = { bytes: Uint8Array; publicUrl: string; qc: ThumbnailQcResult };
+    let best: Attempt | null = null;
+    let qcSkipped = false;
+    let currentPrompt = mainPrompt;
+    const candidatePath = `${enrichment.id}.candidate.png`;
+    const maxAttempts = 3;
+    let attempts = 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      attempts = attempt;
+      const mainResp = await callFal(
+        "fal-ai/bytedance/seedream/v4/edit",
+        {
+          image_urls: preparedMain.map((p) => p.url),
+          prompt: currentPrompt,
+          image_size: { width: settings.target_resolution, height: settings.target_resolution },
+          num_images: 1,
+          sync_mode: true,
+          enable_safety_checker: true,
+          output_format: "jpeg",
+        },
+        FAL_KEY,
+      );
+      const mainUrl = mainResp.images?.[0]?.url;
+      if (!mainUrl) throw new Error("FAL nie zwróciło głównego zdjęcia");
 
-    // Deterministic pure-white background: strip whatever tint the model left
-    // and composite the product over flat #FFFFFF before uploading.
-    const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY);
+      const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY);
+      const { error: candErr } = await supabaseAdmin.storage
+        .from("regenerated-images")
+        .upload(candidatePath, mainBytes, { contentType: "image/png", upsert: true });
+      if (candErr) throw new Error(`Upload kandydata: ${candErr.message}`);
+      const { data: cPub } = supabaseAdmin.storage
+        .from("regenerated-images")
+        .getPublicUrl(candidatePath);
+      const candidatePublicUrl = `${cPub.publicUrl}?v=${Date.now()}`;
+
+      let qc: ThumbnailQcResult;
+      try {
+        qc = await runThumbnailQc(apiKey, referenceForQc, candidatePublicUrl);
+      } catch (e) {
+        qcSkipped = true;
+        qc = {
+          bg_white: true,
+          product_intact: true,
+          framing_ok: true,
+          issues: [`QC pominięte: ${e instanceof Error ? e.message : String(e)}`],
+        };
+      }
+      const current: Attempt = { bytes: mainBytes, publicUrl: candidatePublicUrl, qc };
+      if (
+        !best ||
+        qcScore(current.qc) > qcScore(best.qc) ||
+        (qcScore(current.qc) === qcScore(best.qc) && current.qc.bg_white && !best.qc.bg_white)
+      ) {
+        best = current;
+      }
+      if (qcSkipped || qcAllPass(qc)) break;
+      if (attempt < maxAttempts) {
+        currentPrompt = `${mainPrompt}\n\n${buildCorrectionSentence(qc)}`;
+        await emit(ctx, {
+          level: "warn",
+          message: `🔁 Miniatura ${productId.slice(0, 8)} nie przeszła QC (próba ${attempt}: ${qc.issues.slice(0, 2).join("; ") || "detale poniżej progu"}) — poprawiam prompt`,
+        });
+      }
+    }
+    if (!best) throw new Error("Nie udało się wygenerować miniatury");
+
+    const passed = qcSkipped || qcAllPass(best.qc);
     const mainPath = `${enrichment.id}.png`;
-    await supabaseAdmin.storage
-      .from("regenerated-images")
-      .remove([`${enrichment.id}.webp`, `${enrichment.id}.jpg`])
-      .catch(() => undefined);
-    const { error: upErr } = await supabaseAdmin.storage
-      .from("regenerated-images")
-      .upload(mainPath, mainBytes, { contentType: "image/png", upsert: true });
-    if (upErr) throw new Error(`Upload main: ${upErr.message}`);
-    const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(mainPath);
-    const mainPublic = `${pub.publicUrl}?v=${Date.now()}`;
+
+    // Existing main image on this product (if any) — used to decide whether
+    // to auto-promote a failed candidate.
+    const existingRegen = ((enrichment as { regenerated_main_image?: string | null }).regenerated_main_image) ?? null;
+    const existingPinned = ((enrichment as { pinned_main_url?: string | null }).pinned_main_url) ?? null;
+    const hasExistingMain = !!(existingRegen || existingPinned);
+
+    let mainPublic: string | null = null;
+    let candidateUrlToStore: string | null = null;
+    if (passed || !hasExistingMain) {
+      // Promote candidate → final path. Removes legacy extensions first.
+      await supabaseAdmin.storage
+        .from("regenerated-images")
+        .remove([`${enrichment.id}.webp`, `${enrichment.id}.jpg`])
+        .catch(() => undefined);
+      const { error: upErr } = await supabaseAdmin.storage
+        .from("regenerated-images")
+        .upload(mainPath, best.bytes, { contentType: "image/png", upsert: true });
+      if (upErr) throw new Error(`Upload main: ${upErr.message}`);
+      const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(mainPath);
+      mainPublic = `${pub.publicUrl}?v=${Date.now()}`;
+      // Candidate no longer needed once promoted.
+      await supabaseAdmin.storage.from("regenerated-images").remove([candidatePath]).catch(() => undefined);
+    } else {
+      // QC failed AND user already has a main image — keep it, expose the
+      // candidate URL so the editor can offer accept / reject.
+      candidateUrlToStore = best.publicUrl;
+      await emit(ctx, {
+        level: "warn",
+        message: `⚠️ Miniatura ${productId.slice(0, 8)} nie przeszła QC — zachowuję dotychczasową; kandydat czeka na decyzję.`,
+      });
+    }
+
+    const qcPersisted: ThumbnailQcPersisted = {
+      ...best.qc,
+      attempts,
+      at: new Date().toISOString(),
+      candidate_url: candidateUrlToStore,
+    };
+    // Merge onto existing image_meta without disturbing per-URL {w,h} entries.
+    const mergedImageMeta = {
+      ...(((enrichment as unknown as { image_meta?: Record<string, unknown> }).image_meta) ?? {}),
+      thumbnail_qc: qcPersisted,
+    } as Record<string, unknown>;
+
+    await emit(ctx, {
+      level: passed ? "success" : "warn",
+      message: `🖼  Miniatura ${productId.slice(0, 8)} — QC: bg_white=${best.qc.bg_white ? "✓" : "✗"}, produkt=${best.qc.product_intact ? "✓" : "✗"}, kadr=${best.qc.framing_ok ? "✓" : "✗"} (${attempts} prób${attempts === 1 ? "a" : "y"}${qcSkipped ? ", QC pominięte" : ""})`,
+    });
 
     const usedSet = new Set(mainSourceUrls);
     const galleryCandidates = [
@@ -1124,14 +1228,19 @@ export async function runRegenerateMedia(
     const { error: dbErr } = await supabaseAdmin
       .from("enrichments")
       .update({
-        regenerated_main_image: mainPublic,
+        // Only update image URLs when we actually promoted a new candidate.
+        ...(mainPublic ? { regenerated_main_image: mainPublic } : {}),
         // Never overwrite a manually-pinned main image on a locked product.
-        ...(productLocked ? {} : { pinned_main_url: mainPublic }),
+        ...(mainPublic && !productLocked ? { pinned_main_url: mainPublic } : {}),
         ai_gallery_urls: galleryUrls as never,
+        image_meta: mergedImageMeta as never,
       } as never)
       .eq("id", enrichment.id);
     if (dbErr) throw new Error(dbErr.message);
-    await advancePipelineStatus(supabaseAdmin as never, product.id, "VISUALS_READY");
+    // Only advance the pipeline when we actually produced a usable thumbnail.
+    if (mainPublic) {
+      await advancePipelineStatus(supabaseAdmin as never, product.id, "VISUALS_READY");
+    }
   } finally {
     for (const p of preparedMain) {
       await supabaseAdmin.storage.from("regenerated-images").remove([p.path]).catch(() => undefined);
@@ -3502,7 +3611,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
     .select(
-      "id, golden_name, golden_slug, golden_meta_description, golden_description, golden_features, data_sufficiency, score_breakdown, picked_urls, pinned_main_url, regenerated_main_image, image_scores, quality",
+      "id, golden_name, golden_slug, golden_meta_description, golden_description, golden_features, data_sufficiency, score_breakdown, picked_urls, pinned_main_url, regenerated_main_image, image_scores, quality, image_meta",
     )
     .eq("source_product_id", product.id)
     .maybeSingle();
@@ -3528,6 +3637,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     regenerated_main_image?: string | null;
     image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string | null }> | null;
     quality?: { watermark_urls?: string[]; name_mismatch?: boolean } | null;
+    image_meta?: Record<string, unknown> | null;
   };
 
   await emit(ctx, {
@@ -3549,6 +3659,13 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     regenerated_main_image: en.regenerated_main_image,
     image_scores: en.image_scores,
     quality: en.quality,
+    thumbnail_qc: (en.image_meta as { thumbnail_qc?: {
+      bg_white?: boolean;
+      product_intact?: boolean;
+      framing_ok?: boolean;
+      issues?: string[];
+      candidate_url?: string | null;
+    } } | null | undefined)?.thumbnail_qc ?? null,
   });
 
   const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;
