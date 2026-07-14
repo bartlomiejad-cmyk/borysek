@@ -164,6 +164,7 @@ export type Database = {
           allegro_description: string | null
           allegro_generated_at: string | null
           audit: Json | null
+          compat_suggested: boolean
           data_sufficiency: string | null
           error: string | null
           generated_at: string | null
@@ -198,6 +199,7 @@ export type Database = {
           allegro_description?: string | null
           allegro_generated_at?: string | null
           audit?: Json | null
+          compat_suggested?: boolean
           data_sufficiency?: string | null
           error?: string | null
           generated_at?: string | null
@@ -232,6 +234,7 @@ export type Database = {
           allegro_description?: string | null
           allegro_generated_at?: string | null
           audit?: Json | null
+          compat_suggested?: boolean
           data_sufficiency?: string | null
           error?: string | null
           generated_at?: string | null
@@ -625,6 +628,7 @@ export type Database = {
           id: string
           kod: string | null
           manual_lock: boolean
+          matching_mode: string
           nazwa: string | null
           pipeline_status: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes: string | null
@@ -641,6 +645,7 @@ export type Database = {
           id?: string
           kod?: string | null
           manual_lock?: boolean
+          matching_mode?: string
           nazwa?: string | null
           pipeline_status?: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes?: string | null
@@ -657,6 +662,7 @@ export type Database = {
           id?: string
           kod?: string | null
           manual_lock?: boolean
+          matching_mode?: string
           nazwa?: string | null
           pipeline_status?: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes?: string | null
