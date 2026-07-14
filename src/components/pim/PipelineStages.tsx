@@ -8,6 +8,7 @@ import {
   ImageIcon,
   ShieldCheck,
   ArrowRight,
+  Check,
 } from "lucide-react";
 import type { PipelineSummary } from "@/lib/pim/queries.functions";
 
@@ -25,10 +26,12 @@ type Stage = {
   n: number;
   title: string;
   Icon: typeof Upload;
-  count: (s: PipelineSummary) => number;
-  substatus: (s: PipelineSummary) => string;
-  // For "next step" recommendation — pending count that drives the CTA.
+  // Cumulative done / total for this stage.
+  progress: (s: PipelineSummary) => { done: number; total: number };
+  // Immediate pending count at this stage (drives "next step" + substatus).
   pending: (s: PipelineSummary) => number;
+  // Substatus text when stage is not yet complete.
+  remainingLabel: (pending: number) => string;
   ctaLabel: string;
   nextSentence: (n: number) => string;
 };
@@ -39,9 +42,9 @@ const STAGES: Stage[] = [
     n: 1,
     title: "Import",
     Icon: Upload,
-    count: (s) => s.total,
-    substatus: (s) => (s.total === 0 ? "brak produktów" : `${s.total} produktów`),
+    progress: (s) => ({ done: s.total, total: Math.max(s.total, 1) }),
     pending: (s) => (s.total === 0 ? 1 : 0),
+    remainingLabel: () => "brak produktów",
     ctaLabel: "Zaimportuj produkty",
     nextSentence: () => "Zacznij od zaimportowania produktów z CSV lub linków.",
   },
@@ -50,9 +53,9 @@ const STAGES: Stage[] = [
     n: 2,
     title: "Źródła",
     Icon: Search,
-    count: (s) => s.imported,
-    substatus: (s) => (s.imported ? `${s.imported} bez źródeł` : "wszystkie mają źródła"),
+    progress: (s) => ({ done: Math.max(0, s.total - s.imported), total: s.total }),
     pending: (s) => s.imported,
+    remainingLabel: (n) => `${n} bez źródeł`,
     ctaLabel: "Wyszukaj źródła",
     nextSentence: (n) => `${n} produktów bez źródeł — uruchom wyszukiwanie Firecrawl.`,
   },
@@ -61,9 +64,12 @@ const STAGES: Stage[] = [
     n: 3,
     title: "Dopasowanie",
     Icon: Link2,
-    count: (s) => s.sources_found,
-    substatus: (s) => (s.sources_found ? `${s.sources_found} do dopasowania` : "wszystko dopasowane"),
+    progress: (s) => ({
+      done: Math.max(0, s.total - s.imported - s.sources_found),
+      total: s.total,
+    }),
     pending: (s) => s.sources_found,
+    remainingLabel: (n) => `${n} do dopasowania`,
     ctaLabel: "Dopasuj",
     nextSentence: (n) => `${n} produktów oczekuje na dopasowanie źródeł.`,
   },
@@ -72,9 +78,12 @@ const STAGES: Stage[] = [
     n: 4,
     title: "Treści",
     Icon: Sparkles,
-    count: (s) => s.matched,
-    substatus: (s) => (s.matched ? `${s.matched} do generacji` : "złote rekordy gotowe"),
+    progress: (s) => ({
+      done: Math.max(0, s.total - s.imported - s.sources_found - s.matched),
+      total: s.total,
+    }),
     pending: (s) => s.matched,
+    remainingLabel: (n) => `${n} do generacji`,
     ctaLabel: "Generuj złote rekordy",
     nextSentence: (n) => `${n} produktów gotowych do generacji złotego rekordu.`,
   },
@@ -83,9 +92,9 @@ const STAGES: Stage[] = [
     n: 5,
     title: "Media",
     Icon: ImageIcon,
-    count: (s) => s.golden_ready,
-    substatus: (s) => (s.golden_ready ? `${s.golden_ready} do regeneracji/wizualizacji` : "media gotowe"),
+    progress: (s) => ({ done: s.visuals_ready, total: s.total }),
     pending: (s) => s.golden_ready,
+    remainingLabel: (n) => `${n} do regeneracji/wizualizacji`,
     ctaLabel: "Regeneruj tła",
     nextSentence: (n) => `${n} produktów oczekuje na regenerację teł lub wizualizacje.`,
   },
@@ -94,12 +103,9 @@ const STAGES: Stage[] = [
     n: 6,
     title: "Review",
     Icon: ShieldCheck,
-    count: (s) => s.review_queue,
-    substatus: (s) =>
-      s.review_queue
-        ? `${s.review_queue} do weryfikacji · ${s.review_approved} zatwierdzonych`
-        : `${s.review_approved} zatwierdzonych`,
+    progress: (s) => ({ done: s.review_approved, total: s.total }),
     pending: (s) => s.review_queue,
+    remainingLabel: (n) => `${n} do weryfikacji`,
     ctaLabel: "Weryfikuj zdjęcia AI",
     nextSentence: (n) => `${n} produktów do weryfikacji przez zespół.`,
   },
@@ -107,14 +113,12 @@ const STAGES: Stage[] = [
 
 export function PipelineStages({
   summary,
-  activeStage,
-  onStageClick,
   onPrimaryAction,
+  onShowPending,
 }: {
   summary: PipelineSummary;
-  activeStage: StageKey;
-  onStageClick: (stage: Exclude<StageKey, "NONE">) => void;
   onPrimaryAction: (stage: Exclude<StageKey, "NONE">) => void;
+  onShowPending?: (stage: Exclude<StageKey, "NONE">) => void;
 }) {
   // Determine "next step": the earliest stage with the largest pending count.
   let best: Stage | null = null;
@@ -131,18 +135,18 @@ export function PipelineStages({
     <section className="mb-6">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         {STAGES.map((stg) => {
-          const isActive = activeStage === stg.key;
           const isBest = best?.key === stg.key;
           const Icon = stg.Icon;
+          const { done, total } = stg.progress(summary);
+          const pending = stg.pending(summary);
+          const complete = total > 0 && done >= total && pending === 0;
           return (
-            <button
+            <div
               key={stg.key}
-              type="button"
-              onClick={() => onStageClick(stg.key)}
               className={cn(
-                "text-left rounded-xl border p-3 transition-all bg-card hover:bg-accent/40",
-                isActive
-                  ? "border-primary ring-2 ring-primary/40 bg-primary/5"
+                "rounded-xl border p-3 bg-card",
+                complete
+                  ? "border-emerald-400/60 bg-emerald-500/5"
                   : isBest
                   ? "border-amber-400/70"
                   : "border-border",
@@ -154,14 +158,18 @@ export function PipelineStages({
                 </span>
                 <Icon className="h-3.5 w-3.5" />
                 <span className="font-medium text-foreground">{stg.title}</span>
+                {complete && (
+                  <Check className="ml-auto h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                )}
               </div>
-              <div className="mt-2 font-serif text-3xl leading-none">
-                {stg.count(summary)}
+              <div className="mt-2 font-serif text-3xl leading-none tabular-nums">
+                {done}
+                <span className="text-lg text-muted-foreground">/{total}</span>
               </div>
               <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                {stg.substatus(summary)}
+                {complete ? "gotowe" : pending > 0 ? stg.remainingLabel(pending) : "—"}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -171,6 +179,18 @@ export function PipelineStages({
           <div className="text-sm">
             <span className="font-semibold">Następny krok · Etap {best.n} {best.title}:</span>{" "}
             <span className="text-muted-foreground">{best.nextSentence(bestPending)}</span>
+            {onShowPending && best.key !== "IMPORT" && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="text-primary underline underline-offset-2 hover:no-underline"
+                  onClick={() => onShowPending(best!.key)}
+                >
+                  pokaż te produkty
+                </button>
+              </>
+            )}
           </div>
           <Button size="sm" onClick={() => onPrimaryAction(best!.key)}>
             {best.ctaLabel} ({bestPending}) <ArrowRight className="ml-2 h-4 w-4" />
