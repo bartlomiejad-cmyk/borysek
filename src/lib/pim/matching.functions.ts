@@ -553,7 +553,13 @@ export const runMatching = createServerFn({ method: "POST" })
         );
         const rankedFull = positive
           .filter((x) => dedup.keptUrls.has(x.url))
-          .sort((a, b) => b.total - a.total)
+          .sort((a, b) => {
+            // EAN-confirmed sources always rank above non-confirmed.
+            const ea = a.ean_confirmed ? 1 : 0;
+            const eb = b.ean_confirmed ? 1 : 0;
+            if (ea !== eb) return eb - ea;
+            return b.total - a.total;
+          })
           .slice(0, TOP_SOURCES_PER_PRODUCT);
         const ranked = rankedFull.map((x) => x.url);
         const winners: BreakdownEntry[] = rankedFull.map((x) => ({
@@ -563,6 +569,7 @@ export const runMatching = createServerFn({ method: "POST" })
           trusted_boost: x.trusted_boost,
           variant_key: dedup.keyByUrl.get(x.url) ?? null,
           deduped: false,
+          ean_confirmed: x.ean_confirmed,
         }));
         const droppedByDedup: BreakdownEntry[] = positive
           .filter((x) => dedup.deduped.has(x.url))
@@ -573,6 +580,7 @@ export const runMatching = createServerFn({ method: "POST" })
             trusted_boost: x.trusted_boost,
             variant_key: dedup.keyByUrl.get(x.url) ?? null,
             deduped: true,
+            ean_confirmed: x.ean_confirmed,
           }));
         u.score_breakdown = [...winners, ...droppedByDedup];
 
