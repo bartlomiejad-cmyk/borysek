@@ -1,14 +1,23 @@
 /**
- * Apify SERP client — thin wrapper around the
- * `scraperlink/google-search-results-serp-scraper` actor used as an
- * alternative to Firecrawl search in discovery.
+ * Apify SERP client — wraps the
+ * `scraperlink/google-search-results-serp-scraper` actor.
+ *
+ * Actor contract (per actor docs):
+ *   Input : { keyword: string (REQUIRED, single query),
+ *             limit: 10-100, page?: number,
+ *             gl?: ISO country (localizes results),
+ *             hl?: Google UI language, lr?: language restriction }
+ *     -- NEVER send `country`; that key also forces `proxy_location`, whose
+ *        supported list is limited to US/CA and rejects PL.
+ *   Output: { query, results: [{ position, title, url, description }],
+ *             next_page, next_start }  OR  { error: string }
+ *   Rate  : 5 RPS per account. Keywords sequential per run, max 5 concurrent runs.
  *
  * Server-only. Token is read at call time so a missing secret produces a
  * clear runtime error instead of a build-time surprise.
  */
 
 const ACTOR_ID = "scraperlink~google-search-results-serp-scraper";
-const ACTOR_INFO_URL = `https://api.apify.com/v2/acts/${ACTOR_ID}`;
 const ACTOR_RUN_URL = `https://api.apify.com/v2/acts/${ACTOR_ID}/run-sync-get-dataset-items`;
 
 export type SerpResult = {
@@ -19,17 +28,28 @@ export type SerpResult = {
   domain: string;
 };
 
+export type SerpMeta = {
+  provider: "apify";
+  input: { keyword: string; gl: string; hl: string; limit: number };
+  results_count: number;
+  error?: string;
+};
+
 export type SerpBucket = {
   query: string;
   results: SerpResult[];
+  meta: SerpMeta;
 };
 
 export type SerpOpts = {
-  country?: string;   // ISO code, default "PL"
-  language?: string;  // 2-letter, default "pl"
-  resultsPerQuery?: number; // default 100
+  gl?: string;        // ISO country for localized results, default "PL"
+  hl?: string;        // Google UI language, default "pl"
+  lr?: string;        // optional language restriction (e.g. "lang_pl")
+  limit?: number;     // 10-100, default 100
   timeoutMs?: number; // default 60_000
 };
+
+import { stripTrackingParams } from "./query-variants";
 
 function requireApifyToken(): string {
   const t = process.env.APIFY_TOKEN;
@@ -49,86 +69,39 @@ function hostOf(u: string): string {
   }
 }
 
-/**
- * Cache actor input field-name hints for the lifetime of the Worker
- * instance. We only need this once per process — actor input schemas
- * evolve rarely and any change is caught by the settings validation.
- */
-let cachedFieldHints: { multi: string | null; single: string | null } | null = null;
-
-async function detectFieldNames(token: string): Promise<{ multi: string | null; single: string | null }> {
-  if (cachedFieldHints) return cachedFieldHints;
-  try {
-    const res = await fetch(`${ACTOR_INFO_URL}?token=${encodeURIComponent(token)}`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
-    if (res.ok) {
-      const j = (await res.json()) as { data?: { defaultRunOptions?: unknown; exampleRunInput?: { body?: string } } };
-      const example = j?.data?.exampleRunInput?.body;
-      if (typeof example === "string") {
-        try {
-          const parsed = JSON.parse(example) as Record<string, unknown>;
-          const multi = ["queries", "searchTerms", "searchQueries", "keywords"].find((k) =>
-            Array.isArray(parsed[k]) || typeof parsed[k] === "string",
-          ) ?? null;
-          const single = ["query", "searchTerm", "keyword"].find((k) => typeof parsed[k] === "string") ?? null;
-          cachedFieldHints = { multi, single };
-          return cachedFieldHints;
-        } catch {
-          // ignore parse errors — fall through to defaults
-        }
-      }
-    }
-  } catch {
-    // ignore — we fall back to defaults
-  }
-  // Sensible defaults for scraperlink actor / most Google SERP actors.
-  cachedFieldHints = { multi: "queries", single: "query" };
-  return cachedFieldHints;
-}
-
 type DatasetItem = {
-  searchQuery?: { term?: string; query?: string } | string;
   query?: string;
-  keyword?: string;
-  organicResults?: Array<{
+  results?: Array<{
     position?: number;
-    rank?: number;
     title?: string;
     url?: string;
-    link?: string;
     description?: string;
-    snippet?: string;
-    displayedUrl?: string;
   }>;
-  results?: Array<Record<string, unknown>>;
+  next_page?: string | null;
+  next_start?: number | null;
+  error?: string;
 };
 
-function normalizeItem(item: DatasetItem, fallbackQuery: string): SerpBucket {
-  let q = fallbackQuery;
-  const sq = item.searchQuery;
-  if (typeof sq === "string" && sq.trim()) q = sq.trim();
-  else if (sq && typeof sq === "object") q = (sq.term || sq.query || fallbackQuery).toString();
-  else if (typeof item.query === "string" && item.query.trim()) q = item.query.trim();
-  else if (typeof item.keyword === "string" && item.keyword.trim()) q = item.keyword.trim();
-
-  const raw = item.organicResults ?? (item.results as DatasetItem["organicResults"] | undefined) ?? [];
-  const results: SerpResult[] = [];
+function normalizeResults(items: DatasetItem[]): SerpResult[] {
+  const out: SerpResult[] = [];
   let i = 0;
-  for (const r of raw) {
-    const url = (r?.url || r?.link || "").toString().trim();
-    if (!url) continue;
-    i++;
-    results.push({
-      position: Number(r?.position ?? r?.rank ?? i) || i,
-      title: (r?.title ?? "").toString().slice(0, 400),
-      url,
-      snippet: (r?.description ?? r?.snippet ?? "").toString().slice(0, 600),
-      domain: hostOf(url),
-    });
+  for (const item of items) {
+    for (const r of item.results ?? []) {
+      const rawUrl = (r?.url ?? "").toString().trim();
+      if (!rawUrl) continue;
+      const url = stripTrackingParams(rawUrl);
+      i++;
+      out.push({
+        position: Number(r?.position ?? i) || i,
+        title: (r?.title ?? "").toString().slice(0, 400),
+        url,
+        // Actor field is `description` — map it to our `snippet` shape.
+        snippet: (r?.description ?? "").toString().slice(0, 600),
+        domain: hostOf(url),
+      });
+    }
   }
-  return { query: q, results };
+  return out;
 }
 
 async function runOnce(
@@ -149,23 +122,29 @@ async function runOnce(
       const text = await res.text().catch(() => "");
       const trimmed = text.slice(0, 300);
       const err = new Error(`Apify actor HTTP ${res.status}${trimmed ? `: ${trimmed}` : ""}`);
-      // Mark 5xx as retriable via a flag on the Error object.
       (err as Error & { retriable?: boolean }).retriable = res.status >= 500;
       throw err;
     }
     const j = (await res.json()) as DatasetItem[] | { items?: DatasetItem[] };
-    if (Array.isArray(j)) return j;
-    return Array.isArray(j?.items) ? j.items : [];
+    const arr = Array.isArray(j) ? j : Array.isArray(j?.items) ? j.items! : [];
+    // Actor communicates job-level errors via an { error } dataset item.
+    const errItem = arr.find((it) => typeof (it as DatasetItem).error === "string" && (it as DatasetItem).error);
+    if (errItem) {
+      const e = new Error(`Apify actor: ${(errItem as DatasetItem).error}`);
+      (e as Error & { retriable?: boolean }).retriable = false;
+      throw e;
+    }
+    return arr;
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
- * Run one Apify SERP job for a batch of queries (typically the query
- * variants of a single product). Returns one bucket per query, in the
- * order they were requested. Silently drops queries the actor did not
- * return.
+ * Run one Apify actor invocation per query variant, sequentially (respects
+ * the actor's 5 RPS limit trivially). Each variant becomes its own bucket
+ * with meta describing the exact input we sent — the caller logs this per
+ * product for audit/debug.
  */
 export async function runSerpSearch(
   queries: string[],
@@ -175,67 +154,44 @@ export async function runSerpSearch(
   const clean = queries.map((q) => q.trim()).filter(Boolean);
   if (!clean.length) return [];
 
-  const country = (opts.country ?? "PL").toUpperCase();
-  const language = (opts.language ?? "pl").toLowerCase();
-  const resultsPerQuery = Math.max(10, Math.min(100, opts.resultsPerQuery ?? 100));
+  const gl = (opts.gl ?? "PL").toUpperCase();
+  const hl = (opts.hl ?? "pl").toLowerCase();
+  const limit = Math.max(10, Math.min(100, opts.limit ?? 100));
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
-  const { multi, single } = await detectFieldNames(token);
-
-  // Common Apify Google SERP inputs — extra fields are ignored by the actor.
-  const commonInput: Record<string, unknown> = {
-    countryCode: country,
-    languageCode: language,
-    country,
-    language,
-    resultsPerPage: resultsPerQuery,
-    maxPagesPerQuery: 1,
-    resultsPerQuery,
-    maxItems: resultsPerQuery,
-  };
-
-  const attempt = async (queriesInRun: string[]): Promise<DatasetItem[]> => {
-    const input: Record<string, unknown> = { ...commonInput };
-    if (multi) input[multi] = queriesInRun;
-    if (single && queriesInRun.length === 1) input[single] = queriesInRun[0];
-    // Some actors want a newline-joined string in `queries`.
-    if (!multi && !single) input.queries = queriesInRun.join("\n");
+  const buckets: SerpBucket[] = [];
+  for (const keyword of clean) {
+    const input: Record<string, unknown> = { keyword, limit, gl, hl };
+    if (opts.lr) input.lr = opts.lr;
+    const meta: SerpMeta = {
+      provider: "apify",
+      input: { keyword, gl, hl, limit },
+      results_count: 0,
+    };
     try {
-      return await runOnce(token, input, timeoutMs);
+      let items = await runOnce(token, input, timeoutMs).catch(async (e) => {
+        const err = e as Error & { retriable?: boolean };
+        if (err.retriable || err.name === "AbortError") {
+          return await runOnce(token, input, timeoutMs);
+        }
+        throw err;
+      });
+      if (!Array.isArray(items)) items = [];
+      const results = normalizeResults(items);
+      meta.results_count = results.length;
+      buckets.push({ query: keyword, results, meta });
     } catch (e) {
-      const err = e as Error & { retriable?: boolean };
-      if (err.retriable || err.name === "AbortError") {
-        // One retry on 5xx / timeout.
-        return await runOnce(token, input, timeoutMs);
-      }
-      throw err;
+      meta.error = e instanceof Error ? e.message : String(e);
+      buckets.push({ query: keyword, results: [], meta });
     }
-  };
-
-  const items = multi
-    ? await attempt(clean)
-    : (
-        await Promise.all(clean.map((q) => attempt([q]).catch(() => [] as DatasetItem[])))
-      ).flat();
-
-  // Map items → buckets in the requested order.
-  const byQuery = new Map<string, SerpBucket>();
-  clean.forEach((q, idx) => {
-    // Try to align each item to a query — the actor usually echoes it.
-    const raw = items[idx] ?? items.find((it) => {
-      const bucket = normalizeItem(it, q);
-      return bucket.query.trim().toLowerCase() === q.trim().toLowerCase();
-    });
-    const bucket = raw ? normalizeItem(raw, q) : { query: q, results: [] };
-    if (!byQuery.has(q)) byQuery.set(q, bucket);
-  });
-  return clean.map((q) => byQuery.get(q) ?? { query: q, results: [] });
+  }
+  return buckets;
 }
 
 export async function serpHealthCheck(): Promise<{ ok: boolean; count: number; error?: string }> {
   try {
-    const [b] = await runSerpSearch(["test PL support"], { resultsPerQuery: 10, timeoutMs: 45_000 });
-    return { ok: (b?.results.length ?? 0) > 0, count: b?.results.length ?? 0 };
+    const [b] = await runSerpSearch(["test PL support"], { limit: 10, timeoutMs: 45_000 });
+    return { ok: (b?.results.length ?? 0) > 0, count: b?.results.length ?? 0, error: b?.meta.error };
   } catch (e) {
     return { ok: false, count: 0, error: e instanceof Error ? e.message : String(e) };
   }
@@ -243,17 +199,27 @@ export async function serpHealthCheck(): Promise<{ ok: boolean; count: number; e
 
 /**
  * Rich connection test used by the settings UI: returns the top-5 results
- * so the user can visually confirm PL locale + real Google output.
+ * plus the exact gl/hl used so a US-results regression is visible.
  */
 export async function serpSampleQuery(
   query: string,
-): Promise<{ ok: boolean; count: number; results: SerpResult[]; error?: string }> {
+  opts: { gl?: string; hl?: string } = {},
+): Promise<{ ok: boolean; count: number; results: SerpResult[]; gl: string; hl: string; error?: string }> {
+  const gl = (opts.gl ?? "PL").toUpperCase();
+  const hl = (opts.hl ?? "pl").toLowerCase();
   try {
     const q = query.trim() || "kawa arabica sklep";
-    const [b] = await runSerpSearch([q], { resultsPerQuery: 20, timeoutMs: 45_000 });
+    const [b] = await runSerpSearch([q], { limit: 10, gl, hl, timeoutMs: 45_000 });
     const results = (b?.results ?? []).slice(0, 5);
-    return { ok: results.length > 0, count: b?.results.length ?? 0, results };
+    return {
+      ok: results.length > 0,
+      count: b?.results.length ?? 0,
+      results,
+      gl,
+      hl,
+      error: b?.meta.error,
+    };
   } catch (e) {
-    return { ok: false, count: 0, results: [], error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, count: 0, results: [], gl, hl, error: e instanceof Error ? e.message : String(e) };
   }
 }
