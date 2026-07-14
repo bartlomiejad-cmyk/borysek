@@ -1091,11 +1091,13 @@ export async function runRegenerateMedia(
       .from("enrichments")
       .update({
         regenerated_main_image: mainPublic,
-        pinned_main_url: mainPublic,
+        // Never overwrite a manually-pinned main image on a locked product.
+        ...(productLocked ? {} : { pinned_main_url: mainPublic }),
         ai_gallery_urls: galleryUrls as never,
       } as never)
       .eq("id", enrichment.id);
     if (dbErr) throw new Error(dbErr.message);
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "VISUALS_READY");
   } finally {
     for (const p of preparedMain) {
       await supabaseAdmin.storage.from("regenerated-images").remove([p.path]).catch(() => undefined);
