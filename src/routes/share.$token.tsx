@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { resolveRegenUrl } from "@/lib/pim/media";
 import {
   AlertTriangle,
   ChevronDown,
@@ -242,20 +241,7 @@ function UnlockedView({
 function pickThumb(p: SharePublicProduct): string | null {
   const en = p.enrichment;
   if (!en) return null;
-  if (en.pinned_main_url) return en.pinned_main_url;
-  const regen = resolveRegenUrl(en.regenerated_main_image);
-  if (regen) return regen;
-  const hidden = new Set(en.hidden_images ?? []);
-  const scores = en.image_scores ?? {};
-  const first = (en.picked_urls ?? []).find((u) => {
-    if (hidden.has(u)) return false;
-    const s = scores[u];
-    if (!s) return true;
-    if (s.manual_keep === true) return true;
-    if (s.is_banner_or_trash || s.dead) return false;
-    return s.identity !== "different" && s.identity !== "unsure";
-  });
-  return first ?? null;
+  return en.main_image_url ?? en.images[0] ?? null;
 }
 
 function ProductCard({
@@ -276,26 +262,8 @@ function ProductCard({
   const thumb = pickThumb(product);
   const name = product.enrichment?.golden_name ?? product.nazwa ?? "Bez nazwy";
   const features = product.enrichment?.golden_features ?? [];
-  const gallery = [
-    ...(product.enrichment?.pinned_main_url ? [product.enrichment.pinned_main_url] : []),
-    ...(resolveRegenUrl(product.enrichment?.regenerated_main_image)
-      ? [resolveRegenUrl(product.enrichment?.regenerated_main_image) as string]
-      : []),
-    ...((product.enrichment?.ai_gallery_urls ?? []) as string[]),
-    ...((product.enrichment?.picked_urls ?? []) as string[]),
-  ]
-    .filter((u, i, a) => u && a.indexOf(u) === i)
-    .filter((u) => !(product.enrichment?.hidden_images ?? []).includes(u))
-    // Never show clients images the AI verdict marked as belonging to a
-    // different product or as an unsure/banner/dead reference.
-    .filter((u) => {
-      const s = (product.enrichment?.image_scores ?? {})[u];
-      if (!s) return true;
-      if (s.manual_keep === true) return true;
-      if (s.is_banner_or_trash === true) return false;
-      if (s.dead === true) return false;
-      return s.identity !== "different" && s.identity !== "unsure";
-    });
+  const gallery = product.enrichment?.images ?? [];
+  const aiViz = product.enrichment?.ai_visualizations ?? [];
 
   const previewHref = `/share/${token}/p/${product.id}`;
 
@@ -347,6 +315,23 @@ function ProductCard({
                     className="h-32 rounded-lg border object-contain bg-white"
                   />
                 ))}
+              </div>
+            )}
+            {aiViz.length > 0 && (
+              <div className="mt-2">
+                <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                  Wizualizacje AI
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {aiViz.slice(0, 8).map((u) => (
+                    <img
+                      key={u}
+                      src={u}
+                      alt=""
+                      className="h-32 rounded-lg border object-contain bg-white"
+                    />
+                  ))}
+                </div>
               </div>
             )}
             {product.enrichment?.golden_description && (
