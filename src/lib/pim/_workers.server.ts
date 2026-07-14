@@ -735,6 +735,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .eq("id", enrichment.id);
     if (error) throw new Error(error.message);
     await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "GOLDEN_READY");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
