@@ -1131,7 +1131,7 @@ export const generateAllegroDescription = createServerFn({ method: "POST" })
       .update({
         allegro_description: html,
         allegro_generated_at: new Date().toISOString(),
-        allegro_data_sufficiency: shape.data_sufficiency ?? null,
+        ...(shape.data_sufficiency ? { data_sufficiency: shape.data_sufficiency } : {}),
       } as never)
       .eq("id", enrichment.id);
     if (upErr) throw new Error(upErr.message);
