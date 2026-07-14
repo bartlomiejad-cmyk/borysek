@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { pickImages, pickThumbsForList, type ImageMeta, type ImageScores } from "./images";
+import { sanitizeAllegroHtml } from "./seo";
 
 export const exportProject = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -93,6 +94,12 @@ export const exportProject = createServerFn({ method: "GET" })
       const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
       const listImages = pickThumbsForList(all, meta, hidden, pinned, 12);
       const regen = ((e as { regenerated_main_image?: string | null } | undefined)?.regenerated_main_image) ?? "";
+      // Allegro main image MUST come from the regen pipeline (pinned or FAL
+      // white-background regen) — never from ai_gallery_urls, which contains
+      // prop-styled visualizations that Allegro disallows as the main photo.
+      const regenClean = regen && regen !== "__imported__" ? regen : "";
+      const pinnedForAllegro = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? "") as string;
+      const allegroMainImage = regenClean || pinnedForAllegro;
       const gallery = (((e as unknown as { ai_gallery_urls?: string[] } | undefined)?.ai_gallery_urls) ?? []) as string[];
       const features = ((e as unknown as { golden_features?: Array<{ key: string; value: string }> } | undefined)?.golden_features ?? []);
       const featureCols: Record<string, string> = {};
@@ -123,6 +130,7 @@ export const exportProject = createServerFn({ method: "GET" })
         ai_image_main: regen,
         ai_gallery_all: gallery.join(" | "),
         ...galleryCols,
+        allegro_main_image: allegroMainImage,
         golden_name: e?.golden_name ?? "",
         golden_description: e?.golden_description ?? "",
         golden_slug: ((e as { golden_slug?: string | null } | undefined)?.golden_slug) ?? "",
@@ -130,7 +138,9 @@ export const exportProject = createServerFn({ method: "GET" })
         golden_seo_keywords: (((e as { golden_seo_keywords?: string[] | null } | undefined)?.golden_seo_keywords) ?? []).join(" | "),
         features_text: features.map((f) => `${f.key}: ${f.value}`).join(" | "),
         ...featureCols,
-        allegro_description: ((e as { allegro_description?: string | null } | undefined)?.allegro_description) ?? "",
+        allegro_description: sanitizeAllegroHtml(
+          ((e as { allegro_description?: string | null } | undefined)?.allegro_description) ?? "",
+        ),
         allegro_generated_at: ((e as { allegro_generated_at?: string | null } | undefined)?.allegro_generated_at) ?? "",
         model: e?.model ?? "",
         generated_at: e?.generated_at ?? "",
