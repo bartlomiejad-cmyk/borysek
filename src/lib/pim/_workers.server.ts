@@ -134,6 +134,59 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
+/**
+ * Per-product visualization scene analysis via Gemini Vision. Plain server
+ * helper (no createServerFn wrapper) so bulk workers can call it directly.
+ * Returns Polish {style, requirements} that feed buildFalPromptsFromPolish.
+ * Callers layer client_guidelines and project constraints on top separately.
+ */
+export async function analyzeVisualizationSceneForProduct(args: {
+  productName: string;
+  featuresText: string;
+  imageUrls: string[]; // main first, max 4, must be publicly fetchable
+  projectConstraintsPl?: string; // optional PL text; overrides scene choices
+}): Promise<{ style: string; requirements: string; used: number }> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+  const urls = args.imageUrls.filter(Boolean).slice(0, 4);
+  if (!urls.length) throw new Error("Brak zdjęć do analizy");
+
+  const system = [
+    "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
+    "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
+    "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
+    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"..."}.',
+    "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
+    "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
+  ].join("\n");
+
+  const constraintsBlock = (args.projectConstraintsPl ?? "").trim();
+  const userText = [
+    `Nazwa produktu: "${args.productName || "(bez nazwy)"}"`,
+    args.featuresText ? `Cechy: ${args.featuresText}` : "",
+    constraintsBlock
+      ? `OGRANICZENIA PROJEKTU (nadrzędne wobec Twoich pomysłów na scenę):\n${constraintsBlock}`
+      : "",
+    `Przeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON.`,
+  ].filter(Boolean).join("\n");
+
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [{ type: "text", text: userText }];
+  for (const u of urls) content.push({ type: "image_url", image_url: { url: u } });
+
+  const parsed = (await callGatewayJson(apiKey, "google/gemini-2.5-pro", [
+    { role: "system", content: system },
+    { role: "user", content: content as unknown as string },
+  ])) as { style?: unknown; requirements?: unknown };
+  const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
+  const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+  if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
+  return { style, requirements, used: urls.length };
+}
+
 // Deterministic fallback used when the AI gateway call fails — mirrors the
 // original hardcoded prompts so generation never blocks on the translator.
 function fallbackPrompts(args: {
