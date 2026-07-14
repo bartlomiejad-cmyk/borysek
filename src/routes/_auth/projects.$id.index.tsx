@@ -769,6 +769,13 @@ function ProjectPage() {
               <DropdownMenuItem onSelect={() => exportFile("xlsx")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => exportFile("csv", true)}>
+                <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true)}>
+                <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button onClick={() => setShareOpen(true)}>
