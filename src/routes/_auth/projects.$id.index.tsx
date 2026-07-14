@@ -1239,6 +1239,37 @@ function ProjectPage() {
               </Button>
             </div>
           )}
+          {filter === "REVIEW" && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">
+                Masowe zatwierdzanie produktów z audytem <b>Pass</b>. Pomija już zatwierdzone.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-emerald-500/60 text-emerald-700 dark:text-emerald-300"
+                onClick={async () => {
+                  const ids = selectedIds.size > 0 ? [...selectedIds] : undefined;
+                  const t = toast.loading("Zatwierdzam produkty z Pass…");
+                  try {
+                    const res = await bulkApprovePassFn({ data: { projectId: id, productIds: ids } });
+                    toast.success(
+                      res.approved === 0
+                        ? "Brak produktów z audytem Pass do zatwierdzenia"
+                        : `Zatwierdzono ${res.approved} produkt${res.approved === 1 ? "" : "ów"}`,
+                      { id: t },
+                    );
+                    refetchProducts();
+                    qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                  } catch (e) {
+                    toast.error(friendlyError(e, "Nie udało się zatwierdzić"), { id });
+                  }
+                }}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-1" /> Zatwierdź wszystkie z wynikiem Pass
+              </Button>
+            </div>
+          )}
           <div className="rounded-md border">
             <Table>
               <TableHeader>
