@@ -75,6 +75,8 @@ function ProductDetail() {
   const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const auditFn = useServerFn(runAuditForProduct);
+  const approveFn = useServerFn(approveProduct);
+  const unapproveFn = useServerFn(unapproveProduct);
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
