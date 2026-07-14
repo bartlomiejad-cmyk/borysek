@@ -461,7 +461,17 @@ function ProjectPage() {
         void regenerateAll();
         break;
       case "REVIEW":
-        setVerifyOpen(true);
+        // If any eligible product still lacks an audit, prompt Audyt AI
+        // first — it flags issues before the human review pass. Otherwise
+        // fall through to the classic image-verification dialog.
+        if (
+          summary &&
+          Math.max(0, (summary.audit_eligible ?? 0) - (summary.audit_completed ?? 0)) > 0
+        ) {
+          void auditAll();
+        } else {
+          setVerifyOpen(true);
+        }
         break;
     }
   };
