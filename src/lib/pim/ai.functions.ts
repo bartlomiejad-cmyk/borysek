@@ -464,7 +464,7 @@ export const verifySources = createServerFn({ method: "POST" })
         "Zwróć URL-e zdjęć, które:",
         "  (a) mają widoczny znak wodny / logo sklepu / napis 'kup teraz' itp. (watermark_urls),",
         "  (b) wyraźnie NIE przedstawiają tego produktu (mismatch_urls).",
-        "Bądź zachowawczy — w razie wątpliwości NIE zgłaszaj URL-a.",
+        "Do mismatch_urls dodawaj TYLKO zdjęcia, które na pewno przedstawiają inny produkt. Wątpliwe pomiń (nie zgłaszaj).",
         "Odpowiedź MUSI być JSON-em: {\"watermark_urls\": string[], \"mismatch_urls\": string[], \"notes\": string}.",
       ].join("\n");
       const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
