@@ -3,6 +3,32 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { setManualLockOnProduct } from "./pipeline-status";
 
+async function logManualEdit(
+  supabase: { from: (t: string) => any },
+  productId: string,
+  message: string,
+  meta?: Record<string, unknown>,
+) {
+  try {
+    const { data: p } = await supabase
+      .from("source_products")
+      .select("project_id")
+      .eq("id", productId)
+      .maybeSingle();
+    const projectId = (p as { project_id?: string } | null)?.project_id;
+    if (!projectId) return;
+    const { logProductEvent } = await import("./product-events.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await logProductEvent(supabaseAdmin, {
+      projectId,
+      productId,
+      kind: "manual_edit",
+      message,
+      meta: meta ?? null,
+    });
+  } catch { /* best-effort */ }
+}
+
 const loadEnrichment = async (
   supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
   enrichmentId: string,
