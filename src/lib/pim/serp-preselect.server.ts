@@ -29,6 +29,7 @@ export type PreselectResult = {
 const SYSTEM_PROMPT =
   'Wybierz wyniki wyszukiwania, które najprawdopodobniej prowadzą do strony produktowej opisującej DOKŁADNIE ten produkt. ' +
   "Priorytety: (1) EAN lub kod producenta widoczny w tytule/snippecie, (2) strona producenta, (3) tytuł zawiera markę+model+wariant. " +
+  "Wynik, którego tytuł lub opis zawiera DOKŁADNY EAN produktu (np. 'EAN: 5904905976918'), ma najwyższy priorytet — zawsze umieszczaj go na początku picks. " +
   "Odrzuć: listingi kategorii, blogi/poradniki, agregatory, inne warianty. " +
   'Zwróć JSON {"picks": [{"i": number, "why": string(krótko)}]} — maksymalnie 12 pozycji, posortowane od najlepszej.';
 
