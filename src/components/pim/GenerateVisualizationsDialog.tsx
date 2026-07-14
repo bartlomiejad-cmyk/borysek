@@ -318,7 +318,7 @@ export function GenerateVisualizationsDialog({
             <div className="text-xs">
               <div className="font-medium">Spersonalizuj na podstawie zdjęć</div>
               <div className="text-muted-foreground">
-                Gemini przegląda zdjęcia pierwszego produktu i wypełnia oba pola.
+                Gemini przegląda zdjęcia pierwszego produktu i dokłada wskazówki do wybranego presetu.
               </div>
             </div>
             <Button
@@ -370,57 +370,152 @@ export function GenerateVisualizationsDialog({
             />
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="viz-style">Styl / scena (opcjonalnie)</Label>
+              <Label>Preset sceny</Label>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2 text-xs"
-                onClick={() => suggest("style")}
-                disabled={busyStyle || busy}
+                onClick={matchPreset}
+                disabled={busyMatch || busy}
               >
-                {busyStyle ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                Zaproponuj AI
+                {busyMatch ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                Dobierz AI
               </Button>
             </div>
-            <Textarea
-              id="viz-style"
-              rows={2}
-              placeholder="np. Nowoczesna kuchnia, blat drewniany, poranne światło z okna, minimalizm."
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {availablePresets.map((p) => {
+                const active = presetId === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPresetId(p.id)}
+                    className={`text-left rounded-md border p-2 transition-colors focus:outline-none focus:ring-2 focus:ring-violet-400/60 ${
+                      active
+                        ? "border-violet-500 bg-violet-50 dark:bg-violet-950/30"
+                        : "border-border hover:border-violet-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium">{p.label_pl}</div>
+                      {active && <Check className="h-3.5 w-3.5 text-violet-600" />}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground line-clamp-2">
+                      {p.thumbnail_hint}
+                    </div>
+                    {p.custom && (
+                      <div className="mt-1 text-[10px] uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                        {p.id === "__legacy_custom__" ? "Dotychczasowe" : "Preset projektu"}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="space-y-1 pt-1">
+              <Label htmlFor="viz-adjust" className="text-xs">
+                Dostosowanie dla tego projektu (PL, opcjonalnie)
+              </Label>
+              <Textarea
+                id="viz-adjust"
+                rows={2}
+                placeholder="np. dodaj świeże liście i drewnianą deskę wokół produktu"
+                value={adjustments}
+                onChange={(e) => setAdjustments(e.target.value.slice(0, 480))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Zasady zachowania koloru, logo i proporcji produktu są nadrzędne — nie zostaną zmienione.
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="viz-req">Wymagania (PL) — AI przepisze na prompt EN</Label>
+          <Collapsible open={customOpen} onOpenChange={setCustomOpen}>
+            <CollapsibleTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => suggest("requirements")}
-                disabled={busyReq || busy}
+                className="h-8 px-2 text-xs"
               >
-                {busyReq ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                Zaproponuj AI
+                <ChevronDown
+                  className={`h-3.5 w-3.5 mr-1 transition-transform ${customOpen ? "rotate-180" : ""}`}
+                />
+                Dostosuj (edytuj prompt ręcznie)
               </Button>
-            </div>
-            <Textarea
-              id="viz-req"
-              rows={4}
-              placeholder="np. Produkt trzymany w dłoni w plenerze, poranne światło, rozmyte tło ogrodu, kąt 3/4."
-              value={reqPl}
-              onChange={(e) => setReqPl(e.target.value)}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Piszesz po polsku co ma być na wizualizacji. Gemini 3.1 Pro tłumaczy to na precyzyjny prompt EN,
-              dbając równocześnie, żeby produkt (logo, etykiety, kolory) pozostał wierny oryginałowi.
-            </p>
-          </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-3 pt-2">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="viz-style">Styl / scena (EN)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => suggest("style")}
+                    disabled={busyStyle || busy}
+                  >
+                    {busyStyle ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                    Zaproponuj AI
+                  </Button>
+                </div>
+                <Textarea
+                  id="viz-style"
+                  rows={2}
+                  value={style}
+                  onChange={(e) => setStyle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="viz-req">Wymagania techniczne (EN/PL)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => suggest("requirements")}
+                    disabled={busyReq || busy}
+                  >
+                    {busyReq ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                    Zaproponuj AI
+                  </Button>
+                </div>
+                <Textarea
+                  id="viz-req"
+                  rows={4}
+                  value={reqPl}
+                  onChange={(e) => setReqPl(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2 rounded-md border border-dashed p-2">
+                <Input
+                  placeholder="Nazwa presetu (np. Sklep narzędziowy)"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  className="flex-1 h-8 text-sm"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={savePreset}
+                  disabled={busySave || busy}
+                >
+                  {busySave ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  Zapisz jako preset projektu
+                </Button>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           <div className="space-y-1">
             <Label>Jakość</Label>
