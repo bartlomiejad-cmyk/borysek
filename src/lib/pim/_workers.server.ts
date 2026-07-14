@@ -2217,10 +2217,28 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
         continue;
       }
+      // Firecrawl's index is noisy for bare-numeric queries; for the EAN
+      // variant (kind "A") keep ONLY hits whose title or snippet contains
+      // the exact EAN. Apify/Google is trusted for the same query.
+      const isEanVariant = v.kind === "A";
+      const eanDigits = isEanVariant ? v.query.replace(/\D/g, "") : "";
+      let droppedByEanFilter = 0;
       let n = 0;
       for (const h of hits) {
         const url = (h.url ?? "").trim();
         if (!url) continue;
+        if (isEanVariant && eanDigits) {
+          const title = (h as { title?: string }).title ?? "";
+          const snip =
+            (h as { description?: string; snippet?: string }).description ??
+            (h as { snippet?: string }).snippet ??
+            "";
+          const hay = `${title} ${snip}`.replace(/\D/g, "");
+          if (!hay.includes(eanDigits)) {
+            droppedByEanFilter++;
+            continue;
+          }
+        }
         upsertResult(vi, url, "firecrawl", {
           title: (h as { title?: string }).title,
           snippet: (h as { description?: string; snippet?: string }).description
@@ -2230,6 +2248,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         n++;
       }
       perVariant[vi].providers.firecrawl = n;
+      if (droppedByEanFilter > 0) {
+        await emit(ctx, {
+          level: "info",
+          message: `   ${nazwa} — Firecrawl [A] "${v.query}": odrzucono ${droppedByEanFilter} wyników bez EAN w tytule/snippet`,
+        });
+      }
     }
   }
 
