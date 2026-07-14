@@ -2273,11 +2273,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
       });
       const byI = new Map(flat.map((f) => [f.i, f]));
-      let picks: Array<{ url: string; why?: string; vi: number }> = [];
+      type Pick = { url: string; why?: string; vi: number };
+      let picks: Pick[] = [];
       if (preselect.ok && preselect.picks.length) {
         picks = preselect.picks
-          .map((p) => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi } : null; })
-          .filter((v): v is { url: string; why?: string; vi: number } => !!v);
+          .map((p): Pick | null => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi } : null; })
+          .filter((v): v is Pick => v !== null);
         aiPreselectMeta = { total: flat.length, picked: picks.length };
       } else {
         picks = flat.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
