@@ -679,10 +679,14 @@ export async function scoreAndCapForProduct(
 
   const { data: productRow } = await supabaseAdmin
     .from("source_products")
-    .select("id, nazwa, ean, raw")
+    .select("id, nazwa, ean, raw, manual_lock")
     .eq("id", productId)
     .single();
   if (!productRow) return { count: 0, strong: 0 };
+  if ((productRow as { manual_lock?: boolean }).manual_lock) {
+    // Manually locked — do not rescore/overwrite picked_urls.
+    return { count: 0, strong: 0 };
+  }
   const rawObj = ((productRow as { raw?: unknown }).raw ?? {}) as Record<string, unknown>;
   const ie = (rawObj.imported_extract ?? {}) as Record<string, unknown>;
   const producer =
