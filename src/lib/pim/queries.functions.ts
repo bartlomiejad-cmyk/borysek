@@ -152,6 +152,10 @@ export const getProductDetail = createServerFn({ method: "GET" })
           if (s.manual_keep === true) return false;
           if (s.is_banner_or_trash === true) return true;
           if (s.identity === "different") return true;
+          // 'unsure' → hidden from the main gallery ("Wybrane zdjęcia") but
+          // surfaced separately via `unsure_identity_images` for one-click
+          // review. Never auto-selected as main image.
+          if (s.identity === "unsure") return true;
           return false;
         })
         .map(([u]) => u),
@@ -214,6 +218,9 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const rejected_identity_images = Object.entries(image_scores)
       .filter(([, s]) => s?.identity === "different" && s?.manual_keep !== true)
       .map(([u]) => u);
+    const unsure_identity_images = Object.entries(image_scores)
+      .filter(([, s]) => s?.identity === "unsure" && s?.is_banner_or_trash !== true && s?.manual_keep !== true)
+      .map(([u]) => u);
     return {
       product,
       enrichment,
@@ -223,6 +230,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       image_meta: meta,
       image_scores,
       rejected_identity_images,
+      unsure_identity_images,
       pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
     };
   });
