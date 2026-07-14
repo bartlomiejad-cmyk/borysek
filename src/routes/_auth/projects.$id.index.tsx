@@ -1442,10 +1442,24 @@ function ProjectPage() {
                       </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
-                        if (!g.length) return null;
+                        const regen = (p as { regenerated_main_image?: string | null }).regenerated_main_image;
+                        const hasRegen = !!regen && regen !== "__imported__";
+                        if (!g.length && !hasRegen) return null;
                         return (
-                          <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-violet-500/10 text-violet-700 border-violet-400/50 dark:text-violet-300">
-                            <Wand2 className="h-2.5 w-2.5" /> Wizualizacje AI · {g.length}
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            {hasRegen && (
+                              <div
+                                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-700 border-emerald-400/50 dark:text-emerald-300"
+                                title="Miniatura zregenerowana (białe tło)"
+                              >
+                                Miniatura ✓
+                              </div>
+                            )}
+                            {g.length > 0 && (
+                              <div className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-violet-500/10 text-violet-700 border-violet-400/50 dark:text-violet-300">
+                                <Wand2 className="h-2.5 w-2.5" /> Wizualizacje AI · {g.length}
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
