@@ -1147,14 +1147,13 @@ function ProjectPage() {
                   <TableHead>Nazwa</TableHead>
                   <TableHead>EAN / Kod</TableHead>
                   <TableHead>Match</TableHead>
-                  <TableHead>Status</TableHead>
                   <TableHead className="w-20"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       Brak produktów do wyświetlenia
                     </TableCell>
                   </TableRow>
@@ -1278,26 +1277,6 @@ function ProjectPage() {
                             title={`Po ${rounds} rundach doscrapowania nadal ${strong} silnych źródeł (< 3). Rozważ ręczne dodanie linków.`}
                           >
                             Słabe źródła
-                          </Badge>
-                        );
-                      })()}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={p.status as string} error={p.error} />
-                      {(() => {
-                        const ds = (p as { data_sufficiency?: "full" | "partial" | "poor" | null }).data_sufficiency;
-                        if (ds !== "partial" && ds !== "poor") return null;
-                        const cls =
-                          ds === "poor"
-                            ? "ml-1 border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
-                            : "ml-1 border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-                        const title =
-                          ds === "poor"
-                            ? "Bardzo ubogie dane źródłowe — opis może być mocno skrócony."
-                            : "Częściowe dane źródłowe — opis krótszy, część sekcji może być pominięta.";
-                        return (
-                          <Badge variant="outline" className={cls} title={title}>
-                            {ds === "poor" ? "Ubogie dane" : "Częściowe dane"}
                           </Badge>
                         );
                       })()}
