@@ -251,24 +251,25 @@ export const ALLEGRO_DESCRIPTION_SYSTEM_PROMPT = [
   "## STRUKTURA (kolejność sekcji, każda jako osobny blok)",
   "1) <h1> z krótką, chwytliwą nazwą produktu z frazą kluczową.",
   "2) <p> – 2-4 zdania nagłówka sprzedażowego (hook): dla kogo, główny problem/korzyść, dlaczego warto.",
-  "3) <h2>Najważniejsze cechy</h2> + <ul> z 5-10 punktami. Każdy punkt zaczynaj od <strong>Nazwa cechy:</strong> a potem korzyść dla klienta.",
+  "3) <h2>Najważniejsze cechy</h2> + <ul> z 5-10 punktami. Każdy punkt zaczynaj od <b>Nazwa cechy:</b> a potem korzyść dla klienta.",
   "4) <h2>Zawartość zestawu</h2> + <ul> z tym, co kupujący dostaje w paczce (nawet gdy zestaw jest jednoelementowy, wypisz literalnie).",
-  "5) 2-4 bloki tematyczne pod-nagłówkami <h3>: np. Zastosowanie, Konstrukcja / Materiał, Wygoda i użytkowanie, Bezpieczeństwo, Design. Każdy blok = <h3> + 1-2 akapity <p> + opcjonalnie krótka lista <ul>.",
-  "6) <h2>Parametry techniczne</h2> + <ul> z parametrami w formacie <li><strong>Klucz:</strong> wartość</li> (marka, model, wymiary, waga, materiał, pojemność, moc, itp.). Bierz TYLKO fakty z danych źródłowych i cech (features). Nie halucynuj wartości.",
-  "7) <h2>Najczęściej zadawane pytania</h2> + 3-5 par <p><strong>Pytanie…?</strong></p><p>Odpowiedź…</p> odpowiadających na realne wątpliwości kupującego.",
+  "5) 2-4 bloki tematyczne pod-nagłówkami <h2>: np. Zastosowanie, Konstrukcja / Materiał, Wygoda i użytkowanie, Bezpieczeństwo, Design. Każdy blok = <h2> + 1-2 akapity <p> + opcjonalnie krótka lista <ul>. NIE używaj <h3>, <h4>, <h5> — Allegro ich nie akceptuje.",
+  "6) <h2>Parametry techniczne</h2> + <ul> z parametrami w formacie <li><b>Klucz:</b> wartość</li> (marka, model, wymiary, waga, materiał, pojemność, moc, itp.). Bierz TYLKO fakty z danych źródłowych i cech (features). Nie halucynuj wartości.",
+  "7) <h2>Najczęściej zadawane pytania</h2> + 3-5 par <p><b>Pytanie…?</b></p><p>Odpowiedź…</p> odpowiadających na realne wątpliwości kupującego.",
   "8) Końcowy <p> – krótkie podsumowanie z zachętą do dodania do koszyka (bez agresywnych CTA typu \"KUP TERAZ!!!\", bez wykrzykników, bez cen).",
   "",
   "## DŁUGOŚĆ I JĘZYK",
   "- Cały opis 1500-4000 znaków widocznego tekstu (bez tagów). Konkret, nie lanie wody.",
   "- Polski, poprawna interpunkcja, brak literówek. Ton profesjonalny, sprzedażowy, ale rzeczowy.",
-  "- Frazę kluczową i jej naturalne warianty umieść w <h1>, pierwszym akapicie i 1-2 nagłówkach <h2>/<h3>. Bez keyword stuffingu.",
+  "- Frazę kluczową i jej naturalne warianty umieść w <h1>, pierwszym akapicie i 1-2 nagłówkach <h2>. Bez keyword stuffingu.",
   "- Możesz zwracać się do kupującego per Ty/Twój – to Allegro, jest to naturalne.",
+  "- Nie używaj <br> do przerw między akapitami — każdy akapit MUSI być osobnym <p>…</p>.",
   "",
-  "## DOZWOLONE TAGI (whitelist – regulamin Allegro)",
-  "- Strukturalne: <h1>, <h2>, <h3>, <h4>, <h5>, <p>, <br>",
-  "- Listy: <ul>, <ol>, <li>",
-  "- Inline: <strong>, <b>, <em>, <i>, <u>",
-  "- Zabronione: <script>, <style>, <iframe>, <img>, <a>, <table>, atrybuty class/id/style, inline styles, kolory, linki, dane kontaktowe, adresy, e-maile, telefony, nazwy sklepów zewnętrznych, ceny, promocje, kody rabatowe, informacje o dostawie/płatności/zwrotach, znaki wodne, emoji, ALL CAPS w całych zdaniach, powtarzalne wykrzykniki.",
+  "## DOZWOLONE TAGI (twarda whitelist – regulamin Allegro API)",
+  "- Allegro akceptuje WYŁĄCZNIE te tagi: <h1>, <h2>, <p>, <ul>, <ol>, <li>, <b>.",
+  "- KAŻDY inny tag (w szczególności <h3>, <h4>, <h5>, <strong>, <em>, <i>, <u>, <br>, <table>, <img>, <a>, <span>, <div>) powoduje VALIDATION_ERROR i odrzucenie oferty przez Allegro. Nie używaj ich pod żadnym pozorem.",
+  "- Do pogrubienia używaj wyłącznie <b>, nigdy <strong>. Nie używaj kursywy ani podkreślenia — Allegro ich nie wspiera.",
+  "- Bez atrybutów (class, id, style), bez inline styles, bez kolorów, bez linków, danych kontaktowych, adresów, e-maili, telefonów, nazw sklepów zewnętrznych, cen, promocji, kodów rabatowych, informacji o dostawie/płatności/zwrotach, znaków wodnych, emoji, ALL CAPS w całych zdaniach ani powtarzalnych wykrzykników.",
   "",
   "## ZAKAZY DODATKOWE",
   "- Nie używaj marketingowych ogólników: „idealny wybór\", „doskonały\", „rewolucyjny\", „najwyższej jakości\", „wyjątkowy\", „spełni oczekiwania\".",
@@ -279,28 +280,67 @@ export const ALLEGRO_DESCRIPTION_SYSTEM_PROMPT = [
   "Zwróć wyłącznie JSON. Pole html jako string z czystym HTML, bez ``` i bez markdown.",
 ].join("\n");
 
-const ALLEGRO_ALLOWED_TAGS = new Set([
-  "h1", "h2", "h3", "h4", "h5", "p", "br",
-  "ul", "ol", "li",
-  "strong", "b", "em", "i", "u",
-]);
+// Allegro API allows ONLY these tags in offer descriptions. Any other tag
+// (including h3/h4/h5, strong, em, i, u, br, table, img, a) triggers a
+// VALIDATION_ERROR when publishing through the Offer API / BaseLinker.
+const ALLEGRO_ALLOWED_TAGS = new Set(["h1", "h2", "p", "ul", "ol", "li", "b"]);
+
+// Tags that carry semantic content but must be remapped, not dropped.
+// - h3/h4/h5 → h2 (Allegro caps headings at h2)
+// - strong  → b
+// - em/i/u  → stripped (keep inner text)
+// - br      → paragraph break (handled separately below)
+const ALLEGRO_TAG_REMAP: Record<string, string> = {
+  h3: "h2",
+  h4: "h2",
+  h5: "h2",
+  h6: "h2",
+  strong: "b",
+};
+const ALLEGRO_STRIP_KEEP_TEXT = new Set(["em", "i", "u", "s", "small", "span", "div", "font"]);
 
 function stripDisallowedAllegroHtml(html: string): string {
+  // 1) drop block-level containers we can never keep
   let out = html.replace(/<(script|style|iframe|table|thead|tbody|tr|td|th|link|meta)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
-  out = out.replace(/<(img|hr|link|meta)\b[^>]*\/?>/gi, "");
+  out = out.replace(/<(img|hr|link|meta|input)\b[^>]*\/?>/gi, "");
   out = out.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1");
   out = out.replace(/<!--[\s\S]*?-->/g, "");
-  out = out.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (_m, close: string, tag: string) => {
+
+  // 2) turn <br> into a paragraph break sentinel — Allegro rejects <br>
+  out = out.replace(/<br\s*\/?>/gi, "\u241E");
+
+  // 3) drop tags whose content should survive as plain text
+  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (m, tag: string) => {
     const t = tag.toLowerCase();
+    if (ALLEGRO_STRIP_KEEP_TEXT.has(t)) return "";
+    return m;
+  });
+
+  // 4) remap + whitelist enforcement (attributes always stripped)
+  out = out.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (_m, close: string, tag: string) => {
+    let t = tag.toLowerCase();
+    if (ALLEGRO_TAG_REMAP[t]) t = ALLEGRO_TAG_REMAP[t];
     if (!ALLEGRO_ALLOWED_TAGS.has(t)) return "";
-    if (t === "br") return "<br/>";
     return close ? `</${t}>` : `<${t}>`;
   });
+
+  // 5) split at <br> sentinels: replace inside <p>…</p> with </p><p>,
+  //    everywhere else convert leftover sentinels to spaces.
+  out = out.replace(/<p>([\s\S]*?)<\/p>/g, (_m, inner: string) => {
+    const parts = inner.split("\u241E").map((s) => s.trim()).filter(Boolean);
+    if (parts.length <= 1) return `<p>${inner.replace(/\u241E/g, " ")}</p>`;
+    return parts.map((s) => `<p>${s}</p>`).join("");
+  });
+  out = out.replace(/\u241E/g, " ");
+
+  // 6) collapse empty tags left behind by aggressive stripping
+  out = out.replace(/<(p|li|h1|h2|ul|ol|b)>\s*<\/\1>/g, "");
   return out;
 }
 
 /**
- * Sanitize + normalize Allegro description into a whitelist-only HTML fragment.
+ * Sanitize + normalize Allegro description into a whitelist-only HTML fragment
+ * that Allegro's offer API accepts (h1, h2, p, ul, ol, li, b).
  */
 export function sanitizeAllegroDescriptionHtml(input: string | null | undefined): string {
   let html = (input ?? "").trim();
@@ -312,6 +352,9 @@ export function sanitizeAllegroDescriptionHtml(input: string | null | undefined)
   }
   html = stripDisallowedAllegroHtml(html);
   html = html.replace(/>\s+</g, "><").trim();
-  html = html.replace(/(?:<br\/>\s*){3,}/g, "<br/><br/>");
   return html;
 }
+
+// Alias per new naming; kept alongside the legacy export so callers can
+// migrate gradually and legacy Allegro rows still route through the sanitizer.
+export const sanitizeAllegroHtml = sanitizeAllegroDescriptionHtml;
