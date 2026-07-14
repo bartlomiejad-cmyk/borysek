@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { sanitizeGoldenDescriptionHtml } from "./seo";
 import { type ImageMeta, pickThumbsForList } from "./images";
+import { getVisibleGallery, type GalleryImageScore } from "./gallery";
 import { setManualLockOnProduct } from "./pipeline-status";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
@@ -23,7 +24,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds, data_sufficiency",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, image_scores, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds, data_sufficiency",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -67,13 +68,23 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
       const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
       const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
+      const scores = (((e as unknown as { image_scores?: Record<string, GalleryImageScore> } | undefined)?.image_scores) ?? {}) as Record<string, GalleryImageScore>;
       const allFromSources: string[] = [];
       for (const u of picked) {
         for (const img of imgMap.get(u) ?? []) {
           if (!allFromSources.includes(img)) allFromSources.push(img);
         }
       }
-      const images = pickThumbsForList(allFromSources, meta, hidden, pinned, 12);
+      // First filter by AI verdicts (accepted only), then apply size/pinned
+      // ordering identical to the editor. Rejected/unsure never appear in
+      // the list thumbnails or their overflow counter.
+      const { accepted, unsure, rejected } = getVisibleGallery(allFromSources, {
+        hidden_images: Array.from(hidden),
+        image_scores: scores,
+        pinned_main_url: pinned,
+      });
+      const images = pickThumbsForList(accepted, meta, hidden, pinned, 12);
+      const acceptedTotal = accepted.length;
       return {
         ...p,
         status: e?.status ?? "PENDING",
@@ -87,6 +98,16 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         thumbnail: images[0] ?? null,
         images,
         extra_image_urls: images.filter((u) => extraSet.has(u)),
+        accepted_total: acceptedTotal,
+        unsure_count: unsure.length,
+        rejected_count: rejected.length,
+        // Total scored-with-identity-v2 count vs total images — used by
+        // the "Weryfikuj zdjęcia AI" dialog to estimate work.
+        total_images: allFromSources.filter((u) => !hidden.has(u)).length,
+        identity_v2_count: allFromSources.filter((u) => {
+          const s = scores[u];
+          return s && (s.identity_v ?? 0) >= 2;
+        }).length,
         picked_urls: picked,
         enrichment_id: (e as { id?: string } | undefined)?.id ?? null,
         pinned_main_url: pinned,

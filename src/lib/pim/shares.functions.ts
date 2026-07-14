@@ -17,6 +17,12 @@ export type SharePublicEnrichment = {
   pinned_main_url: string | null;
   ai_gallery_urls: string[] | null;
   hidden_images: string[] | null;
+  image_scores: Record<string, {
+    is_banner_or_trash?: boolean;
+    identity?: "same" | "different" | "unsure";
+    manual_keep?: boolean;
+    dead?: boolean;
+  }> | null;
   status: string;
 };
 
@@ -260,6 +266,7 @@ export const listShareProducts = createServerFn({ method: "POST" })
           pinned_main_url,
           ai_gallery_urls,
           hidden_images,
+          image_scores,
           status
         )
       `)
@@ -368,6 +375,7 @@ export const getShareProduct = createServerFn({ method: "POST" })
           pinned_main_url,
           ai_gallery_urls,
           hidden_images,
+          image_scores,
           status
         )
       `)

@@ -191,6 +191,8 @@ function ProjectPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyForce, setVerifyForce] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
@@ -274,15 +276,21 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_ALLEGRO_DESCRIPTION" } }),
     refetchInterval: 3000,
   });
+  const { data: verifyJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_IMAGE_VERIFY"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_IMAGE_VERIFY" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
   const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
   const allegroActive = allegroJob && (allegroJob.status === "PENDING" || allegroJob.status === "PROCESSING");
+  const verifyActive = verifyJob && (verifyJob.status === "PENDING" || verifyJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -298,7 +306,9 @@ function ProjectPage() {
                 ? "Opisy Allegro"
                 : job.kind === "PIM_RESCRAPE"
                   ? "Doscrapowanie źródeł"
-                  : "Wizualizacje produktowe";
+                  : job.kind === "PIM_IMAGE_VERIFY"
+                    ? "Weryfikacja zdjęć AI"
+                    : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -308,7 +318,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, vizJob, allegroJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob, refetchProducts]);
 
   useEffect(() => {
     if (!vizActive) return;
@@ -493,6 +503,35 @@ function ProjectPage() {
       });
       toast.success(`Uruchomiono w tle: ${targets.length} produktów. Możesz zamknąć kartę.`);
       qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "REGENERATE_MEDIA"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
+    }
+  };
+
+  // Bulk AI image identity verification. Operates on the current selection
+  // (or the filtered view). Products without picked_urls are skipped by the
+  // worker itself; we still send them so the log shows the skip.
+  const verifyImagesAll = async (opts: { force: boolean; productIds?: string[] }) => {
+    const idSet = opts.productIds ? new Set(opts.productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
+    const targets = source.filter(
+      (p) => !!(p as { enrichment_id?: string | null }).enrichment_id,
+    );
+    if (!targets.length) {
+      toast.info("Brak produktów z dopasowaniem — najpierw uruchom Dopasowanie.");
+      return;
+    }
+    try {
+      await createJobFn({
+        data: {
+          projectId: id,
+          kind: "PIM_IMAGE_VERIFY",
+          items: targets.map((t) => t.id),
+          payload: { force: opts.force },
+        },
+      });
+      toast.success(`Uruchomiono weryfikację zdjęć AI: ${targets.length} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_IMAGE_VERIFY"] });
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się uruchomić zadania"));
     }
@@ -733,6 +772,38 @@ function ProjectPage() {
         </Card>
       )}
 
+      {verifyActive && verifyJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {verifyJob.cancel_requested ? "Zatrzymywanie… " : "Weryfikacja zdjęć AI "}
+                {verifyJob.processed_count}/{verifyJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">
+                  {Math.round((verifyJob.processed_count / Math.max(1, verifyJob.total)) * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: verifyJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_IMAGE_VERIFY"] });
+                  }}
+                  disabled={verifyJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(verifyJob.processed_count / Math.max(1, verifyJob.total)) * 100} />
+            <BulkJobLog jobId={verifyJob.id} />
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="data" className="mb-4">
         <TabsList>
           <TabsTrigger value="data">Dane</TabsTrigger>
@@ -881,6 +952,14 @@ function ProjectPage() {
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() => setVerifyOpen(true)}
+                disabled={!!verifyActive}
+              >
+                <RefreshCw className="h-4 w-4 mr-1" /> Weryfikuj zdjęcia AI
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => generateAllegroAll([...selectedIds])}
                 disabled={!!allegroActive}
               >
@@ -973,6 +1052,22 @@ function ProjectPage() {
                           refetchProducts();
                         }}
                       />
+                      {(((p as { unsure_count?: number }).unsure_count ?? 0) +
+                        ((p as { rejected_count?: number }).rejected_count ?? 0)) > 0 && (
+                        <Link
+                          to="/projects/$id/products/$pid"
+                          params={{ id, pid: p.id }}
+                          className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                          title="Zdjęcia oczekujące weryfikacji / odrzucone przez AI"
+                        >
+                          {((p as { unsure_count?: number }).unsure_count ?? 0) > 0 && (
+                            <span>?{(p as { unsure_count?: number }).unsure_count}</span>
+                          )}
+                          {((p as { rejected_count?: number }).rejected_count ?? 0) > 0 && (
+                            <span>×{(p as { rejected_count?: number }).rejected_count}</span>
+                          )}
+                        </Link>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="font-medium line-clamp-1">{p.golden_name ?? p.nazwa ?? "—"}</div>
@@ -1200,6 +1295,55 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
+        <DialogContent className="max-w-md">
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">Weryfikacja zdjęć AI</h3>
+            <p className="text-sm text-muted-foreground">
+              Gemini Vision sprawdzi każde zdjęcie i oznaczy „ten sam produkt", „inny produkt" lub
+              „niepewne". Odrzucone i niepewne nie pojawią się na liście, w eksporcie ani w linku
+              klienta. Zdjęcia oznaczone ręcznie jako zatwierdzone są zawsze pomijane.
+            </p>
+            {(() => {
+              const src = selectedIds.size > 0
+                ? products.filter((p) => selectedIds.has(p.id))
+                : filtered;
+              const targets = src.filter((p) => !!(p as { enrichment_id?: string | null }).enrichment_id);
+              const total = targets.reduce(
+                (n, p) => n + (((p as { total_images?: number }).total_images) ?? 0),
+                0,
+              );
+              const verified = targets.reduce(
+                (n, p) => n + (((p as { identity_v2_count?: number }).identity_v2_count) ?? 0),
+                0,
+              );
+              const est = verifyForce ? total : Math.max(0, total - verified);
+              return (
+                <div className="text-sm rounded border p-2 bg-muted/30">
+                  <div>Produktów w zakresie: <b>{targets.length}</b></div>
+                  <div>Do analizy: ~<b>{est}</b> zdjęć{verifyForce ? " (wymuszone)" : ""}</div>
+                </div>
+              );
+            })()}
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={verifyForce} onCheckedChange={(v) => setVerifyForce(v === true)} />
+              Wymuś ponowną analizę już sprawdzonych
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setVerifyOpen(false)}>Anuluj</Button>
+              <Button
+                onClick={async () => {
+                  const ids = selectedIds.size > 0 ? [...selectedIds] : undefined;
+                  setVerifyOpen(false);
+                  await verifyImagesAll({ force: verifyForce, productIds: ids });
+                }}
+              >
+                Uruchom
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <ClientGuidelinesDialog
         open={guidelinesOpen}
         onOpenChange={setGuidelinesOpen}

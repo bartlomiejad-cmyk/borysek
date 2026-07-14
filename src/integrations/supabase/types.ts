@@ -679,6 +679,7 @@ export type Database = {
         | "PIM_VISUALIZATIONS"
         | "PIM_ALLEGRO_DESCRIPTION"
         | "PIM_RESCRAPE"
+        | "PIM_IMAGE_VERIFY"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -832,6 +833,7 @@ export const Constants = {
         "PIM_VISUALIZATIONS",
         "PIM_ALLEGRO_DESCRIPTION",
         "PIM_RESCRAPE",
+        "PIM_IMAGE_VERIFY",
       ],
       bulk_job_status: [
         "PENDING",
