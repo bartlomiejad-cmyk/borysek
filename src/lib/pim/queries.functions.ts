@@ -90,7 +90,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, pipeline_status, review_status, manual_lock")
+      .select("id, ext_id, nazwa, kod, ean, pipeline_status, review_status, manual_lock, matching_mode")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);
@@ -100,7 +100,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, image_scores, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds, data_sufficiency, audit",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, image_scores, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds, data_sufficiency, audit, compat_suggested",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -168,6 +168,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         pipeline_status: (p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED",
         review_status: (p as { review_status?: string | null }).review_status ?? "NONE",
         manual_lock: !!(p as { manual_lock?: boolean }).manual_lock,
+        matching_mode: (((p as { matching_mode?: string | null }).matching_mode) ?? "strict") as "strict" | "compatible",
         golden_name: e?.golden_name ?? null,
         generated_at: e?.generated_at ?? null,
         error: e?.error ?? null,
@@ -220,6 +221,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
             verdict: "pass" | "warn" | "fail";
           };
         },
+        compat_suggested: !!(e as { compat_suggested?: boolean } | undefined)?.compat_suggested,
       };
     });
   });
