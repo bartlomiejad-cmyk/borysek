@@ -3053,6 +3053,7 @@ export async function runPimVisualization(
       `FAL nie wygenerował żadnej wizualizacji dla „${label}". ${lastFalErr ? `Ostatni błąd: ${lastFalErr.slice(0, 200)}` : ""}`.trim(),
     );
   }
+  await advancePipelineStatus(supabaseAdmin as never, (product as { id: string }).id, "VISUALS_READY");
   return { complete: true };
 }
 
