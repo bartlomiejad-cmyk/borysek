@@ -877,7 +877,7 @@ export async function scoreAndCapForProduct(
   const currentPicked = (enRow.picked_urls as string[] | null) ?? [];
   const pinned = (enRow as { pinned_main_url?: string | null }).pinned_main_url ?? null;
   const prevBd = Array.isArray((enRow as { score_breakdown?: unknown }).score_breakdown)
-    ? ((enRow as { score_breakdown: BreakdownEntry[] }).score_breakdown)
+    ? ((enRow as unknown as { score_breakdown: BreakdownEntry[] }).score_breakdown)
     : [];
   const manualEntries = prevBd.filter((b) => b && (b as { manual?: boolean }).manual === true);
   const manualUrls = manualEntries.map((e) => e.url);
