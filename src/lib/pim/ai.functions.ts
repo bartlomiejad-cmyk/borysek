@@ -899,38 +899,42 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       return (prev.identity_v ?? 0) < IDENTITY_VERSION;
     };
     let toScore = data.urls.filter(needsCheck);
+    let currentScores: Record<string, ImageScore> = existing;
 
     // Pre-flight so a stale URL doesn't blow up the whole scoring batch
     // with `upstream_error: 404 status code when fetching image from URL`.
     if (toScore.length) {
-      const { alive } = await filterAliveImages(supabase, enRow.id, toScore, existing);
+      const { alive, dead } = await filterAliveImages(supabase, enRow.id, toScore, existing);
       toScore = alive;
+      if (dead.length) {
+        // Re-read so the merged writeback below preserves the dead markers
+        // we just persisted.
+        const { data: refreshed } = await supabase
+          .from("enrichments")
+          .select("image_scores")
+          .eq("id", enRow.id)
+          .maybeSingle();
+        currentScores =
+          ((refreshed as { image_scores?: Record<string, ImageScore> } | null)?.image_scores ??
+            existing) as Record<string, ImageScore>;
+      }
     }
 
     if (!toScore.length) {
-      // Re-read scores because filterAliveImages may have written dead markers.
-      const { data: refreshed } = await supabase
-        .from("enrichments")
-        .select("image_scores")
-        .eq("id", enRow.id)
-        .maybeSingle();
-      const scores =
-        ((refreshed as { image_scores?: Record<string, ImageScore> } | null)?.image_scores ??
-          existing) as Record<string, ImageScore>;
-      return { scores, source: "cache" as const, failed: [] as string[] };
+      return { scores: currentScores, source: "cache" as const, failed: [] as string[] };
     }
 
     const settled = await Promise.allSettled(
       toScore.map((u) => scoreOneImage(apiKey, u, productName, brand, anchorUrl && anchorUrl !== u ? anchorUrl : null)),
     );
-    const merged: Record<string, ImageScore> = { ...existing };
+    const merged: Record<string, ImageScore> = { ...currentScores };
     const failed: string[] = [];
     settled.forEach((r, idx) => {
       const url = toScore[idx];
       if (r.status === "fulfilled") {
         // Preserve manual_keep if it was somehow set on this URL between
         // read and write (defence in depth — the filter above already skips).
-        const prevManual = existing[url]?.manual_keep;
+        const prevManual = currentScores[url]?.manual_keep;
         merged[url] = prevManual ? { ...r.value, manual_keep: true } : r.value;
       } else {
         failed.push(url);
