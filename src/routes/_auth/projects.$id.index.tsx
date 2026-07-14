@@ -1395,6 +1395,19 @@ function ProjectPage() {
                             </Badge>
                           );
                         })()}
+                        {(() => {
+                          const rs = ((p as { review_status?: string | null }).review_status ?? "NONE") as string;
+                          if (rs !== "APPROVED") return null;
+                          return (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0 border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              title="Produkt zatwierdzony"
+                            >
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Zatwierdzony
+                            </Badge>
+                          );
+                        })()}
                       </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
