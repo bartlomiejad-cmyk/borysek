@@ -629,6 +629,33 @@ function ProjectPage() {
     }
   };
 
+  /**
+   * Bulk AI audit — deterministic checks + LLM cross-check for every product
+   * with a Golden Record (pipeline_status GOLDEN_READY or VISUALS_READY).
+   * Products still in earlier stages are skipped by the worker itself.
+   */
+  const auditAll = async (productIds?: string[]) => {
+    const idSet = productIds ? new Set(productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : products;
+    const targets = source.filter((p) => {
+      const ps = ((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED");
+      return ps === "GOLDEN_READY" || ps === "VISUALS_READY";
+    });
+    if (!targets.length) {
+      toast.info("Brak produktów ze złotym rekordem — najpierw wygeneruj złote rekordy.");
+      return;
+    }
+    try {
+      await createJobFn({
+        data: { projectId: id, kind: "PIM_AUDIT", items: targets.map((t) => t.id) },
+      });
+      toast.success(`Uruchomiono Audyt AI: ${targets.length} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_AUDIT"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić Audytu AI"));
+    }
+  };
+
   const exportFile = async (fmt: "csv" | "xlsx") => {
     const allRows = await exportFn({ data: { projectId: id } });
     const rows =
