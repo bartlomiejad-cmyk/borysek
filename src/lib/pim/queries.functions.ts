@@ -260,11 +260,15 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
       patch.allegro_generated_at = new Date().toISOString();
     }
     if (!Object.keys(patch).length) return { ok: true };
-    const { error } = await supabase
+    const { data: enRow, error } = await supabase
       .from("enrichments")
       .update(patch as never)
-      .eq("id", data.enrichmentId);
+      .eq("id", data.enrichmentId)
+      .select("source_product_id")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    const pid = (enRow as { source_product_id?: string } | null)?.source_product_id;
+    if (pid) await setManualLockOnProduct(supabase as never, pid, true);
     return { ok: true };
   });
 
@@ -303,5 +307,6 @@ export const setImageManualKeep = createServerFn({ method: "POST" })
       .update({ image_scores: scores as never } as never)
       .eq("id", (enr as unknown as { id: string }).id);
     if (upErr) throw new Error(upErr.message);
+    await setManualLockOnProduct(supabase as never, data.productId, true);
     return { ok: true, manual_keep: data.keep };
   });
