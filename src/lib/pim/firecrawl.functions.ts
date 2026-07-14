@@ -68,6 +68,11 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
     z
       .object({
         projectId: z.string().uuid(),
+        // Retained for backward compatibility. Kept as no-op flag: eligibility
+        // is now driven strictly by pipeline_status (IMPORTED) or an explicit
+        // productIds selection. The old semantics ("skip products that
+        // already have a search_results row") caused a mismatch with the
+        // pipeline stage bar and made cleared-source products un-startable.
         onlyMissing: z.boolean().default(true),
         productIds: z.array(z.string().uuid()).max(20000).optional(),
       })
@@ -88,36 +93,49 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
       throw new Error("Wyszukiwanie źródeł już działa w tle dla tego projektu.");
     }
 
-    // Pick target products.
+    // Pick target products. Eligibility rules:
+    //   • If productIds is passed → those exact products (explicit user
+    //     selection, e.g. "Szukaj ponownie" from editor). Works at any
+    //     pipeline_status — idempotent, new results merge into search_results.
+    //   • Otherwise → products at the Import stage
+    //     (pipeline_status IS NULL OR = 'IMPORTED').
+    // The old "skip if search_results row exists" predicate is removed:
+    // it disagreed with the pipeline stage bar for products whose sources
+    // had been cleared.
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, nazwa")
+      .select("id, nazwa, pipeline_status")
       .eq("project_id", data.projectId);
     if (error) throw new Error(error.message);
 
     const restrict = data.productIds ? new Set(data.productIds) : null;
-    let targetIds = (products ?? [])
-      .filter((p) => (p.nazwa ?? "").trim().length > 0)
-      .filter((p) => (restrict ? restrict.has(p.id as string) : true))
-      .map((p) => p.id as string);
+    const scoped = (products ?? []).filter((p) =>
+      restrict ? restrict.has(p.id as string) : true,
+    );
 
-    if (data.onlyMissing && targetIds.length) {
-      const { data: existingSrs } = await supabase
-        .from("search_results")
-        .select("term")
-        .eq("project_id", data.projectId);
-      const haveTerms = new Set(
-        (existingSrs ?? []).map((s) => (s.term ?? "").trim().toLowerCase()),
-      );
-      const namesById = new Map((products ?? []).map((p) => [p.id as string, (p.nazwa ?? "").trim().toLowerCase()]));
-      targetIds = targetIds.filter((id) => {
-        const t = namesById.get(id) ?? "";
-        return t && !haveTerms.has(t);
-      });
+    let skippedAdvanced = 0;
+    let skippedNoName = 0;
+    const targetIds: string[] = [];
+    for (const p of scoped) {
+      const name = (p.nazwa ?? "").trim();
+      if (!name) {
+        skippedNoName++;
+        continue;
+      }
+      if (!restrict) {
+        const ps = ((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED") as string;
+        if (ps !== "IMPORTED") {
+          skippedAdvanced++;
+          continue;
+        }
+      }
+      targetIds.push(p.id as string);
     }
 
     if (!targetIds.length) {
-      throw new Error("Brak produktów do przetworzenia (wszystkie mają już źródła lub brak nazwy).");
+      throw new Error(
+        `Brak produktów do przetworzenia: ${skippedAdvanced} pominięto (status dalej niż Import), ${skippedNoName} pominięto (brak nazwy).`,
+      );
     }
 
     const { data: row, error: insErr } = await supabase
@@ -150,7 +168,12 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
       // ignore
     }
 
-    return { jobId: (row as { id: string }).id, total: targetIds.length };
+    return {
+      jobId: (row as { id: string }).id,
+      total: targetIds.length,
+      skippedAdvanced,
+      skippedNoName,
+    };
   });
 
 /**
