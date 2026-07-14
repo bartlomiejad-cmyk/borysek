@@ -1472,6 +1472,42 @@ function ProjectPage() {
                             <ArrowRight className="h-4 w-4" />
                           </Link>
                         </Button>
+                        {(() => {
+                          const rs = ((p as { review_status?: string | null }).review_status ?? "NONE") as string;
+                          if (rs === "APPROVED") {
+                            return (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Cofnij zatwierdzenie"
+                                onClick={async () => {
+                                  await unapproveFn({ data: { productId: p.id } });
+                                  toast.success("Cofnięto zatwierdzenie");
+                                  refetchProducts();
+                                  qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                                }}
+                              >
+                                <Undo2 className="h-4 w-4" />
+                              </Button>
+                            );
+                          }
+                          return (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Zatwierdź produkt"
+                              className="text-emerald-700 dark:text-emerald-300 hover:text-emerald-800"
+                              onClick={async () => {
+                                await approveFn({ data: { productId: p.id } });
+                                toast.success("Zatwierdzono");
+                                refetchProducts();
+                                qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                              }}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </Button>
+                          );
+                        })()}
                         <Button
                           size="sm"
                           variant="ghost"
