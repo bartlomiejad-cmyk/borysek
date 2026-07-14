@@ -3293,14 +3293,13 @@ export async function runPimVisualization(
   const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number) => {
     const { data: fresh, error: readErr } = await supabaseAdmin
       .from("enrichments")
-      .select("ai_gallery_urls, image_meta, review_status")
+      .select("ai_gallery_urls, image_meta")
       .eq("id", e.id)
       .single();
     if (readErr) throw new Error(readErr.message);
     const freshRow = fresh as {
       ai_gallery_urls?: string[] | null;
       image_meta?: Record<string, unknown> | null;
-      review_status?: string | null;
     };
     const existing = Array.isArray(freshRow.ai_gallery_urls)
       ? (freshRow.ai_gallery_urls ?? [])
@@ -3317,20 +3316,32 @@ export async function runPimVisualization(
       reference_url: effectiveRefUrls[0] ?? null,
     };
     const nextMeta: Record<string, unknown> = { ...meta, viz_qc: vizQcMap };
-    // If this viz failed product_intact, demote review_status — a broken
-    // visual on an approved product must resurface. Never touch REJECTED.
     const updatePayload: Record<string, unknown> = {
       ai_gallery_urls: merged,
       image_meta: nextMeta,
     };
-    if (!passed && freshRow.review_status !== "REJECTED" && freshRow.review_status !== "NEEDS_REVIEW") {
-      updatePayload.review_status = "NEEDS_REVIEW";
-    }
     const { error: dbErr } = await supabaseAdmin
       .from("enrichments")
       .update(updatePayload as never)
       .eq("id", e.id);
     if (dbErr) throw new Error(dbErr.message);
+    // If this viz failed product_intact, demote review_status on the
+    // owning source_product — a broken visual on an approved product must
+    // resurface. Never touch REJECTED. review_status lives on source_products.
+    if (!passed) {
+      const { data: prow } = await supabaseAdmin
+        .from("source_products")
+        .select("review_status")
+        .eq("id", productId)
+        .maybeSingle();
+      const cur = (prow as { review_status?: string | null } | null)?.review_status ?? null;
+      if (cur !== "REJECTED" && cur !== "NEEDS_REVIEW") {
+        await supabaseAdmin
+          .from("source_products")
+          .update({ review_status: "NEEDS_REVIEW" } as never)
+          .eq("id", productId);
+      }
+    }
     await emit(ctx, {
       level: passed ? "success" : "warn",
       message: passed
