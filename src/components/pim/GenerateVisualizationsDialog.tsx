@@ -8,10 +8,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Wand2, Sparkles, Loader2, ImageIcon } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Wand2, Sparkles, Loader2, ImageIcon, ChevronDown, Save, Check } from "lucide-react";
 import { createBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { updateProject } from "@/lib/pim/projects.functions";
-import { suggestVisualizationField, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
+import {
+  suggestVisualizationField,
+  suggestVisualizationPreset,
+  analyzeProductImagesForPrompt,
+} from "@/lib/pim/ai.functions";
+import {
+  BUILT_IN_PRESETS,
+  legacyPreset,
+  readCustomPresets,
+  resolvePresetById,
+  composePresetPayload,
+  type ScenePreset,
+} from "@/lib/pim/scene-presets";
 import { friendlyError } from "@/lib/utils";
 
 export type VizTarget = {
@@ -31,6 +44,7 @@ type Props = {
   selectedIds: Set<string>;
   defaultStylePrompt?: string | null;
   defaultRequirementsPl?: string | null;
+  projectSettings?: Record<string, unknown> | null;
 };
 
 function hasMain(p: VizTarget): boolean {
@@ -48,11 +62,13 @@ export function GenerateVisualizationsDialog({
   selectedIds,
   defaultStylePrompt,
   defaultRequirementsPl,
+  projectSettings,
 }: Props) {
   const qc = useQueryClient();
   const createJob = useServerFn(createBulkJob);
   const updProject = useServerFn(updateProject);
   const suggestField = useServerFn(suggestVisualizationField);
+  const suggestPreset = useServerFn(suggestVisualizationPreset);
   const analyzeImagesFn = useServerFn(analyzeProductImagesForPrompt);
 
   const selectedTargets = useMemo(
@@ -65,13 +81,52 @@ export function GenerateVisualizationsDialog({
     selectedIds.size > 0 ? "selected" : "with_main",
   );
   const [count, setCount] = useState(3);
-  const [style, setStyle] = useState<string>(defaultStylePrompt ?? "");
-  const [reqPl, setReqPl] = useState<string>(defaultRequirementsPl ?? "");
+  const customPresets = useMemo<ScenePreset[]>(
+    () => readCustomPresets(projectSettings ?? null),
+    [projectSettings],
+  );
+  const legacy = useMemo(
+    () => legacyPreset(defaultStylePrompt, defaultRequirementsPl),
+    [defaultStylePrompt, defaultRequirementsPl],
+  );
+  const availablePresets = useMemo<ScenePreset[]>(
+    () => [
+      ...(legacy ? [legacy] : []),
+      ...customPresets,
+      ...BUILT_IN_PRESETS,
+    ],
+    [customPresets, legacy],
+  );
+  const initialPresetId = legacy ? legacy.id : BUILT_IN_PRESETS[0]!.id;
+  const [presetId, setPresetId] = useState<string>(initialPresetId);
+  const [adjustments, setAdjustments] = useState<string>("");
+  const [customOpen, setCustomOpen] = useState(false);
+  const [style, setStyle] = useState<string>("");
+  const [reqPl, setReqPl] = useState<string>("");
   const [quality, setQuality] = useState<"2K" | "4K">("2K");
   const [busy, setBusy] = useState(false);
   const [busyStyle, setBusyStyle] = useState(false);
   const [busyReq, setBusyReq] = useState(false);
   const [busyVision, setBusyVision] = useState(false);
+  const [busyMatch, setBusyMatch] = useState(false);
+  const [busySave, setBusySave] = useState(false);
+  const [presetName, setPresetName] = useState("");
+
+  const selectedPreset = useMemo<ScenePreset | null>(
+    () => resolvePresetById(presetId, [...(legacy ? [legacy] : []), ...customPresets]),
+    [presetId, legacy, customPresets],
+  );
+
+  // When user opens Dostosuj, prefill the two text fields from the preset so
+  // they can tweak in Polish. Style comes from style_en (which is the EN scene
+  // description we pass into buildFalPromptsFromPolish); requirements come
+  // from requirements_en. Legacy preset already holds the original PL text.
+  useEffect(() => {
+    if (!open) return;
+    if (!selectedPreset) return;
+    setStyle(selectedPreset.style_en);
+    setReqPl(selectedPreset.requirements_en);
+  }, [open, selectedPreset]);
 
   const suggest = async (field: "style" | "requirements") => {
     const setBusyFn = field === "style" ? setBusyStyle : setBusyReq;
@@ -87,6 +142,20 @@ export function GenerateVisualizationsDialog({
     }
   };
 
+  const matchPreset = async () => {
+    setBusyMatch(true);
+    try {
+      const out = await suggestPreset({ data: { projectId } });
+      setPresetId(out.preset_id);
+      setAdjustments(out.adjustments ?? "");
+      toast.success("AI dobrała preset");
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się dopasować presetu"));
+    } finally {
+      setBusyMatch(false);
+    }
+  };
+
   const analyzeFromImages = async () => {
     const withMain = selectedTargets.filter(hasMain);
     const pick = withMain[0] ?? withMainTargets[0];
@@ -99,8 +168,14 @@ export function GenerateVisualizationsDialog({
       const out = await analyzeImagesFn({
         data: { productId: pick.id, mode: "visualization" },
       });
-      setStyle(out.style);
-      setReqPl(out.requirements);
+      // Vision output is treated as per-product personalisation ON TOP of the
+      // chosen preset. Preset rules take precedence on conflicts; we simply
+      // concatenate the vision insight into the `adjustments` field.
+      const merged = [adjustments.trim(), out.requirements.trim(), out.style.trim()]
+        .filter(Boolean)
+        .join(" · ")
+        .slice(0, 480);
+      setAdjustments(merged);
       toast.success(`AI przeanalizowała ${out.analyzed} zdjęcie/zdjęć`);
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się przeanalizować zdjęć"));
@@ -109,13 +184,56 @@ export function GenerateVisualizationsDialog({
     }
   };
 
-  // Re-sync form defaults when opened (project settings may have changed).
+  // Re-sync scope + preset defaults when the dialog opens.
   useEffect(() => {
     if (!open) return;
-    setStyle(defaultStylePrompt ?? "");
-    setReqPl(defaultRequirementsPl ?? "");
     setScope(selectedIds.size > 0 ? "selected" : "with_main");
-  }, [open, defaultStylePrompt, defaultRequirementsPl, selectedIds]);
+    setPresetId(legacy ? legacy.id : BUILT_IN_PRESETS[0]!.id);
+    setAdjustments("");
+    setCustomOpen(false);
+  }, [open, selectedIds, legacy]);
+
+  const savePreset = async () => {
+    const name = presetName.trim();
+    if (!name) {
+      toast.info("Nadaj nazwę presetowi");
+      return;
+    }
+    const s = style.trim();
+    const r = reqPl.trim();
+    if (!s && !r) {
+      toast.info("Uzupełnij pola stylu lub wymagań przed zapisem");
+      return;
+    }
+    setBusySave(true);
+    try {
+      const existing = readCustomPresets(projectSettings ?? null);
+      const id = `custom_${Date.now().toString(36)}`;
+      const nextArr = [
+        ...existing,
+        {
+          id,
+          label_pl: name,
+          thumbnail_hint: "Własny preset projektu.",
+          style_en: s,
+          requirements_en: r,
+        },
+      ];
+      const nextSettings = {
+        ...(projectSettings ?? {}),
+        scene_presets: nextArr,
+      } as Record<string, unknown>;
+      await updProject({ data: { id: projectId, settings: nextSettings } });
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      toast.success("Preset zapisany w projekcie");
+      setPresetName("");
+      setPresetId(id);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się zapisać presetu"));
+    } finally {
+      setBusySave(false);
+    }
+  };
 
   const targets = useMemo(() => {
     if (scope === "selected") return selectedTargets.filter(hasMain);
@@ -135,14 +253,28 @@ export function GenerateVisualizationsDialog({
       toast.info("Brak produktów z gotowym zdjęciem głównym w wybranym zakresie");
       return;
     }
+    if (!selectedPreset) {
+      toast.info("Wybierz preset sceny");
+      return;
+    }
     setBusy(true);
     try {
-      // Persist form defaults on the project so users don't retype them.
+      // If the user edited the collapsible text fields we honour those exact
+      // values; otherwise we compose the payload from the preset + AI-picked
+      // per-product adjustments. Preset preservation rules always apply.
+      const usingCustomText = customOpen &&
+        (style.trim() !== selectedPreset.style_en.trim() ||
+          reqPl.trim() !== selectedPreset.requirements_en.trim());
+      const payload = usingCustomText
+        ? { stylePrompt: style.trim(), requirementsPl: reqPl.trim() }
+        : composePresetPayload(selectedPreset, adjustments);
+
+      // Persist last-used defaults on the project so users don't retype them.
       await updProject({
         data: {
           id: projectId,
-          visualization_style_prompt: style.trim() || null,
-          visualization_requirements_pl: reqPl.trim() || null,
+          visualization_style_prompt: payload.stylePrompt || null,
+          visualization_requirements_pl: payload.requirementsPl || null,
         },
       });
       await createJob({
@@ -152,8 +284,8 @@ export function GenerateVisualizationsDialog({
           items: targets.map((t) => t.id),
           payload: {
             count,
-            stylePrompt: style.trim(),
-            requirementsPl: reqPl.trim(),
+            stylePrompt: payload.stylePrompt,
+            requirementsPl: payload.requirementsPl,
             targetResolution: quality === "4K" ? 4096 : 2048,
           },
         },
