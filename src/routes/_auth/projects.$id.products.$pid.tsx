@@ -1040,6 +1040,11 @@ function ProductDetail() {
             {(() => {
               const gallery = (((enrichment as { ai_gallery_urls?: string[] | null } | null)?.ai_gallery_urls) ?? []) as string[];
               if (!gallery.length) return null;
+              const vizQcMap =
+                (((enrichment as { image_meta?: { viz_qc?: Record<string, { passed?: boolean; product_intact?: boolean; product_visible?: boolean; issues?: string[] }> } | null } | null)?.image_meta?.viz_qc) ?? {}) as Record<
+                  string,
+                  { passed?: boolean; product_intact?: boolean; product_visible?: boolean; issues?: string[] }
+                >;
               return (
                 <div className="rounded border bg-muted/30 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1053,13 +1058,22 @@ function ProductDetail() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {gallery.map((u) => {
                       const isPinned = u === pinnedMainUrl;
+                      const vq = vizQcMap[u];
+                      const vqFailed = vq && vq.passed === false;
+                      const vqTitle = vqFailed
+                        ? `Wizualizacja: produkt niezgodny z referencją${
+                            vq.issues && vq.issues.length ? ` — ${vq.issues.slice(0, 3).join("; ")}` : ""
+                          }`
+                        : undefined;
                       return (
                         <div
                           key={u}
                           className={cn(
                             "relative group rounded border-2 p-0.5",
                             isPinned ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-violet-400/60",
+                            vqFailed ? "border-amber-500 ring-2 ring-amber-500/40" : "",
                           )}
+                          title={vqTitle}
                         >
                           <a href={u} target="_blank" rel="noreferrer">
                             <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
@@ -1070,6 +1084,14 @@ function ProductDetail() {
                           >
                             AI
                           </Badge>
+                          {vqFailed && (
+                            <Badge
+                              variant="outline"
+                              className="absolute top-0 left-1/2 -translate-x-1/2 text-[10px] px-1 py-0 bg-amber-500/15 text-amber-800 border-amber-500/60 dark:text-amber-200 whitespace-nowrap"
+                            >
+                              ⚠ niezgodny
+                            </Badge>
+                          )}
                           {enrichment && (
                             <button
                               onClick={() =>
