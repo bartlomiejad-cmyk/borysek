@@ -21,6 +21,17 @@ export type GalleryImageScore = {
   manual_keep?: boolean;
   dead?: boolean;
   identity_v?: number;
+  /** Probed image dimensions (persisted after size probe). */
+  w?: number;
+  h?: number;
+  /**
+   * Best-effort upgraded URL variant (e.g. thumbnail → source-size). Only set
+   * when the upgraded URL responded and returned larger dimensions than the
+   * original. Callers should use it as the download target for regen / AI.
+   */
+  large_url?: string;
+  /** URL of the largest sibling variant this image was deduped into. */
+  dedup_of?: string;
 };
 
 export type GalleryEnrichment = {
@@ -34,6 +45,8 @@ export type VisibleGallery = {
   unsure: string[];
   rejected: string[];
 };
+
+import { baseVariantKey } from "./image-variants";
 
 export function getVisibleGallery(
   urls: readonly string[],
@@ -63,6 +76,44 @@ export function getVisibleGallery(
     if (identity === "different") rejected.push(u);
     else if (identity === "unsure") unsure.push(u);
     else accepted.push(u); // "same" or unscored
+  }
+
+  // Size-variant deduplication: if two accepted URLs collapse to the same
+  // canonical form, keep only the largest by pixel area. Others become
+  // hidden duplicates (not surfaced in unsure/rejected). Pinned always
+  // survives even if a larger sibling exists — user's explicit choice.
+  if (accepted.length > 1) {
+    const groups = new Map<string, string[]>();
+    for (const u of accepted) {
+      const key = baseVariantKey(u);
+      const arr = groups.get(key) ?? [];
+      arr.push(u);
+      groups.set(key, arr);
+    }
+    const keep = new Set<string>();
+    for (const arr of groups.values()) {
+      if (arr.length === 1) {
+        keep.add(arr[0]);
+        continue;
+      }
+      const withPinned = pinned && arr.includes(pinned) ? pinned : null;
+      let bestUrl = withPinned ?? arr[0];
+      let bestArea = -1;
+      for (const u of arr) {
+        const s = scores[u];
+        const area = (s?.w ?? 0) * (s?.h ?? 0);
+        if (area > bestArea) {
+          bestArea = area;
+          bestUrl = u;
+        }
+      }
+      // Honour explicit pin
+      keep.add(withPinned ?? bestUrl);
+    }
+    // Preserve original order
+    const filtered = accepted.filter((u) => keep.has(u));
+    accepted.length = 0;
+    accepted.push(...filtered);
   }
 
   // Pin the main image first when it survived.
