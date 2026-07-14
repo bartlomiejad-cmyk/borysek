@@ -28,6 +28,7 @@ import {
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
 import { advancePipelineStatus } from "./pipeline-status";
+import { logProductEvent } from "./product-events.server";
 import {
   runThumbnailQc,
   buildCorrectionSentence,
