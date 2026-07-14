@@ -566,10 +566,10 @@ function ProductDetail() {
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-medium flex items-center gap-1">
-                    <Wand2 className="h-3.5 w-3.5 text-violet-500" /> Zdjęcie główne (FAL.ai)
+                    <Wand2 className="h-3.5 w-3.5 text-violet-500" /> Miniatura Allegro (czyste białe tło)
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Białe tło, miękki cień, produkt ~70% kadru, JPG 2560×2560.
+                    Wyłącznie sam produkt na #FFFFFF, miękki cień, ~70% kadru, JPG 2560×2560. Zdjęcie główne oferty Allegro.
                   </p>
                 </div>
                 <div className="flex gap-1">
@@ -770,9 +770,11 @@ function ProductDetail() {
                 <div className="rounded border bg-muted/30 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium flex items-center gap-2">
-                      <Wand2 className="h-4 w-4" /> Wizualizacje AI
+                      <Wand2 className="h-4 w-4" /> Miniatura katalogowa (z rekwizytami)
                     </p>
-                    <p className="text-[11px] text-muted-foreground">{gallery.length} obraz(ów)</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {gallery.length} obraz(ów) — nie używać jako zdjęcie główne Allegro
+                    </p>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {gallery.map((u) => {
