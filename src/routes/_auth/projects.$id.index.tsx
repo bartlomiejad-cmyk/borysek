@@ -1937,6 +1937,30 @@ function SettingsCard({
   })();
   const [trustedDomains, setTrustedDomains] = useState(initialTrusted);
 
+  const initialSearchProvider: "firecrawl" | "apify" = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).search_provider;
+      if (v === "apify") return "apify";
+    }
+    return "firecrawl";
+  })();
+  const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify">(initialSearchProvider);
+  const [apifyTest, setApifyTest] = useState<{ state: "idle" | "loading" | "ok" | "err"; msg?: string }>({
+    state: "idle",
+  });
+  const testApify = useServerFn(testApifySerp);
+  const runApifyTest = async () => {
+    setApifyTest({ state: "loading" });
+    try {
+      const r = await testApify();
+      if (r.ok) setApifyTest({ state: "ok", msg: `OK — ${r.count} wyników testowych` });
+      else setApifyTest({ state: "err", msg: r.error ?? "Actor nie zwrócił wyników (sprawdź obsługę PL)" });
+    } catch (e) {
+      setApifyTest({ state: "err", msg: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   // Media (AI images) settings.
   const [compA, setCompA] = useState(mediaSettings?.component_a ?? "");
   const [compB, setCompB] = useState(mediaSettings?.component_b ?? "");
