@@ -29,6 +29,14 @@ import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
 import { advancePipelineStatus } from "./pipeline-status";
 import {
+  runThumbnailQc,
+  buildCorrectionSentence,
+  qcScore,
+  qcAllPass,
+  type ThumbnailQcResult,
+  type ThumbnailQcPersisted,
+} from "./thumbnail-qc";
+import {
   auditChecks,
   AUDIT_SYSTEM_PROMPT,
   buildAuditUserPrompt,
