@@ -799,6 +799,51 @@ function ProductDetail() {
                   </details>
                 );
               })()}
+              {(() => {
+                const unsure = (((data as { unsure_identity_images?: string[] } | undefined)?.unsure_identity_images) ?? []) as string[];
+                if (!unsure.length) return null;
+                return (
+                  <details className="pt-1">
+                    <summary className="text-[11px] text-sky-700 dark:text-sky-400 cursor-pointer hover:text-foreground">
+                      Niepewne — do weryfikacji ({unsure.length})
+                    </summary>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      AI nie mogła jednoznacznie potwierdzić, że to ten produkt. Zaakceptuj (dopisz do galerii) lub odrzuć (ukryj).
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                      {unsure.map((u) => (
+                        <div key={u} className="relative group rounded border border-sky-400/40 p-0.5">
+                          <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 flex justify-between opacity-0 group-hover:opacity-100 transition">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await restoreIdentityFn({ data: { productId: pid, url: u, keep: true } });
+                                  toast.success("Zaakceptowano zdjęcie");
+                                  invalidate();
+                                } catch (e) {
+                                  toast.error(friendlyError(e, "Nie udało się zaakceptować"));
+                                }
+                              }}
+                              className="bg-emerald-600 text-white rounded p-0.5"
+                              title="Zaakceptuj — dodaj do galerii"
+                            >
+                              <ShieldCheck className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => hideMut.mutate(u)}
+                              className="bg-destructive text-destructive-foreground rounded p-0.5"
+                              title="Odrzuć — ukryj"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })()}
             </div>
 
             {/* Wizualizacje AI (lifestyle) */}
