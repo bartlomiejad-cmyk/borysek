@@ -3068,10 +3068,17 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, product_notes")
+    .select("id, project_id, nazwa, kod, ean, product_notes, manual_lock")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  if ((product as { manual_lock?: boolean }).manual_lock) {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (zablokowane): ${product.nazwa ?? productId} — opis Allegro`,
+    });
+    return;
+  }
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
