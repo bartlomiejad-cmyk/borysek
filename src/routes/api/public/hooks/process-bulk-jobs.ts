@@ -236,6 +236,15 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
         const deadline = Date.now() + BUDGET_MS;
         const job = await pickNextJob();
         if (!job) {
+          // Housekeeping on idle ticks: purge product events older than 90 days.
+          try {
+            const { cleanupOldProductEvents } = await import(
+              "@/lib/pim/product-events.server"
+            );
+            await cleanupOldProductEvents(supabaseAdmin);
+          } catch {
+            /* housekeeping is best-effort */
+          }
           return Response.json({ ok: true, picked: 0 });
         }
 
