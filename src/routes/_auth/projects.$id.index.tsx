@@ -976,19 +976,13 @@ function ProjectPage() {
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">Wszystkie</SelectItem>
-                <SelectItem value="MATCHED">Dopasowane</SelectItem>
-                <SelectItem value="NO_MATCH">Bez dopasowania</SelectItem>
-                <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
-                <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
+                <SelectItem value="PIPE_IMPORTED">Bez źródeł (do wyszukania)</SelectItem>
+                <SelectItem value="PIPE_SOURCES_FOUND">Do dopasowania</SelectItem>
+                <SelectItem value="PIPE_MATCHED">Do generacji treści</SelectItem>
+                <SelectItem value="PIPE_GOLDEN_READY">Do generacji mediów</SelectItem>
+                <SelectItem value="REVIEW">Do przeglądu</SelectItem>
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
-                <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
-                <SelectItem value="LOCKED">🔒 Zablokowane (manual)</SelectItem>
-                <SelectItem value="REVIEW">Kolejka review</SelectItem>
-                <SelectItem value="PIPE_IMPORTED">Etap: Zaimportowany</SelectItem>
-                <SelectItem value="PIPE_SOURCES_FOUND">Etap: Źródła znalezione</SelectItem>
-                <SelectItem value="PIPE_MATCHED">Etap: Dopasowany</SelectItem>
-                <SelectItem value="PIPE_GOLDEN_READY">Etap: Rekord gotowy</SelectItem>
-                <SelectItem value="PIPE_VISUALS_READY">Etap: Wizualizacje gotowe</SelectItem>
+                <SelectItem value="LOCKED">🔒 Zablokowane ręcznie</SelectItem>
               </SelectContent>
             </Select>
           </div>
