@@ -145,7 +145,13 @@ export async function analyzeVisualizationSceneForProduct(args: {
   featuresText: string;
   imageUrls: string[]; // main first, max 4, must be publicly fetchable
   projectConstraintsPl?: string; // optional PL text; overrides scene choices
-}): Promise<{ style: string; requirements: string; used: number }> {
+}): Promise<{
+  style: string;
+  requirements: string;
+  used: number;
+  has_text: boolean;
+  color_anchor_en: string;
+}> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
   const urls = args.imageUrls.filter(Boolean).slice(0, 4);
@@ -155,9 +161,11 @@ export async function analyzeVisualizationSceneForProduct(args: {
     "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
     "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
     "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
-    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"..."}.',
+    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"..."}.',
     "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
     "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    '- has_text: true jeśli na produkcie widać czytelne napisy/logo/etykiety, false gdy produkt jest "gładki" (np. jednokolorowa taśma, folia, karton bez druku).',
+    '- color_anchor_en (60–180 znaków, PO ANGIELSKU): konkretne, nazwane kolory najważniejszych powierzchni produktu i wnętrza/rdzenia (np. "outer wound surface uniformly bright green, side face green, core light beige/white"). Kluczowe zwłaszcza dla produktów bez tekstu — zastępuje ogólne "preserve colours".',
     "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
   ].join("\n");
 
@@ -180,11 +188,19 @@ export async function analyzeVisualizationSceneForProduct(args: {
   const parsed = (await callGatewayJson(apiKey, "google/gemini-2.5-pro", [
     { role: "system", content: system },
     { role: "user", content },
-  ])) as { style?: unknown; requirements?: unknown };
+  ])) as {
+    style?: unknown;
+    requirements?: unknown;
+    has_text?: unknown;
+    color_anchor_en?: unknown;
+  };
   const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
   const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+  const has_text = typeof parsed.has_text === "boolean" ? parsed.has_text : true;
+  const color_anchor_en =
+    typeof parsed.color_anchor_en === "string" ? parsed.color_anchor_en.trim() : "";
   if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
-  return { style, requirements, used: urls.length };
+  return { style, requirements, used: urls.length, has_text, color_anchor_en };
 }
 
 // Deterministic fallback used when the AI gateway call fails — mirrors the
