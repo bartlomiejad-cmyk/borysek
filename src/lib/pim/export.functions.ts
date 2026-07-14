@@ -141,7 +141,7 @@ export const exportProject = createServerFn({ method: "GET" })
       }
       const galleryCols: Record<string, string> = {};
       for (let i = 0; i < maxGallery; i++) galleryCols[`ai_gallery_${i + 1}`] = gallery[i] ?? "";
-      const base: Record<string, unknown> = {
+      const base = {
         id: p.ext_id ?? "",
         nazwa: p.nazwa ?? "",
         kod: p.kod ?? "",
