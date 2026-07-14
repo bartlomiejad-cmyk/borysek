@@ -12,7 +12,12 @@ import { runAuditForProduct } from "@/lib/pim/audit.functions";
 import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
-import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
+import {
+  regenerateMainImage,
+  clearRegeneratedImage,
+  acceptThumbnailCandidate,
+  rejectThumbnailCandidate,
+} from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
@@ -80,6 +85,8 @@ function ProductDetail() {
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
+  const acceptQcFn = useServerFn(acceptThumbnailCandidate);
+  const rejectQcFn = useServerFn(rejectThumbnailCandidate);
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
@@ -413,6 +420,17 @@ function ProductDetail() {
     mutationFn: (enrichmentId: string) => clearRegenFn({ data: { enrichmentId } }),
     onSuccess: () => { toast.success("Cofnięto regenerację"); invalidate(); },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  const acceptQcMut = useMutation({
+    mutationFn: (enrichmentId: string) => acceptQcFn({ data: { enrichmentId } }),
+    onSuccess: () => { toast.success("Zaakceptowano kandydata miniatury"); invalidate(); },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się zaakceptować kandydata")),
+  });
+  const rejectQcMut = useMutation({
+    mutationFn: (enrichmentId: string) => rejectQcFn({ data: { enrichmentId } }),
+    onSuccess: () => { toast.success("Kandydat odrzucony"); invalidate(); },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się odrzucić kandydata")),
   });
 
   const pinMut = useMutation({
