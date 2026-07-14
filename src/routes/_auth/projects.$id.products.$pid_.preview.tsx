@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { getProductDetail } from "@/lib/pim/queries.functions";
+import { resolveRegenUrl } from "@/lib/pim/media";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -55,7 +56,7 @@ function ProductPreview() {
     const list: string[] = [];
     const push = (u?: string | null) => { if (u && !list.includes(u)) list.push(u); };
     push(en?.pinned_main_url ?? null);
-    push(en?.regenerated_main_image ?? null);
+    push(resolveRegenUrl(en?.regenerated_main_image));
     for (const s of data.sources ?? []) {
       for (const u of s.images) push(u);
       for (const u of s.extra_images) push(u);

@@ -12,6 +12,7 @@ import {
   submitShareFeedback,
   type SharePublicProduct,
 } from "@/lib/pim/shares.functions";
+import { resolveRegenUrl } from "@/lib/pim/media";
 
 export const Route = createFileRoute("/share/$token/p/$pid")({
   head: () => ({
@@ -75,7 +76,7 @@ function Content({ token, session, pid }: { token: string; session: string; pid:
     };
     const list: string[] = [];
     push(en?.pinned_main_url ?? null, list);
-    push(en?.regenerated_main_image ?? null, list);
+    push(resolveRegenUrl(en?.regenerated_main_image), list);
     for (const u of en?.ai_gallery_urls ?? []) push(u, list);
     for (const u of en?.picked_urls ?? []) push(u, list);
     return list;

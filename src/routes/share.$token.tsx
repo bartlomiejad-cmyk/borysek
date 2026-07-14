@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { resolveRegenUrl } from "@/lib/pim/media";
 import {
   AlertTriangle,
   ChevronDown,
@@ -242,7 +243,8 @@ function pickThumb(p: SharePublicProduct): string | null {
   const en = p.enrichment;
   if (!en) return null;
   if (en.pinned_main_url) return en.pinned_main_url;
-  if (en.regenerated_main_image) return en.regenerated_main_image;
+  const regen = resolveRegenUrl(en.regenerated_main_image);
+  if (regen) return regen;
   const hidden = new Set(en.hidden_images ?? []);
   const first = (en.picked_urls ?? []).find((u) => !hidden.has(u));
   return first ?? null;
@@ -268,8 +270,8 @@ function ProductCard({
   const features = product.enrichment?.golden_features ?? [];
   const gallery = [
     ...(product.enrichment?.pinned_main_url ? [product.enrichment.pinned_main_url] : []),
-    ...(product.enrichment?.regenerated_main_image
-      ? [product.enrichment.regenerated_main_image]
+    ...(resolveRegenUrl(product.enrichment?.regenerated_main_image)
+      ? [resolveRegenUrl(product.enrichment?.regenerated_main_image) as string]
       : []),
     ...((product.enrichment?.ai_gallery_urls ?? []) as string[]),
     ...((product.enrichment?.picked_urls ?? []) as string[]),
