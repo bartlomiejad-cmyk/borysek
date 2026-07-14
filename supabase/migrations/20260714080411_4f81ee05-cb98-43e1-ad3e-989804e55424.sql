@@ -1,0 +1,1 @@
+UPDATE public.source_products SET manual_lock = false WHERE manual_lock = true;
