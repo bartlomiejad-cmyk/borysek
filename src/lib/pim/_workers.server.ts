@@ -2480,7 +2480,17 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   }
   await supabaseAdmin.from("search_results").insert(rowsToInsert as never);
 
-  // 3) Filter out marketplaces / blacklist, dedup po hoście (max 1 URL/host), top 5.
+  // 3) Post-merge filter. Marketplace/blacklist rules still apply to
+  //    every URL. Host-level dedup was already done pre-preselect on the
+  //    Apify pool — DO NOT run it again on AI picks. We still dedup
+  //    Firecrawl-only URLs by host (max 1/host) so the scrape budget isn't
+  //    burned on near-duplicate shop mirrors. AI picks are always kept.
+  const aiPickUrls = new Set<string>();
+  for (const b of perVariant) {
+    for (const r of b.results) {
+      if (r.ai_pick) aiPickUrls.add(normalizeUrlForDedup(r.url));
+    }
+  }
   const seenHosts = new Set<string>();
   const markFiltered = (url: string, reason: "marketplace" | "host_dup") => {
     const key = normalizeUrlForDedup(url);
@@ -2494,10 +2504,16 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     if (isMarketplaceUrl(u, extraBlacklist)) { markFiltered(u, "marketplace"); continue; }
     const h = (() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } })();
     if (!h) { markFiltered(u, "marketplace"); continue; }
-    if (seenHosts.has(h)) { markFiltered(u, "host_dup"); continue; }
+    const isAiPick = aiPickUrls.has(normalizeUrlForDedup(u));
+    if (!isAiPick) {
+      if (seenHosts.has(h)) { markFiltered(u, "host_dup"); continue; }
+    }
     seenHosts.add(h);
-    if (filtered.length < 5) filtered.push(u);
-    else markFiltered(u, "host_dup");
+    if (isAiPick || filtered.length < 5) {
+      filtered.push(u);
+    } else {
+      markFiltered(u, "host_dup");
+    }
   }
   await emit(ctx, {
     level: filtered.length ? "info" : "warn",
