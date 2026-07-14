@@ -2078,9 +2078,24 @@ function SettingsCard({
         <div className="pt-4 border-t space-y-2">
           <Label className="text-sm font-medium">Źródło wyszukiwania</Label>
           <p className="text-xs text-muted-foreground">
-            Firecrawl (domyślne) używa własnego indeksu. Google (Apify) korzysta z prawdziwej stronki Google przez actor SERP i dodaje wstępną selekcję AI (Gemini) przed scrapowaniem.
+            Tryb łączony (domyślny) uruchamia oba providery jednocześnie i łączy wyniki. Firecrawl korzysta z własnego indeksu; Google (Apify) używa prawdziwego SERP-a z AI-preselekcją.
           </p>
           <div className="flex flex-col gap-2">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="search-provider"
+                className="mt-1"
+                checked={searchProvider === "both"}
+                onChange={() => setSearchProvider("both")}
+              />
+              <span>
+                <span className="font-medium">Łączony (Firecrawl + Google/Apify)</span>
+                <span className="block text-xs text-muted-foreground">
+                  Rekomendowane. Sumuje wyniki obu źródeł; AI-preselekcja przenosi z Apify tylko trafne pozycje. Wyższy koszt.
+                </span>
+              </span>
+            </label>
             <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="radio"
@@ -2110,18 +2125,33 @@ function SettingsCard({
               </span>
             </label>
           </div>
-          {searchProvider === "apify" ? (
-            <div className="flex items-center gap-2 pt-1">
-              <Button size="sm" variant="secondary" onClick={runApifyTest} disabled={apifyTest.state === "loading"}>
-                {apifyTest.state === "loading" ? "Testuję…" : "Test połączenia"}
-              </Button>
-              {apifyTest.state === "ok" ? (
-                <span className="text-xs text-emerald-600">{apifyTest.msg}</span>
-              ) : apifyTest.state === "err" ? (
-                <span className="text-xs text-destructive">Błąd: {apifyTest.msg}</span>
-              ) : (
-                <span className="text-xs text-muted-foreground">Zapisz najpierw wybór, potem przetestuj (wymaga APIFY_TOKEN i wsparcia PL przez actor).</span>
-              )}
+          {searchProvider === "apify" || searchProvider === "both" ? (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={runApifyTest} disabled={apifyTest.state === "loading"}>
+                  {apifyTest.state === "loading" ? "Testuję…" : "Test połączenia Apify"}
+                </Button>
+                {apifyTest.state === "ok" ? (
+                  <span className="text-xs text-emerald-600">{apifyTest.msg}</span>
+                ) : apifyTest.state === "err" ? (
+                  <span className="text-xs text-destructive">Błąd: {apifyTest.msg}</span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Uruchamia realne zapytanie do actor-a i pokazuje 5 pierwszych wyników.</span>
+                )}
+              </div>
+              {apifyTest.state === "ok" && apifyTest.results && apifyTest.results.length > 0 ? (
+                <ol className="list-decimal pl-5 space-y-1 text-xs">
+                  {apifyTest.results.map((r, i) => (
+                    <li key={i}>
+                      <a href={r.url} target="_blank" rel="noreferrer" className="font-medium underline">
+                        {r.title || r.url}
+                      </a>
+                      <span className="text-muted-foreground"> — {r.domain}</span>
+                      {r.snippet ? <div className="text-muted-foreground line-clamp-2">{r.snippet}</div> : null}
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
             </div>
           ) : null}
         </div>
