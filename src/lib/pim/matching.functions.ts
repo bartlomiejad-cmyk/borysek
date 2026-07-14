@@ -567,10 +567,20 @@ export const runMatching = createServerFn({ method: "POST" })
     }
 
     if (updates.length) {
-      const { error } = await supabase
+      // Manually-locked products keep their existing picked_urls untouched.
+      const writable = updates.filter((u) => !lockedSet.has(u.source_product_id));
+      const { error } = writable.length
+        ? await supabase
         .from("enrichments")
-        .upsert(updates as never, { onConflict: "source_product_id" });
+        .upsert(writable as never, { onConflict: "source_product_id" })
+        : { error: null as unknown as { message: string } | null };
       if (error) throw new Error(error.message);
+      // Forward-only advance for products that ended up with picked sources.
+      for (const u of updates) {
+        if (u.picked_urls.length > 0) {
+          await advancePipelineStatus(supabase as never, u.source_product_id, "MATCHED");
+        }
+      }
     }
 
     // ---------------------------------------------------------------------
