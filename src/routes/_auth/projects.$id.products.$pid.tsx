@@ -2231,4 +2231,3 @@ function ProductSearchResults({ projectId, productName }: { projectId: string; p
     </Collapsible>
   );
 }
-}
