@@ -639,7 +639,28 @@ function ProductDetail() {
           ) : (
             <Eraser className="h-4 w-4 mr-2" />
           )}
-          {reclean.isPending ? "Czyszczenie…" : "Wyczyść źródła"}
+          {reclean.isPending ? "Czyszczenie…" : "Wyczyść śmieci"}
+        </Button>
+        <Button
+          variant="outline"
+          title="Pełny reset: usuwa wpisy wyszukiwania dla tego produktu i wraca go na etap Import. Nie ruszy blokady ręcznej ani statusu zatwierdzenia."
+          disabled={resetSourcesMut.isPending}
+          onClick={() => {
+            if (
+              confirm(
+                "Zresetować źródła dla tego produktu?\n\nUsunie wpisy wyszukiwania i wróci produkt na etap Import.",
+              )
+            ) {
+              resetSourcesMut.mutate();
+            }
+          }}
+        >
+          {resetSourcesMut.isPending ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Eraser className="h-4 w-4 mr-2" />
+          )}
+          {resetSourcesMut.isPending ? "Reset…" : "Reset źródeł"}
         </Button>
         <Button
           onClick={() => regenAll.mutate()}
