@@ -2200,6 +2200,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   if (useFirecrawl) {
     for (let vi = 0; vi < variants.length; vi++) {
       const v = variants[vi];
+      perVariant[vi].providers.firecrawl = 0;
       let hits: FirecrawlSearchHit[] = [];
       try {
         const sr = (await firecrawl.search(v.query, {
@@ -2321,6 +2322,31 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       await emit(ctx, {
         level: "info",
         message: `🎯 ${nazwa} — Apify SERP: ${flat.length} wyników, AI wybrała ${picks.length}${aiPreselectMeta.error ? " (fallback)" : ""}`,
+      });
+    }
+  }
+
+  // Defensive: if we generated an EAN (kind "A") variant but any enabled
+  // provider reports zero results for it, warn loudly — matching depends on
+  // EAN-carrying pages that the bare-EAN Google query surfaces best.
+  for (let vi = 0; vi < variants.length; vi++) {
+    const v = variants[vi];
+    if (v.kind !== "A") continue;
+    const p = perVariant[vi].providers;
+    const zeroProviders: string[] = [];
+    if (useFirecrawl && !(p.firecrawl && p.firecrawl > 0)) zeroProviders.push("firecrawl");
+    if (useApify && !(p.apify && p.apify > 0)) zeroProviders.push("apify");
+    if (zeroProviders.length) {
+      await emit(ctx, {
+        level: "warn",
+        message: `⚠️ ${nazwa} — wariant EAN "${v.query}" bez wyników w: ${zeroProviders.join(", ")}`,
+      });
+      await logProductEvent(supabaseAdmin, {
+        projectId: product.project_id,
+        productId: product.id,
+        kind: "discovery_search",
+        message: `EAN variant "${v.query}" bez wyników: ${zeroProviders.join(", ")}`,
+        meta: { ean_variant: v.query, zero_providers: zeroProviders, provider_mode: searchProvider },
       });
     }
   }
