@@ -103,6 +103,7 @@ import {
   ImagePlus,
   Wand2,
   Share2,
+  FileText,
 } from "lucide-react";
 
 const searchSchema = z.object({
