@@ -1238,6 +1238,32 @@ function ProjectPage() {
               >
                 <Sparkles className="h-4 w-4 mr-1" /> {allegroActive ? "Allegro…" : "Opisy Allegro"}
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const ids = [...selectedIds];
+                  if (!ids.length) return;
+                  // Toggle mode based on majority; if any is strict → set all to compatible, else back to strict.
+                  const anyStrict = products.some(
+                    (p) => selectedIds.has(p.id) && (((p as { matching_mode?: string | null }).matching_mode ?? "strict") === "strict"),
+                  );
+                  const next: "strict" | "compatible" = anyStrict ? "compatible" : "strict";
+                  try {
+                    await setModeFn({ data: { productIds: ids, mode: next } });
+                    toast.success(
+                      next === "compatible"
+                        ? `Ustawiono tryb zamiennik dla ${ids.length}`
+                        : `Ustawiono tryb ścisły dla ${ids.length}`,
+                    );
+                    refetchProducts();
+                  } catch (e) {
+                    toast.error(friendlyError(e, "Nie udało się zmienić trybu"));
+                  }
+                }}
+              >
+                Tryb: zamiennik/ścisły
+              </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("csv")}>
                 <Download className="h-4 w-4 mr-1" /> CSV
               </Button>
