@@ -104,13 +104,34 @@ import {
   Wand2,
   Share2,
   FileText,
+  Lock,
+  LockOpen,
 } from "lucide-react";
+import {
+  PIPELINE_STATUS_LABEL,
+  type PimPipelineStatus,
+} from "@/lib/pim/pipeline-status";
+import { setManualLock } from "@/lib/pim/enrichments.functions";
 
 const searchSchema = z.object({
   page: z.number().min(1).catch(1),
   pageSize: z.number().min(1).catch(25),
   filter: z
-    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES", "POOR_DATA"])
+    .enum([
+      "ALL",
+      "MATCHED",
+      "PENDING",
+      "GENERATED",
+      "NO_MATCH",
+      "NO_IMAGES",
+      "POOR_DATA",
+      "PIPE_IMPORTED",
+      "PIPE_SOURCES_FOUND",
+      "PIPE_MATCHED",
+      "PIPE_GOLDEN_READY",
+      "PIPE_VISUALS_READY",
+      "LOCKED",
+    ])
     .catch("ALL"),
   search: z.string().catch(""),
 });
