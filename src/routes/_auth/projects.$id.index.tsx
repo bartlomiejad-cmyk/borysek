@@ -14,7 +14,7 @@ import {
   clearProjectData,
 } from "@/lib/pim/ingest.functions";
 import { runMatching } from "@/lib/pim/matching.functions";
-import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
+import { listProductsWithEnrichment, getPipelineSummary } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
@@ -84,6 +84,15 @@ import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
 import { ImportUrlsDialog } from "@/components/pim/ImportUrlsDialog";
+import { PipelineStages, stageToFilter, type StageKey } from "@/components/pim/PipelineStages";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
@@ -106,6 +115,8 @@ import {
   FileText,
   Lock,
   LockOpen,
+  Wrench,
+  ChevronDown,
 } from "lucide-react";
 import {
   PIPELINE_STATUS_LABEL,
@@ -130,10 +141,14 @@ const searchSchema = z.object({
       "PIPE_MATCHED",
       "PIPE_GOLDEN_READY",
       "PIPE_VISUALS_READY",
+      "REVIEW",
       "LOCKED",
     ])
     .catch("ALL"),
   search: z.string().catch(""),
+  stage: z
+    .enum(["NONE", "IMPORT", "SOURCES", "MATCH", "CONTENT", "MEDIA", "REVIEW"])
+    .catch("NONE"),
 });
 
 export const Route = createFileRoute("/_auth/projects/$id/")({
