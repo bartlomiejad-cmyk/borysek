@@ -74,7 +74,30 @@ type BreakdownEntry = {
   variant_key: string | null;
   deduped: boolean;
   ean_confirmed?: boolean;
+  manual?: boolean;
 };
+
+/**
+ * Heuristic: does this product name look like an accessory / replacement /
+ * compatibility item (e.g. filters, seals, spare parts)? Used to prompt the
+ * user to switch to compatibility matching mode when strict validation
+ * rejects every source.
+ */
+export function isLikelyCompatProduct(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const t = name.toLowerCase();
+  if (/\bpasuje\s+do\b/.test(t)) return true;
+  if (/\bzamiennik(i|em|ów|ow)?\b/.test(t)) return true;
+  if (/\bakcesori(a|um|ów|ow)?\b/.test(t)) return true;
+  if (/\bkomplet\s+filtr/.test(t)) return true;
+  if (/\bdo\s+rekuperator/.test(t)) return true;
+  // "do modelA/modelB/modelC" — three+ slash- or space-separated model tokens after "do "
+  if (/\bdo\s+[\wąćęłńóśźż0-9]{2,}[\s/,][\wąćęłńóśźż0-9]{2,}[\s/,][\wąćęłńóśźż0-9]{2,}/i.test(name)) return true;
+  // three+ slash/comma-separated tokens anywhere (350H/2 350V/2 355 Combo ...)
+  const slashSep = name.split(/[\/,;|]/).map((s) => s.trim()).filter((s) => s.length >= 2);
+  if (slashSep.length >= 3) return true;
+  return false;
+}
 
 /**
  * Given a set of URLs allowed to be picked, apply variant-cluster dedup.
@@ -194,6 +217,7 @@ async function validateSourcesWithAI(
     ean?: string | null;
     mpn?: string | null;
   }>,
+  mode: "strict" | "compatible" = "strict",
 ): Promise<ValidationResult> {
   if (!sources.length) return { keep: new Set(), clustersByUrl: new Map(), ok: true };
   const blocks = sources
@@ -210,7 +234,7 @@ async function validateSourcesWithAI(
       return lines.join("\n");
     })
     .join("\n\n");
-  const system = [
+  const strictSystem = [
     "Jesteś walidatorem dopasowań produktów w PIM.",
     "Dla podanego PRODUKTU oraz listy ŹRÓDEŁ (stron internetowych) zdecyduj, które źródła opisują DOKŁADNIE ten sam produkt (ten sam wariant, marka, model, rozmiar/gramatura).",
     "REGUŁA NADRZĘDNA: jeżeli w danych źródła występuje EAN identyczny z EAN produktu, źródło PASUJE — zaakceptuj je niezależnie od pozostałych heurystyk (nadal przypisz je do właściwego klastra wariantu).",
@@ -222,6 +246,17 @@ async function validateSourcesWithAI(
     "Zwróć JSON: {\"keep\": number[], \"clusters\": [{\"variant_key\": string, \"indices\": number[]}]}. Indeksy 1-based. Każdy indeks z keep musi wystąpić w dokładnie jednym klastrze.",
     "Jeśli żadne nie pasuje: {\"keep\": [], \"clusters\": []}.",
   ].join("\n");
+  const compatSystem = [
+    "Jesteś walidatorem dopasowań produktów typu AKCESORIUM / ZAMIENNIK w PIM.",
+    "Produkt to akcesorium/zamiennik (np. filtry do rekuperatora, uszczelki, części zamienne).",
+    "Źródło PASUJE, jeżeli opisuje produkt funkcjonalnie równoważny: ten sam TYP (np. komplet filtrów M5+G4, konkretny typ uszczelki), zgodne kluczowe parametry (klasy filtracji, wymiary jeśli podane) ORAZ pokrywająca się lista kompatybilnych modeli/urządzeń (wystarczy część wspólna z modelami wymienionymi w nazwie produktu klienta).",
+    "Inna marka zamiennika lub inny sklep NIE dyskwalifikuje źródła.",
+    "Odrzuć TYLKO: inny typ produktu, inne klasy/parametry techniczne, brak wspólnych modeli kompatybilności.",
+    "Klastruj po zestawie kompatybilności + typie, nie po marce. variant_key w formacie \"typ|parametry|kompatybilność\" małymi literami (np. \"filtr|m5+g4|wanas-350h-350v\"). Gdy brak informacji, użyj \"-\".",
+    "Zwróć JSON: {\"keep\": number[], \"clusters\": [{\"variant_key\": string, \"indices\": number[]}]}. Indeksy 1-based. Każdy indeks z keep musi wystąpić w dokładnie jednym klastrze.",
+    "Jeśli żadne nie pasuje: {\"keep\": [], \"clusters\": []}.",
+  ].join("\n");
+  const system = mode === "compatible" ? compatSystem : strictSystem;
   const user = [
     `PRODUKT: ${productName}`,
     productEan ? `EAN: ${productEan}` : "",
