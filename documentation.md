@@ -426,7 +426,15 @@ Plik: `lib/pim/export.functions.ts`. CSV ze złotymi rekordami (kolumny konfigur
 | `src/lib/pim/shares-crypto.server.ts` | PBKDF2 (100k) + HMAC token |
 | `src/lib/pim/_workers.server.ts` | Implementacja wszystkich workerów (Firecrawl, FAL, SEO, Allegro, regen, wizualizacje) |
 | `src/lib/pim/image-size.server.ts` | Rozmiar obrazu bez sharp (probe headers/magic bytes) |
+| `src/lib/pim/image-probe.server.ts` | HEAD/GET probe dla URL-i bez zapisanych wymiarów (cache w `image_scores.w/h`) |
+| `src/lib/pim/image-variants.ts` | Klastrowanie wariantów (`baseVariantKey`) + upgrade do największego rozmiaru |
+| `src/lib/pim/gallery.ts` | **Jedyne** źródło prawdy dla widocznej galerii (`getVisibleGallery`) |
+| `src/lib/pim/pipeline-status.ts` | Rangi + `advancePipelineStatus` (forward-only) |
+| `src/lib/pim/audit.ts` | Deterministyczne + LLM checki jakości golden record |
+| `src/lib/pim/audit.functions.ts` | `runAuditForProduct` serverFn + bulk job `PIM_AUDIT` |
+| `src/lib/pim/review.functions.ts` | `approveProduct` / `unapproveProduct` / `bulkApprovePass` |
 | `src/lib/pim/images.ts` | Helpery URL obrazów (upgrade, dedup) |
+| `src/components/pim/PipelineStages.tsx` | 6-stopniowy pasek postępu w nagłówku projektu |
 | `src/components/pim/ImportCsvDialog.tsx` | UI import CSV |
 | `src/components/pim/ImportUrlsDialog.tsx` | UI import z linków (+ tryb stealth) |
 | `src/components/pim/RemapCsvDialog.tsx` | Remap kolumn |
