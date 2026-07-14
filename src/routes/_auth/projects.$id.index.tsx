@@ -795,6 +795,7 @@ function ProjectPage() {
                 <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
                 <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
+                <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
               </SelectContent>
             </Select>
           </div>
