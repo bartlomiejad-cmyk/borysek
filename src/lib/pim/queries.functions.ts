@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { sanitizeGoldenDescriptionHtml } from "./seo";
 import { type ImageMeta, pickThumbsForList } from "./images";
+import { setManualLockOnProduct } from "./pipeline-status";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -12,7 +13,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean")
+      .select("id, ext_id, nazwa, kod, ean, pipeline_status, review_status, manual_lock")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);
@@ -77,6 +78,9 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         ...p,
         status: e?.status ?? "PENDING",
         match_type: e?.match_type ?? "NO_MATCH",
+        pipeline_status: (p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED",
+        review_status: (p as { review_status?: string | null }).review_status ?? "NONE",
+        manual_lock: !!(p as { manual_lock?: boolean }).manual_lock,
         golden_name: e?.golden_name ?? null,
         generated_at: e?.generated_at ?? null,
         error: e?.error ?? null,
