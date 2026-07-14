@@ -825,6 +825,12 @@ function ProjectPage() {
                 <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
                 <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
+                <SelectItem value="LOCKED">🔒 Zablokowane (manual)</SelectItem>
+                <SelectItem value="PIPE_IMPORTED">Etap: Zaimportowany</SelectItem>
+                <SelectItem value="PIPE_SOURCES_FOUND">Etap: Źródła znalezione</SelectItem>
+                <SelectItem value="PIPE_MATCHED">Etap: Dopasowany</SelectItem>
+                <SelectItem value="PIPE_GOLDEN_READY">Etap: Rekord gotowy</SelectItem>
+                <SelectItem value="PIPE_VISUALS_READY">Etap: Wizualizacje gotowe</SelectItem>
               </SelectContent>
             </Select>
           </div>
