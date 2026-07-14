@@ -86,6 +86,7 @@ async function processItem(
         stylePrompt: typeof payload?.stylePrompt === "string" ? (payload.stylePrompt as string) : "",
         targetResolution:
           typeof payload?.targetResolution === "number" ? (payload.targetResolution as number) : undefined,
+        force_reanalyze: payload?.force_reanalyze === true,
       });
     }
     case "PIM_ALLEGRO_DESCRIPTION":

@@ -70,8 +70,8 @@ export function GenerateVisualizationsDialog({
     selectedIds.size > 0 ? "selected" : "with_main",
   );
   const [count, setCount] = useState(3);
-  const [style, setStyle] = useState<string>((defaultStylePrompt ?? "").trim());
-  const [reqPl, setReqPl] = useState<string>((defaultRequirementsPl ?? "").trim());
+  const [style, setStyle] = useState<string>(defaultStylePrompt ?? "");
+  const [reqPl, setReqPl] = useState<string>(defaultRequirementsPl ?? "");
   const [constraintsOpen, setConstraintsOpen] = useState(false);
   const [forceReanalyze, setForceReanalyze] = useState(false);
   const [quality, setQuality] = useState<"2K" | "4K">("2K");
@@ -86,8 +86,8 @@ export function GenerateVisualizationsDialog({
     setConstraintsOpen(false);
     setForceReanalyze(false);
     setPreview(null);
-    setStyle((defaultStylePrompt ?? "").trim());
-    setReqPl((defaultRequirementsPl ?? "").trim());
+    setStyle(defaultStylePrompt ?? "");
+    setReqPl(defaultRequirementsPl ?? "");
   }, [open, selectedIds, defaultStylePrompt, defaultRequirementsPl]);
 
   const targets = useMemo(() => {
@@ -98,6 +98,7 @@ export function GenerateVisualizationsDialog({
 
   const total = targets.length;
   const totalRenders = total * count;
+  const constraintsChanged = style !== (defaultStylePrompt ?? "") || reqPl !== (defaultRequirementsPl ?? "");
 
   // Default preview product = first selected-with-main, or first with-main overall.
   useEffect(() => {
@@ -141,13 +142,13 @@ export function GenerateVisualizationsDialog({
     }
     setBusy(true);
     try {
-      const stylePrompt = style.trim();
-      const requirementsPl = reqPl.trim();
+      const stylePrompt = style;
+      const requirementsPl = reqPl;
       await updProject({
         data: {
           id: projectId,
-          visualization_style_prompt: stylePrompt || null,
-          visualization_requirements_pl: requirementsPl || null,
+          visualization_style_prompt: stylePrompt === "" ? null : stylePrompt,
+          visualization_requirements_pl: requirementsPl === "" ? null : requirementsPl,
         },
       });
       await createJob({
@@ -297,8 +298,13 @@ export function GenerateVisualizationsDialog({
             <CollapsibleContent className="space-y-3 pt-2">
               <p className="text-[11px] text-muted-foreground">
                 Te pola OGRANICZAJĄ dobór sceny per produkt — AI będzie się do nich stosować.
-                Zostaw puste, żeby AI decydowała samodzielnie na podstawie zdjęć.
+                Pozostaw puste, aby AI dobierała scenę wyłącznie na podstawie produktu.
               </p>
+              {constraintsChanged && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  Zapisane ramy projektu zostaną nadpisane po kliknięciu „Generuj”.
+                </p>
+              )}
               <div className="space-y-1">
                 <Label htmlFor="viz-style" className="text-xs">Styl / stylistyka (PL, opcjonalnie)</Label>
                 <Textarea
