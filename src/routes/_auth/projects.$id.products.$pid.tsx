@@ -406,8 +406,24 @@ function ProductDetail() {
   const regeneratedUrl = resolveRegenUrl(
     (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null,
   );
-  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ deduped?: boolean }>;
+  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ url?: string; deduped?: boolean; ean_confirmed?: boolean }>;
   const dedupedCount = scoreBreakdown.filter((s) => s.deduped === true).length;
+  const eanConfirmedByUrl = new Map<string, boolean>();
+  for (const b of scoreBreakdown) {
+    if (b?.url) eanConfirmedByUrl.set(b.url, !!b.ean_confirmed);
+  }
+  const hasAnyEanConfirmed = Array.from(eanConfirmedByUrl.values()).some(Boolean);
+  // The main image "comes from" a source when that image appears in the
+  // source's images/extra_images list. Warn only when we have at least one
+  // ean-confirmed source and the current main image isn't in any of them.
+  const mainFromEanConfirmed = (() => {
+    if (!mainUrl) return false;
+    for (const s of sources) {
+      if (!eanConfirmedByUrl.get(s.url)) continue;
+      if (s.images.includes(mainUrl) || s.extra_images.includes(mainUrl)) return true;
+    }
+    return false;
+  })();
 
   const renderThumb = (u: string, extra: boolean) => {
     const s = imageScores[u];
