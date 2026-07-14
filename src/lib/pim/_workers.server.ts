@@ -1736,8 +1736,12 @@ async function filterScrapedForProduct(
     // fotografią tego konkretnego produktu (inne kafle z listingu).
     if (dedup.length) {
       try {
-        const keepVisual = await visualFilterImages(apiKey, product.nazwa ?? "", dedup);
-        if (keepVisual) dedup = dedup.filter((u) => keepVisual.has(u));
+        const ordered = await visualFilterImages(apiKey, product.nazwa ?? "", dedup);
+        // Canonical uncertainty policy: keep-images first, unsure appended
+        // after, dropped (confidently-different / banner / logo / icon)
+        // excluded. Manual overrides (image_scores[url].manual_keep,
+        // pinned_main_url) are enforced downstream and always win.
+        if (ordered) dedup = ordered;
       } catch (e) {
         console.warn("visualFilterImages non-fatal:", e);
       }
@@ -1763,16 +1767,17 @@ async function visualFilterImages(
   apiKey: string,
   productName: string,
   imageUrls: string[],
-): Promise<Set<string> | null> {
+): Promise<string[] | null> {
   if (!imageUrls.length || !productName) return null;
   const top = imageUrls.slice(0, 8);
   const content = [
     { type: "text", text: [
       `Produkt: „${productName}".`,
       "Otrzymujesz zdjęcia jako kandydatów do galerii tego produktu.",
-      "Zwróć JSON {\"keep\":[indeksy 1-based]} — WYŁĄCZNIE zdjęć, które przedstawiają dokładnie ten sam produkt (ten sam wariant/rozmiar/kolor).",
-      "ODRZUĆ: zdjęcia innych produktów widocznych na kaflach Nowości/Polecane/Bestseller, ikony, banery, logo, zdjęcia kategorii, akcesoriów niezwiązanych z produktem.",
-      "Jeśli nie widzisz produktu albo nie masz pewności — nie dodawaj indeksu.",
+      "Zwróć JSON {\"keep\":[indeksy 1-based], \"unsure\":[indeksy 1-based]}.",
+      "keep = zdjęcia na pewno tego produktu (ten sam wariant/rozmiar/kolor).",
+      "unsure = nie można stwierdzić na pewno (niewyraźne, częściowo widoczne, słaby kadr).",
+      "Pomiń indeks (nie dodawaj ani do keep, ani do unsure) TYLKO gdy na PEWNO to inny produkt, baner, logo lub ikona.",
     ].join("\n") },
     ...top.map((url) => ({ type: "image_url", image_url: { url } })),
   ] as unknown[];
@@ -1783,18 +1788,34 @@ async function visualFilterImages(
     const timeout = new Promise<never>((_, rej) =>
       setTimeout(() => rej(new Error("vision timeout")), 15_000),
     );
-    const parsed = (await Promise.race([call, timeout])) as { keep?: unknown };
-    const idxs = Array.isArray(parsed.keep)
+    const parsed = (await Promise.race([call, timeout])) as { keep?: unknown; unsure?: unknown };
+    const keepIdx = Array.isArray(parsed.keep)
       ? parsed.keep.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
       : [];
-    const kept = new Set<string>();
-    for (const i of idxs) {
+    const unsureIdx = Array.isArray(parsed.unsure)
+      ? parsed.unsure.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+      : [];
+    const keepUrls: string[] = [];
+    const unsureUrls: string[] = [];
+    const seen = new Set<string>();
+    for (const i of keepIdx) {
       const u = top[i - 1];
-      if (u) kept.add(u);
+      if (u && !seen.has(u)) { keepUrls.push(u); seen.add(u); }
     }
-    // Zdjęcia poza top-8 nie były oceniane — zachowujemy je (bezpieczniej).
-    for (let i = 8; i < imageUrls.length; i++) kept.add(imageUrls[i]);
-    return kept;
+    for (const i of unsureIdx) {
+      const u = top[i - 1];
+      if (u && !seen.has(u)) { unsureUrls.push(u); seen.add(u); }
+    }
+    // Zdjęcia poza top-8 nie były oceniane — zachowujemy je na końcu.
+    const tail: string[] = [];
+    for (let i = 8; i < imageUrls.length; i++) {
+      const u = imageUrls[i];
+      if (!seen.has(u)) { tail.push(u); seen.add(u); }
+    }
+    // Ordering: confident-keep → unsure → untested. Ensures an unsure
+    // image is never at index 0 unless there is no confident-keep at all,
+    // so downstream main-image auto-selection prefers a confident image.
+    return [...keepUrls, ...unsureUrls, ...tail];
   } catch (e) {
     console.warn("visualFilterImages failed:", e);
     return null;
