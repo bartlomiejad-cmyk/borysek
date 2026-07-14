@@ -156,6 +156,8 @@ export async function buildFalPromptsFromPolish(args: {
   productDesc: string;
   requirementsPl: string;
   projectStyle: string;
+  clientGuidelines?: string;
+  productNotes?: string;
 }): Promise<{ thumbnail_prompt: string; lifestyle_prompt: string }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
@@ -203,9 +205,15 @@ export async function buildFalPromptsFromPolish(args: {
     args.requirementsPl || "(none — use defaults from the rules above)",
   ].join("\n");
 
+  const guidelinesBlock = buildClientGuidelinesBlock(
+    args.clientGuidelines ?? "",
+    args.productNotes ?? "",
+  );
+  const userWithGuidelines = guidelinesBlock ? `${user}\n\n${guidelinesBlock}` : user;
+
   const res = await callGatewayJson(apiKey, "google/gemini-3.1-pro-preview", [
     { role: "system", content: system },
-    { role: "user", content: user },
+    { role: "user", content: userWithGuidelines },
   ]) as { thumbnail_prompt?: string; lifestyle_prompt?: string };
 
   const t = (res.thumbnail_prompt ?? "").trim();
