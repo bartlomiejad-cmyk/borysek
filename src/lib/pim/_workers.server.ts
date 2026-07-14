@@ -2316,22 +2316,56 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     }
 
     if (flat.length) {
-      const capped = flat.slice(0, 40);
+      // Candidate-pool reduction BEFORE AI pre-selection:
+      //   1) Drop marketplace / blacklist hits (they will never scrape well).
+      //   2) Host-level dedup: keep up to 2 URLs per host, prioritized by
+      //      (a) exact EAN present in title/snippet, (b) original SERP
+      //      position. AI pre-selection's output on this pool is then FINAL —
+      //      no host-dedup runs after it, so AI picks always survive.
+      const eanDigits = (product.ean ?? "").replace(/\D/g, "");
+      const hasEanInSnippet = (r: { title: string; snippet: string }) => {
+        if (!eanDigits) return false;
+        const hay = `${r.title} ${r.snippet}`.replace(/\D/g, "");
+        return hay.includes(eanDigits);
+      };
+      const preFiltered = flat.filter((r) => !isMarketplaceUrl(r.url, extraBlacklist));
+      const byHost = new Map<string, typeof preFiltered>();
+      for (const r of preFiltered) {
+        const h = r.domain || (() => { try { return new URL(r.url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+        if (!h) continue;
+        const arr = byHost.get(h) ?? [];
+        arr.push(r);
+        byHost.set(h, arr);
+      }
+      const dedupPool: typeof preFiltered = [];
+      for (const [, arr] of byHost) {
+        const sorted = arr.slice().sort((a, b) => {
+          const ea = hasEanInSnippet(a) ? 1 : 0;
+          const eb = hasEanInSnippet(b) ? 1 : 0;
+          if (ea !== eb) return eb - ea;
+          return a.i - b.i; // lower SERP position wins
+        });
+        dedupPool.push(...sorted.slice(0, 2));
+      }
+      // Preserve original SERP order in the pool we send to the AI so the
+      // prompt's "position matters" heuristic still holds.
+      dedupPool.sort((a, b) => a.i - b.i);
+      const capped = dedupPool.slice(0, 40);
       const preselect = await preselectSerpResults({
         product: { nazwa, ean: product.ean ?? null, producent, kod_producenta: mpn },
         items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
       });
-      const byI = new Map(flat.map((f) => [f.i, f]));
+      const byI = new Map(capped.map((f) => [f.i, f]));
       type Pick = { url: string; why?: string; vi: number };
       let picks: Pick[] = [];
       if (preselect.ok && preselect.picks.length) {
         picks = preselect.picks
           .map((p): Pick | null => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi } : null; })
           .filter((v): v is Pick => v !== null);
-        aiPreselectMeta = { total: flat.length, picked: picks.length };
+        aiPreselectMeta = { total: capped.length, picked: picks.length };
       } else {
-        picks = flat.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
-        aiPreselectMeta = { total: flat.length, picked: picks.length, error: preselect.error ?? "empty" };
+        picks = capped.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
+        aiPreselectMeta = { total: capped.length, picked: picks.length, error: preselect.error ?? "empty" };
       }
       for (const p of picks) {
         upsertResult(p.vi, p.url, "apify", { ai_pick: true, ai_reason: p.why });
