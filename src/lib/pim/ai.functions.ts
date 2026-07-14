@@ -852,7 +852,7 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
 
     const { data: enrichment, error: eErr } = await supabase
       .from("enrichments")
-      .select("id, image_scores, pinned_main_url, regenerated_main_image")
+      .select("id, image_scores, pinned_main_url, regenerated_main_image, picked_urls, score_breakdown, project_id")
       .eq("source_product_id", data.productId)
       .maybeSingle();
     if (eErr) throw new Error(eErr.message);
@@ -860,16 +860,45 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
 
     const enRow = enrichment as unknown as {
       id: string;
+      project_id: string;
       image_scores?: Record<string, ImageScore> | null;
       pinned_main_url?: string | null;
       regenerated_main_image?: string | null;
+      picked_urls?: string[] | null;
+      score_breakdown?: Array<{ url: string; ean_confirmed?: boolean; total?: number }> | null;
     };
     const existing = (enRow.image_scores ?? {}) as Record<string, ImageScore>;
 
     // Choose an anchor image the vision model can trust. Priority:
-    // 1) user-pinned main image, 2) regenerated main image (skip sentinel),
-    // 3) best-scored existing 'same' image in the cache. Fallback: no anchor
-    // (identity check compares against name only, current behaviour).
+    // 1) user-pinned main image,
+    // 2) main image of the best EAN-confirmed source (score_breakdown.ean_confirmed),
+    // 3) regenerated main image (skip sentinel),
+    // 4) best-scored existing 'same' image in the cache. Fallback: no anchor.
+    const pickBestEanConfirmedImage = async (): Promise<string | null> => {
+      const bd = (enRow.score_breakdown ?? []).filter((b) => b?.ean_confirmed) as Array<{
+        url: string;
+        total?: number;
+      }>;
+      if (!bd.length) return null;
+      bd.sort((a, b) => (b.total ?? 0) - (a.total ?? 0));
+      const urls = bd.map((b) => b.url);
+      const { data: srcs } = await supabase
+        .from("product_sources")
+        .select("url, images")
+        .eq("project_id", enRow.project_id)
+        .in("url", urls);
+      const byUrl = new Map<string, string[]>();
+      for (const s of (srcs ?? []) as Array<{ url: string; images: unknown }>) {
+        const imgs = Array.isArray(s.images) ? (s.images as string[]) : [];
+        byUrl.set(s.url, imgs);
+      }
+      for (const u of urls) {
+        const imgs = byUrl.get(u) ?? [];
+        const first = imgs.find((x) => typeof x === "string" && x);
+        if (first) return first;
+      }
+      return null;
+    };
     const pickBestSameAnchor = (): string | null => {
       let bestUrl: string | null = null;
       let bestScore = -Infinity;
@@ -881,8 +910,10 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       return bestUrl;
     };
     const regen = enRow.regenerated_main_image;
+    const eanAnchor = await pickBestEanConfirmedImage();
     const anchorUrl: string | null =
       (enRow.pinned_main_url && enRow.pinned_main_url !== "__imported__" ? enRow.pinned_main_url : null) ??
+      eanAnchor ??
       (regen && regen !== "__imported__" ? regen : null) ??
       pickBestSameAnchor();
 
