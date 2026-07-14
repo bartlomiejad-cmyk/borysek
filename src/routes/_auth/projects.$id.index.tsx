@@ -1977,23 +1977,43 @@ function SettingsCard({
   const [apifyTest, setApifyTest] = useState<{
     state: "idle" | "loading" | "ok" | "err";
     msg?: string;
+    locale?: { gl: string; hl: string };
     results?: Array<{ title: string; url: string; domain: string; snippet: string }>;
   }>({
     state: "idle",
   });
   const testApify = useServerFn(testApifySerp);
+  const settingsLocale = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const loc = (s as Record<string, unknown>).serp_locale;
+      if (loc && typeof loc === "object") {
+        const { gl, hl } = loc as { gl?: unknown; hl?: unknown };
+        return {
+          gl: typeof gl === "string" && gl.trim() ? gl.trim().toUpperCase() : "PL",
+          hl: typeof hl === "string" && hl.trim() ? hl.trim().toLowerCase() : "pl",
+        };
+      }
+    }
+    return { gl: "PL", hl: "pl" };
+  })();
   const runApifyTest = async () => {
     setApifyTest({ state: "loading" });
     try {
-      const r = await testApify({ data: {} });
+      const r = await testApify({ data: { query: "filtry do rekuperatora Wanas 350", gl: settingsLocale.gl, hl: settingsLocale.hl } });
       if (r.ok) {
         setApifyTest({
           state: "ok",
-          msg: `OK — ${r.count} wyników`,
+          msg: `OK — ${r.count} wyników (gl=${r.gl}, hl=${r.hl})`,
+          locale: { gl: r.gl, hl: r.hl },
           results: r.results.map((x) => ({ title: x.title, url: x.url, domain: x.domain, snippet: x.snippet })),
         });
       } else {
-        setApifyTest({ state: "err", msg: r.error ?? "Actor nie zwrócił wyników (sprawdź obsługę PL)" });
+        setApifyTest({
+          state: "err",
+          msg: `${r.error ?? "Actor nie zwrócił wyników"} (gl=${r.gl}, hl=${r.hl})`,
+          locale: { gl: r.gl, hl: r.hl },
+        });
       }
     } catch (e) {
       setApifyTest({ state: "err", msg: e instanceof Error ? e.message : String(e) });
