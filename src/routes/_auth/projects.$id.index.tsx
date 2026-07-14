@@ -2055,12 +2055,63 @@ function SettingsCard({
                   .split("\n")
                   .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
                   .filter(Boolean),
+                search_provider: searchProvider,
               },
             })
           }
         >
           Zapisz
         </Button>
+        <div className="pt-4 border-t space-y-2">
+          <Label className="text-sm font-medium">Źródło wyszukiwania</Label>
+          <p className="text-xs text-muted-foreground">
+            Firecrawl (domyślne) używa własnego indeksu. Google (Apify) korzysta z prawdziwej stronki Google przez actor SERP i dodaje wstępną selekcję AI (Gemini) przed scrapowaniem.
+          </p>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="search-provider"
+                className="mt-1"
+                checked={searchProvider === "firecrawl"}
+                onChange={() => setSearchProvider("firecrawl")}
+              />
+              <span>
+                <span className="font-medium">Firecrawl</span>
+                <span className="block text-xs text-muted-foreground">Szybkie, tanie, wbudowany index. Do 10 wyników na wariant.</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="search-provider"
+                className="mt-1"
+                checked={searchProvider === "apify"}
+                onChange={() => setSearchProvider("apify")}
+              />
+              <span>
+                <span className="font-medium">Google (Apify)</span>
+                <span className="block text-xs text-muted-foreground">
+                  Actor scraperlink/google-search-results-serp-scraper (~$0.50/1000 SERP). Do ~100 wyników na zapytanie, AI wybiera 12 najbardziej trafnych do scrapowania.
+                </span>
+              </span>
+            </label>
+          </div>
+          {searchProvider === "apify" ? (
+            <div className="flex items-center gap-2 pt-1">
+              <Button size="sm" variant="secondary" onClick={runApifyTest} disabled={apifyTest.state === "loading"}>
+                {apifyTest.state === "loading" ? "Testuję…" : "Test połączenia"}
+              </Button>
+              {apifyTest.state === "ok" ? (
+                <span className="text-xs text-emerald-600">{apifyTest.msg}</span>
+              ) : apifyTest.state === "err" ? (
+                <span className="text-xs text-destructive">Błąd: {apifyTest.msg}</span>
+              ) : (
+                <span className="text-xs text-muted-foreground">Zapisz najpierw wybór, potem przetestuj (wymaga APIFY_TOKEN i wsparcia PL przez actor).</span>
+              )}
+            </div>
+          ) : null}
+        </div>
         <div className="pt-4 border-t space-y-3">
           <div className="flex items-center gap-3">
             <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
