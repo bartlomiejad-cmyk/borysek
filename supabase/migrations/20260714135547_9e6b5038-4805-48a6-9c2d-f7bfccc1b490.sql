@@ -1,0 +1,1 @@
+ALTER TABLE public.enrichments ADD COLUMN IF NOT EXISTS removed_urls text[] NOT NULL DEFAULT '{}'::text[];

@@ -188,6 +188,7 @@ export type Database = {
           project_id: string
           quality: Json | null
           regenerated_main_image: string | null
+          removed_urls: string[]
           rescrape_rounds: number
           score_breakdown: Json | null
           source_product_id: string
@@ -223,6 +224,7 @@ export type Database = {
           project_id: string
           quality?: Json | null
           regenerated_main_image?: string | null
+          removed_urls?: string[]
           rescrape_rounds?: number
           score_breakdown?: Json | null
           source_product_id: string
@@ -258,6 +260,7 @@ export type Database = {
           project_id?: string
           quality?: Json | null
           regenerated_main_image?: string | null
+          removed_urls?: string[]
           rescrape_rounds?: number
           score_breakdown?: Json | null
           source_product_id?: string
