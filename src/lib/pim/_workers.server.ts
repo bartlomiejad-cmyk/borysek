@@ -3114,7 +3114,12 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
   const content = json.choices?.[0]?.message?.content ?? "";
   let parsed: unknown;
   try { parsed = JSON.parse(content); } catch { throw new Error("Model nie zwrócił poprawnego JSON"); }
-  const shape = z.object({ html: z.string().min(1).max(60000) }).parse(parsed);
+  const shape = z
+    .object({
+      html: z.string().min(1).max(60000),
+      data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
+    })
+    .parse(parsed);
   const html = sanitizeAllegroDescriptionHtml(shape.html);
   if (!html) throw new Error("Model zwrócił pusty opis");
 
@@ -3123,6 +3128,7 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
     .update({
       allegro_description: html,
       allegro_generated_at: new Date().toISOString(),
+      ...(shape.data_sufficiency ? { data_sufficiency: shape.data_sufficiency } : {}),
     } as never)
     .eq("id", enrichment.id);
   if (upErr) throw new Error(upErr.message);
