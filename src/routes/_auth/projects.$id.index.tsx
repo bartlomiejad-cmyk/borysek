@@ -335,6 +335,14 @@ function ProjectPage() {
         const ds = (p as { data_sufficiency?: string | null }).data_sufficiency ?? null;
         if (ds !== "partial" && ds !== "poor") return false;
       }
+      if (filter.startsWith("PIPE_")) {
+        const target = filter.slice("PIPE_".length);
+        const cur = ((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED");
+        if (cur !== target) return false;
+      }
+      if (filter === "LOCKED") {
+        if (!(p as { manual_lock?: boolean }).manual_lock) return false;
+      }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
