@@ -14,7 +14,7 @@ import {
   clearProjectData,
 } from "@/lib/pim/ingest.functions";
 import { runMatching } from "@/lib/pim/matching.functions";
-import { listProductsWithEnrichment } from "@/lib/pim/queries.functions";
+import { listProductsWithEnrichment, getPipelineSummary } from "@/lib/pim/queries.functions";
 import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
@@ -84,6 +84,15 @@ import { UploadZone } from "@/components/pim/UploadZone";
 import { RemapCsvDialog } from "@/components/pim/RemapCsvDialog";
 import { ImportCsvDialog } from "@/components/pim/ImportCsvDialog";
 import { ImportUrlsDialog } from "@/components/pim/ImportUrlsDialog";
+import { PipelineStages, stageToFilter, type StageKey } from "@/components/pim/PipelineStages";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { friendlyError } from "@/lib/utils";
 import {
   Sparkles,
@@ -106,6 +115,8 @@ import {
   FileText,
   Lock,
   LockOpen,
+  Wrench,
+  ChevronDown,
 } from "lucide-react";
 import {
   PIPELINE_STATUS_LABEL,
@@ -130,10 +141,14 @@ const searchSchema = z.object({
       "PIPE_MATCHED",
       "PIPE_GOLDEN_READY",
       "PIPE_VISUALS_READY",
+      "REVIEW",
       "LOCKED",
     ])
     .catch("ALL"),
   search: z.string().catch(""),
+  stage: z
+    .enum(["NONE", "IMPORT", "SOURCES", "MATCH", "CONTENT", "MEDIA", "REVIEW"])
+    .catch("NONE"),
 });
 
 export const Route = createFileRoute("/_auth/projects/$id/")({
@@ -167,6 +182,7 @@ function ProjectPage() {
   const recleanFn = useServerFn(recleanProductSources);
   const setLockFn = useServerFn(setManualLock);
   const deleteProductsFn = useServerFn(deleteProducts);
+  const summaryFn = useServerFn(getPipelineSummary);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -180,6 +196,11 @@ function ProjectPage() {
     queryKey: ["project", id, "products"],
     queryFn: () => listFn({ data: { projectId: id } }),
   });
+  const { data: summary } = useQuery({
+    queryKey: ["project", id, "pipeline-summary"],
+    queryFn: () => summaryFn({ data: { projectId: id } }),
+    refetchInterval: 8000,
+  });
 
   const navigate = useNavigate();
   const urlSearch = Route.useSearch();
@@ -188,6 +209,7 @@ function ProjectPage() {
   const search = urlSearch.search;
   const pageSize = urlSearch.pageSize;
   const page = urlSearch.page;
+  const stage = urlSearch.stage;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
@@ -354,6 +376,10 @@ function ProjectPage() {
       if (filter === "LOCKED") {
         if (!(p as { manual_lock?: boolean }).manual_lock) return false;
       }
+      if (filter === "REVIEW") {
+        const rs = (p as { review_status?: string | null }).review_status ?? "NONE";
+        if (rs !== "AI_FLAGGED" && rs !== "NEEDS_REVIEW") return false;
+      }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
@@ -373,6 +399,62 @@ function ProjectPage() {
   useEffect(() => {
     if (page !== 1) updateSearch({ page: 1 });
   }, [filter, search, pageSize]);
+
+  const handleStageClick = (s: Exclude<StageKey, "NONE">) => {
+    if (stage === s) {
+      // Toggle off — clear filter.
+      updateSearch({ stage: "NONE", filter: "ALL", page: 1 });
+    } else {
+      updateSearch({ stage: s, filter: stageToFilter(s), page: 1 });
+    }
+  };
+
+  const runFirecrawl = async () => {
+    if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
+    try {
+      const res = await firecrawlFn({ data: { projectId: id, onlyMissing: true } });
+      toast.success(`Uruchomiono w tle: ${res.total} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
+    }
+  };
+
+  const runReclean = async () => {
+    try {
+      const res = await recleanFn({ data: { projectId: id } });
+      toast.success(
+        `Wyczyszczono: ${res.updated}/${res.scanned} źródeł, usunięto ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków opisu.`,
+      );
+      qc.invalidateQueries({ queryKey: ["project", id] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
+    }
+  };
+
+  const handleStagePrimary = (s: Exclude<StageKey, "NONE">) => {
+    switch (s) {
+      case "IMPORT":
+        // Ensure Import cards are visible.
+        if (stage !== "IMPORT") updateSearch({ stage: "IMPORT", filter: "ALL", page: 1 });
+        break;
+      case "SOURCES":
+        void runFirecrawl();
+        break;
+      case "MATCH":
+        matchMut.mutate();
+        break;
+      case "CONTENT":
+        void generateAll();
+        break;
+      case "MEDIA":
+        void regenerateAll();
+        break;
+      case "REVIEW":
+        setVerifyOpen(true);
+        break;
+    }
+  };
 
   const toggleSelected = (pid: string) => {
     setSelectedIds((prev) => {
@@ -575,82 +657,76 @@ function ProjectPage() {
             {meta?.counts.product_sources ?? 0} stron źródłowych · {meta?.counts.enrichments_done ?? 0} złotych rekordów
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
-            <Play className="h-4 w-4 mr-2" /> Dopasuj
-          </Button>
-          <Button variant="outline" onClick={() => setShareOpen(true)}>
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Wrench className="h-4 w-4 mr-2" /> Narzędzia
+                <ChevronDown className="h-3 w-3 ml-1 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel>Narzędzia</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setGuidelinesOpen(true)}>
+                <FileText className="h-4 w-4 mr-2" />
+                Wytyczne klienta
+                {(() => {
+                  const s = (meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings;
+                  const filled = Boolean(s?.client_guidelines?.trim());
+                  return (
+                    <span
+                      className={`ml-auto inline-block h-2 w-2 rounded-full ${filled ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                    />
+                  );
+                })()}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void runReclean()}>
+                <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to="/projects/$id/verify" params={{ id }}>
+                  <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => setVerifyOpen(true)}
+                disabled={!!verifyActive}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" /> Weryfikuj zdjęcia AI
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="h-4 w-4 mr-2" /> Eksport
+                <ChevronDown className="h-3 w-3 ml-1 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => exportFile("csv")}>
+                <Download className="h-4 w-4 mr-2" /> CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx")}>
+                <Download className="h-4 w-4 mr-2" /> XLSX
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button onClick={() => setShareOpen(true)}>
             <Share2 className="h-4 w-4 mr-2" /> Udostępnij klientowi
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setGuidelinesOpen(true)}
-            title="Ustalenia z klientem — wstrzykiwane do promptów AI"
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            Wytyczne klienta
-            {(() => {
-              const s = (meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings;
-              const filled = Boolean(s?.client_guidelines?.trim());
-              return (
-                <span
-                  className={`ml-2 inline-block h-2 w-2 rounded-full ${filled ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
-                  aria-label={filled ? "Wytyczne uzupełnione" : "Brak wytycznych"}
-                />
-              );
-            })()}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!!discActive}
-            onClick={async () => {
-              if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
-              try {
-                const res = await firecrawlFn({ data: { projectId: id, onlyMissing: true } });
-                toast.success(`Uruchomiono w tle: ${res.total} produktów. Możesz zamknąć kartę.`);
-                qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
-              } catch (e) {
-                toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
-              }
-            }}
-          >
-            <Sparkles className="h-4 w-4 mr-2" /> Wyszukaj źródła (Firecrawl)
-          </Button>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              try {
-                const res = await recleanFn({ data: { projectId: id } });
-                toast.success(
-                  `Wyczyszczono: ${res.updated}/${res.scanned} źródeł, usunięto ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków opisu.`,
-                );
-                qc.invalidateQueries({ queryKey: ["project", id] });
-              } catch (e) {
-                toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
-              }
-            }}
-          >
-            <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
-          </Button>
-          <Button onClick={() => generateAll()} disabled={!!genActive}>
-            <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
-          </Button>
-          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenActive}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/projects/$id/verify" params={{ id }}>
-              <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
-            </Link>
-          </Button>
-          <Button variant="outline" onClick={() => exportFile("csv")}>
-            <Download className="h-4 w-4 mr-2" /> CSV
-          </Button>
-          <Button variant="outline" onClick={() => exportFile("xlsx")}>
-            <Download className="h-4 w-4 mr-2" /> XLSX
           </Button>
         </div>
       </div>
+
+      {summary && (
+        <PipelineStages
+          summary={summary}
+          activeStage={stage}
+          onStageClick={handleStageClick}
+          onPrimaryAction={handleStagePrimary}
+        />
+      )}
 
       {genActive && genJob && (
         <Card className="mb-4">
@@ -811,6 +887,8 @@ function ProjectPage() {
         </TabsList>
 
         <TabsContent value="data" className="space-y-3 pt-3">
+          {(stage === "IMPORT" || (meta?.counts.source_products ?? 0) === 0) && (
+            <>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
             <ImportCsvDialog
               projectId={id}
@@ -857,6 +935,8 @@ function ProjectPage() {
               onDone={() => refetchProducts()}
             />
           </div>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="settings" className="pt-3">
@@ -887,7 +967,10 @@ function ProjectPage() {
               onChange={(e) => updateSearch({ search: e.target.value })}
               className="w-64"
             />
-            <Select value={filter} onValueChange={(v) => updateSearch({ filter: v as typeof filter })}>
+            <Select
+              value={filter}
+              onValueChange={(v) => updateSearch({ filter: v as typeof filter, stage: "NONE" })}
+            >
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">Wszystkie</SelectItem>
@@ -898,6 +981,7 @@ function ProjectPage() {
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
                 <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
                 <SelectItem value="LOCKED">🔒 Zablokowane (manual)</SelectItem>
+                <SelectItem value="REVIEW">Kolejka review</SelectItem>
                 <SelectItem value="PIPE_IMPORTED">Etap: Zaimportowany</SelectItem>
                 <SelectItem value="PIPE_SOURCES_FOUND">Etap: Źródła znalezione</SelectItem>
                 <SelectItem value="PIPE_MATCHED">Etap: Dopasowany</SelectItem>
@@ -908,6 +992,61 @@ function ProjectPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {stage !== "NONE" && stage !== "IMPORT" && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+              <span>
+                Filtr etapu aktywny — akcja poniżej dotyczy widocznych <b>{filtered.length}</b> produktów.
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {stage === "SOURCES" && (
+                  <Button size="sm" disabled={!!discActive} onClick={() => void runFirecrawl()}>
+                    <Sparkles className="h-4 w-4 mr-1" /> Wyszukaj źródła
+                  </Button>
+                )}
+                {stage === "MATCH" && (
+                  <Button size="sm" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
+                    <Play className="h-4 w-4 mr-1" /> Dopasuj
+                  </Button>
+                )}
+                {stage === "CONTENT" && (
+                  <Button
+                    size="sm"
+                    disabled={!!genActive}
+                    onClick={() => generateAll(filtered.map((p) => p.id))}
+                  >
+                    <Sparkles className="h-4 w-4 mr-1" /> Generuj złote rekordy
+                  </Button>
+                )}
+                {stage === "MEDIA" && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!!regenActive}
+                      onClick={() => regenerateAll(filtered.map((p) => p.id))}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-1" /> Regeneruj tła
+                    </Button>
+                    <Button size="sm" onClick={() => setVizOpen(true)} disabled={!!vizActive}>
+                      <Sparkles className="h-4 w-4 mr-1" /> Wizualizacje
+                    </Button>
+                  </>
+                )}
+                {stage === "REVIEW" && (
+                  <>
+                    <Button asChild size="sm" variant="outline">
+                      <Link to="/projects/$id/verify" params={{ id }}>
+                        <ShieldCheck className="h-4 w-4 mr-1" /> Widok weryfikacyjny
+                      </Link>
+                    </Button>
+                    <Button size="sm" onClick={() => setVerifyOpen(true)} disabled={!!verifyActive}>
+                      <RefreshCw className="h-4 w-4 mr-1" /> Weryfikuj zdjęcia AI
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {selectedIds.size > 0 && (
             <div className="sticky top-0 z-20 -mx-6 px-6 py-2 mb-3 bg-primary/10 border-y border-primary/30 flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">
@@ -1008,14 +1147,13 @@ function ProjectPage() {
                   <TableHead>Nazwa</TableHead>
                   <TableHead>EAN / Kod</TableHead>
                   <TableHead>Match</TableHead>
-                  <TableHead>Status</TableHead>
                   <TableHead className="w-20"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       Brak produktów do wyświetlenia
                     </TableCell>
                   </TableRow>
@@ -1139,26 +1277,6 @@ function ProjectPage() {
                             title={`Po ${rounds} rundach doscrapowania nadal ${strong} silnych źródeł (< 3). Rozważ ręczne dodanie linków.`}
                           >
                             Słabe źródła
-                          </Badge>
-                        );
-                      })()}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={p.status as string} error={p.error} />
-                      {(() => {
-                        const ds = (p as { data_sufficiency?: "full" | "partial" | "poor" | null }).data_sufficiency;
-                        if (ds !== "partial" && ds !== "poor") return null;
-                        const cls =
-                          ds === "poor"
-                            ? "ml-1 border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
-                            : "ml-1 border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-                        const title =
-                          ds === "poor"
-                            ? "Bardzo ubogie dane źródłowe — opis może być mocno skrócony."
-                            : "Częściowe dane źródłowe — opis krótszy, część sekcji może być pominięta.";
-                        return (
-                          <Badge variant="outline" className={cls} title={title}>
-                            {ds === "poor" ? "Ubogie dane" : "Częściowe dane"}
                           </Badge>
                         );
                       })()}
