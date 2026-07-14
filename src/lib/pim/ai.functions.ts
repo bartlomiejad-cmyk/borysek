@@ -11,6 +11,7 @@ import {
   sanitizeGoldenDescriptionHtml,
   ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
   sanitizeAllegroDescriptionHtml,
+  buildClientGuidelinesBlock,
 } from "./seo";
 
 const MODEL = "google/gemini-3-flash-preview";
