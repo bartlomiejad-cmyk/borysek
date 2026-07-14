@@ -3659,7 +3659,13 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     regenerated_main_image: en.regenerated_main_image,
     image_scores: en.image_scores,
     quality: en.quality,
-    thumbnail_qc: (en.image_meta as { thumbnail_qc?: AuditInputThumbQc } | null | undefined)?.thumbnail_qc ?? null,
+    thumbnail_qc: (en.image_meta as { thumbnail_qc?: {
+      bg_white?: boolean;
+      product_intact?: boolean;
+      framing_ok?: boolean;
+      issues?: string[];
+      candidate_url?: string | null;
+    } } | null | undefined)?.thumbnail_qc ?? null,
   });
 
   const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;
