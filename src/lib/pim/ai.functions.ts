@@ -1161,7 +1161,7 @@ export const suggestVisualizationPreset = createServerFn({ method: "POST" })
       "Dostajesz listę PRESETÓW SCEN oraz kontekst projektu (nazwa, przykładowe produkty).",
       "Zwróć JSON: {\"preset_id\": string, \"adjustments\": string}.",
       "- preset_id: dokładnie jedno id z listy (nie wymyślaj innych).",
-      "- adjustments: krotkie (maks. 220 znakow) doprecyzowanie po polsku dla TEGO asortymentu (np. dodaj swieze liscie i drewniana deske). Bez marek, bez ludzi, bez CTA. Puste, jezeli preset wystarcza.",
+      "- adjustments: krótkie doprecyzowanie po polsku dla tego asortymentu (maks. 220 znaków; np. dodaj świeże liście i drewnianą deskę do prezentacji). Bez marek, bez ludzi, bez CTA. Zostaw puste, jeżeli preset wystarcza.",
       "Zasady zachowania produktu (kolor, logo, proporcje, tekst) są nadrzędne — nie sugeruj ich zmiany.",
     ].join("\n");
 
