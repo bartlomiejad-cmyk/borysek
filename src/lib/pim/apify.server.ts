@@ -240,3 +240,20 @@ export async function serpHealthCheck(): Promise<{ ok: boolean; count: number; e
     return { ok: false, count: 0, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+/**
+ * Rich connection test used by the settings UI: returns the top-5 results
+ * so the user can visually confirm PL locale + real Google output.
+ */
+export async function serpSampleQuery(
+  query: string,
+): Promise<{ ok: boolean; count: number; results: SerpResult[]; error?: string }> {
+  try {
+    const q = query.trim() || "kawa arabica sklep";
+    const [b] = await runSerpSearch([q], { resultsPerQuery: 20, timeoutMs: 45_000 });
+    const results = (b?.results ?? []).slice(0, 5);
+    return { ok: results.length > 0, count: b?.results.length ?? 0, results };
+  } catch (e) {
+    return { ok: false, count: 0, results: [], error: e instanceof Error ? e.message : String(e) };
+  }
+}
