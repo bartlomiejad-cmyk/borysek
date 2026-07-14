@@ -161,7 +161,15 @@ export async function runSerpSearch(
 
   const buckets: SerpBucket[] = [];
   for (const keyword of clean) {
-    const input: Record<string, unknown> = { keyword, limit, gl, hl };
+    // Actor input validation requires numeric-looking fields as strings
+    // (docs list defaults like "10"). Sending a JSON number → HTTP 400
+    // "Field input.limit must be string".
+    const input: Record<string, unknown> = {
+      keyword,
+      limit: String(limit),
+      gl,
+      hl,
+    };
     if (opts.lr) input.lr = opts.lr;
     const meta: SerpMeta = {
       provider: "apify",
