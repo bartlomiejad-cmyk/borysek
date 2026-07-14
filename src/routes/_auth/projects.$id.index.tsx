@@ -722,9 +722,11 @@ function ProjectPage() {
       {summary && (
         <PipelineStages
           summary={summary}
-          activeStage={stage}
-          onStageClick={handleStageClick}
           onPrimaryAction={handleStagePrimary}
+          onShowPending={(s) => {
+            const f = stageToFilter(s);
+            updateSearch({ filter: f, stage: "NONE", page: 1 });
+          }}
         />
       )}
 
