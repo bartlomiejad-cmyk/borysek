@@ -207,7 +207,15 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const rawName = sanitize(out.name, blacklist) ?? "";
       const name = clampName(rawName, 70);
       const rawDescription = sanitize(out.description, blacklist) ?? "";
-      const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
+      const rawMeta = sanitizeStr(out.meta_description ?? "");
+      const metaDescription = await finalizeMetaDescription(rawMeta, async (text) => {
+        const shortened = await callGatewayRaw(apiKey, MODEL, [
+          { role: "system", content: SHORTEN_META_SYSTEM_PROMPT },
+          { role: "user", content: text },
+        ]);
+        return (shortened as { meta_description?: string }).meta_description ?? "";
+      });
+      const dataSufficiency = out.data_sufficiency ?? null;
       const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
       const slug = slugifyPl(slugSource, 75);
       const seoKeywords = dedupeKeywords((out.seo_keywords ?? []).map(sanitizeStr));
@@ -249,6 +257,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         generated_at: new Date().toISOString(),
         error: null,
         previous: previous as never,
+        data_sufficiency: dataSufficiency,
       };
       if (shouldWriteFeatures) updatePayload.golden_features = newFeatures;
 
