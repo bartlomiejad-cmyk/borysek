@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
@@ -8,7 +9,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
  */
 export const testApifySerp = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const { serpHealthCheck } = await import("./apify.server");
-    return serpHealthCheck();
+  .inputValidator((i) => z.object({ query: z.string().max(200).optional() }).optional().parse(i))
+  .handler(async ({ data }) => {
+    const { serpSampleQuery } = await import("./apify.server");
+    return serpSampleQuery(data?.query ?? "");
   });
