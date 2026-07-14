@@ -3611,7 +3611,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
     .select(
-      "id, golden_name, golden_slug, golden_meta_description, golden_description, golden_features, data_sufficiency, score_breakdown, picked_urls, pinned_main_url, regenerated_main_image, image_scores, quality",
+      "id, golden_name, golden_slug, golden_meta_description, golden_description, golden_features, data_sufficiency, score_breakdown, picked_urls, pinned_main_url, regenerated_main_image, image_scores, quality, image_meta",
     )
     .eq("source_product_id", product.id)
     .maybeSingle();
@@ -3637,6 +3637,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     regenerated_main_image?: string | null;
     image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string | null }> | null;
     quality?: { watermark_urls?: string[]; name_mismatch?: boolean } | null;
+    image_meta?: Record<string, unknown> | null;
   };
 
   await emit(ctx, {
@@ -3658,6 +3659,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     regenerated_main_image: en.regenerated_main_image,
     image_scores: en.image_scores,
     quality: en.quality,
+    thumbnail_qc: (en.image_meta as { thumbnail_qc?: AuditInputThumbQc } | null | undefined)?.thumbnail_qc ?? null,
   });
 
   const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;
