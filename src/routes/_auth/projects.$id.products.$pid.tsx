@@ -1823,6 +1823,23 @@ function ProductDetail() {
                       <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
                         {combined.length} zdj.
                       </span>
+                      <button
+                        type="button"
+                        title="Usuń to źródło z produktu"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveSource(s.url);
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        disabled={removingSource === s.url}
+                        className="shrink-0 h-6 w-6 inline-flex items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+                      >
+                        {removingSource === s.url ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <X className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                       <ChevronDown
                         className={cn(
                           "h-4 w-4 text-muted-foreground transition-transform shrink-0",
