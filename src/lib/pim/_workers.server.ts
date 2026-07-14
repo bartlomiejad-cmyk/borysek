@@ -2023,6 +2023,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
     details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
   });
+  if (scraped > 0) {
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "SOURCES_FOUND");
+  }
 }
 
 // ---------------------------------------------------------------------------
