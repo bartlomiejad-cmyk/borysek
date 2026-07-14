@@ -2274,6 +2274,18 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
     details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
   });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "discovery_scrape",
+    message: `Zescrapowano ${scraped} stron (${filtered.length - scraped - cacheHits} pominiętych, ${cacheHits} z cache)`,
+    meta: {
+      scraped_urls: filtered.slice(0, scraped),
+      total_candidates: filtered.length,
+      cache_hits: cacheHits,
+      images_found: totalImages,
+    },
+  });
   if (scraped > 0) {
     await advancePipelineStatus(supabaseAdmin as never, product.id, "SOURCES_FOUND");
   }
