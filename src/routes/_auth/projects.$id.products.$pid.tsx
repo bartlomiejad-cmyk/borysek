@@ -518,6 +518,35 @@ function ProductDetail() {
         </div>
       </div>
 
+      <Collapsible open={notesOpen} onOpenChange={setNotesOpen} className="mb-6">
+        <CollapsibleTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full justify-between">
+            <span className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Notatki do tego produktu (wewnętrzne, wstrzykiwane do promptów AI)
+              {notesInitial.trim() ? (
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              ) : null}
+            </span>
+            <span className="text-xs text-muted-foreground">{notesOpen ? "Zwiń" : "Rozwiń"}</span>
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 space-y-2">
+          <Textarea
+            value={productNotes}
+            onChange={(e) => setProductNotes(e.target.value)}
+            onBlur={saveNotes}
+            rows={5}
+            maxLength={2000}
+            placeholder="Wskazówki tylko dla AI, np. „podkreśl wersję lewostronną”, „unikaj słowa X”, „w opisie wymień kompatybilność z modelem Y”."
+          />
+          <div className="flex justify-between items-center text-xs text-muted-foreground">
+            <span>{productNotes.length} / 2000 · zapis automatyczny po opuszczeniu pola</span>
+            <span>{notesSaving ? "Zapisywanie…" : productNotes !== notesInitial ? "Nie zapisano" : "Zapisane"}</span>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Golden record */}
         <Card className="lg:sticky lg:top-4 self-start">
