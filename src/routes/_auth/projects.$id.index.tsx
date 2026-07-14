@@ -182,6 +182,7 @@ function ProjectPage() {
   const recleanFn = useServerFn(recleanProductSources);
   const setLockFn = useServerFn(setManualLock);
   const deleteProductsFn = useServerFn(deleteProducts);
+  const summaryFn = useServerFn(getPipelineSummary);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -195,6 +196,11 @@ function ProjectPage() {
     queryKey: ["project", id, "products"],
     queryFn: () => listFn({ data: { projectId: id } }),
   });
+  const { data: summary } = useQuery({
+    queryKey: ["project", id, "pipeline-summary"],
+    queryFn: () => summaryFn({ data: { projectId: id } }),
+    refetchInterval: 8000,
+  });
 
   const navigate = useNavigate();
   const urlSearch = Route.useSearch();
@@ -203,6 +209,7 @@ function ProjectPage() {
   const search = urlSearch.search;
   const pageSize = urlSearch.pageSize;
   const page = urlSearch.page;
+  const stage = urlSearch.stage;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
