@@ -254,7 +254,7 @@ async function loadShareForPublic(token: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data, error } = await supabaseAdmin
     .from("project_shares")
-    .select("token, project_id, password_hash, salt, password_updated_at, is_active")
+    .select("token, project_id, password_hash, salt, password_updated_at, is_active, approved_only")
     .eq("token", token)
     .maybeSingle();
   if (error || !data) return null;
@@ -265,6 +265,7 @@ async function loadShareForPublic(token: string) {
     salt: string;
     password_updated_at: string;
     is_active: boolean;
+    approved_only: boolean;
   };
 }
 
@@ -314,7 +315,7 @@ export const listShareProducts = createServerFn({ method: "POST" })
       .select("name")
       .eq("id", share.project_id)
       .maybeSingle();
-    const { data: products, error } = await supabaseAdmin
+    let productQ = supabaseAdmin
       .from("source_products")
       .select(`
         id,
@@ -336,7 +337,9 @@ export const listShareProducts = createServerFn({ method: "POST" })
           status
         )
       `)
-      .eq("project_id", share.project_id)
+      .eq("project_id", share.project_id);
+    if (share.approved_only) productQ = productQ.eq("review_status", "APPROVED");
+    const { data: products, error } = await productQ
       .order("nazwa", { ascending: true })
       .limit(2000);
     if (error) throw new Error(error.message);
