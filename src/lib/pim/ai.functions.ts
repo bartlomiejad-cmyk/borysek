@@ -733,7 +733,7 @@ export async function filterAliveImages(
 }
 
 /** Current identity check schema version. Bump when prompt semantics change. */
-export const IDENTITY_VERSION = 2;
+export const IDENTITY_VERSION = 3;
 
 const SCORE_SYSTEM_PROMPT =
   "Jesteś ekspertem e-commerce. Oceń kompozycję zdjęcia pod kątem przydatności jako główna miniaturka produktu w sklepie. Zwróć surowy JSON według podanego schematu.";
@@ -760,8 +760,8 @@ function buildScoreUserText(productName: string, brand: string, hasReference: bo
     "has_packaging: 10 = w kadrze widać i opakowanie I sam produkt; 6-9 = tylko opakowanie; 3-5 = sam produkt bez opakowania; 0-2 = brak kontekstu.",
     "is_banner_or_trash: true, jeśli obrazek to baner, infografika, tabela rozmiarów, ikona, logo sklepu, znak wodny lub kolaż.",
     hasReference
-      ? "identity: 'same' = ten sam produkt co na referencji/w nazwie (dopuszczalne inne ujęcie, kąt, opakowanie zbiorcze, zbliżenie na detal); 'different' = inny produkt, inny wariant lub inna kategoria (np. inne kafle z listingu, inny model, inny kolor/rozmiar zmieniający SKU); 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true."
-      : "identity: 'same' = zdjęcie pokazuje ten sam produkt co w nazwie (dopuszczalne inne ujęcie, kąt, opakowanie zbiorcze); 'different' = inny produkt, inny wariant lub inna kategoria; 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true.",
+        ? "identity: 'same' = ten sam produkt co na referencji/w nazwie (dopuszczalne inne ujęcie, kąt, opakowanie zbiorcze, zbliżenie na detal); 'different' = inny produkt, inny wariant lub inna kategoria (np. inne kafle z listingu, inny model, inny kolor/rozmiar zmieniający SKU). 'different' obejmuje także: inne opakowanie (inna szata graficzna, inna marka na opakowaniu, inny branding) tego samego typu produktu — jeżeli na referencji widać opakowanie marki X, a oceniany obraz pokazuje opakowanie innej marki lub wyraźnie inną szatę graficzną, to 'different', nawet gdy zawartość (np. szpilki, wkręty) wygląda identycznie. Opakowanie zbiorcze, inny kąt tej samej marki, zdjęcie samej zawartości bez opakowania = nadal 'same' albo 'unsure', nie 'different'. 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true."
+        : "identity: 'same' = zdjęcie pokazuje ten sam produkt co w nazwie (dopuszczalne inne ujęcie, kąt, opakowanie zbiorcze); 'different' = inny produkt, inny wariant lub inna kategoria — w tym inne opakowanie / inna marka na opakowaniu / wyraźnie inna szata graficzna, nawet jeżeli zawartość wygląda identycznie; 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true.",
   ].filter(Boolean).join("\n");
 }
 
