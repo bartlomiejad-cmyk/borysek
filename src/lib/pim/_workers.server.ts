@@ -3843,6 +3843,13 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
   } catch { /* best-effort */ }
 
   await emit(ctx, { level: "success", message: `✅ Allegro: opis zapisany (${html.length} znaków)` });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "allegro_generated",
+    message: `Wygenerowano opis Allegro (${html.length} znaków)`,
+    meta: { model: "openai/gpt-5.5", length: html.length },
+  });
 }
 
 // ---------------------------------------------------------------------------
