@@ -182,6 +182,22 @@ function ProductDetail() {
   const [manualUrlInput, setManualUrlInput] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
+  const [removingSource, setRemovingSource] = useState<string | null>(null);
+
+  const onRemoveSource = async (url: string) => {
+    if (removingSource) return;
+    if (!confirm("Usunąć to źródło z tego produktu? Nie będzie brane pod uwagę w kolejnych dopasowaniach.")) return;
+    setRemovingSource(url);
+    try {
+      await removeSourceFn({ data: { projectId: id, productId: pid, url } });
+      toast.success("Źródło usunięte");
+      invalidate();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się usunąć źródła"));
+    } finally {
+      setRemovingSource(null);
+    }
+  };
 
   useEffect(() => {
     const n = ((data as { product?: { product_notes?: string | null } } | undefined)?.product?.product_notes ?? "") || "";
