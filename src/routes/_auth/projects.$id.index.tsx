@@ -124,6 +124,8 @@ import {
   type PimPipelineStatus,
 } from "@/lib/pim/pipeline-status";
 import { setManualLock } from "@/lib/pim/enrichments.functions";
+import { approveProduct, unapproveProduct, bulkApprovePass } from "@/lib/pim/review.functions";
+import { CheckCircle2, Undo2 } from "lucide-react";
 
 const searchSchema = z.object({
   page: z.number().min(1).catch(1),
