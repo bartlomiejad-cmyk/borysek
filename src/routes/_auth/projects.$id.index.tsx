@@ -666,8 +666,8 @@ function ProjectPage() {
     }
   };
 
-  const exportFile = async (fmt: "csv" | "xlsx") => {
-    const allRows = await exportFn({ data: { projectId: id } });
+  const exportFile = async (fmt: "csv" | "xlsx", approvedOnly = false) => {
+    const allRows = await exportFn({ data: { projectId: id, approvedOnly } });
     const rows =
       selectedIds.size > 0
         ? allRows.filter((r: Record<string, unknown>) => {
