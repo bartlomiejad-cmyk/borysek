@@ -110,7 +110,7 @@ const searchSchema = z.object({
   page: z.number().min(1).catch(1),
   pageSize: z.number().min(1).catch(25),
   filter: z
-    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES"])
+    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES", "POOR_DATA"])
     .catch("ALL"),
   search: z.string().catch(""),
 });
@@ -309,6 +309,10 @@ function ProjectPage() {
           !!(p as { regenerated_main_image?: string | null }).regenerated_main_image ||
           (((p as { ai_gallery_urls?: string[] }).ai_gallery_urls?.length) ?? 0) > 0;
         if (hasAny) return false;
+      }
+      if (filter === "POOR_DATA") {
+        const ds = (p as { data_sufficiency?: string | null }).data_sufficiency ?? null;
+        if (ds !== "partial" && ds !== "poor") return false;
       }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
