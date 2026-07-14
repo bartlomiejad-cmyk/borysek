@@ -714,6 +714,29 @@ function ProductDetail() {
                   Generuję zdjęcie produktowe… (10–40 s)
                 </p>
               )}
+              {(() => {
+                if (!mainUrl) return null;
+                const s = imageScores[mainUrl];
+                const m = imageMeta[mainUrl];
+                const w = s?.w ?? m?.w ?? 0;
+                const h = s?.h ?? m?.h ?? 0;
+                if (!w || !h) return null;
+                const minSide = Math.min(w, h);
+                if (minSide >= 800) return null;
+                const largeAlt =
+                  s?.large_url && !hiddenSet.has(s.large_url) ? s.large_url : null;
+                return (
+                  <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-[11px] space-y-1">
+                    <div className="font-medium text-amber-800 dark:text-amber-300">
+                      Zdjęcie główne ma niską rozdzielczość: {w}×{h}px
+                    </div>
+                    <div className="text-muted-foreground">
+                      Zalecane min. 800×800px do regeneracji e-commerce.
+                      {largeAlt ? " Dostępny większy wariant tego samego zdjęcia." : ""}
+                    </div>
+                  </div>
+                );
+              })()}
               {regeneratedUrl && (
                 <a href={regeneratedUrl} target="_blank" rel="noreferrer" className="block">
                   <img
