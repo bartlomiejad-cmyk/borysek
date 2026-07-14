@@ -2196,6 +2196,20 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const useApify = searchProvider === "apify" || searchProvider === "both";
   const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
 
+  // Load URLs the user has explicitly removed for this product — we still
+  // fetch them via search (for audit / debug in query_variants) but never
+  // rescrape them, and matching filters them out at pick-time.
+  const { data: enRowForRemoved } = await supabaseAdmin
+    .from("enrichments")
+    .select("removed_urls")
+    .eq("source_product_id", product.id)
+    .maybeSingle();
+  const removedUrlSet = new Set(
+    ((enRowForRemoved as { removed_urls?: string[] | null } | null)?.removed_urls ?? []).map(
+      (u) => normalizeUrlForDedup(u),
+    ),
+  );
+
   // ---- Firecrawl branch ----
   if (useFirecrawl) {
     for (let vi = 0; vi < variants.length; vi++) {
