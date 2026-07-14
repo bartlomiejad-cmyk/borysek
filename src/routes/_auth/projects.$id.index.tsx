@@ -32,7 +32,11 @@ import {
   getActiveBulkJob,
   cancelBulkJob,
 } from "@/lib/pim/bulk-jobs.functions";
-import { startFirecrawlDiscovery, recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import {
+  startFirecrawlDiscovery,
+  recleanProductSources,
+  resetProductSources,
+} from "@/lib/pim/firecrawl.functions";
 import { testApifySerp } from "@/lib/pim/apify.functions";
 import { deleteProducts } from "@/lib/pim/products.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
@@ -185,6 +189,7 @@ function ProjectPage() {
   const cancelJobFn = useServerFn(cancelBulkJob);
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
   const recleanFn = useServerFn(recleanProductSources);
+  const resetSourcesFn = useServerFn(resetProductSources);
   const setLockFn = useServerFn(setManualLock);
   const setModeFn = useServerFn(setMatchingMode);
   const rerunMatchFn = useServerFn(rerunMatchingForProduct);
@@ -448,6 +453,24 @@ function ProjectPage() {
       qc.invalidateQueries({ queryKey: ["project", id] });
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
+    }
+  };
+
+  const runResetSources = async () => {
+    if (
+      !confirm(
+        "Zresetować źródła dla całego projektu?\n\nUsunie wpisy wyszukiwania i wróci wszystkie produkty na etap Import. Nie ruszy blokad ręcznych ani statusów zatwierdzenia.",
+      )
+    )
+      return;
+    try {
+      const res = await resetSourcesFn({ data: { projectId: id } });
+      toast.success(
+        `Zresetowano ${res.products} produkt(ów): usunięto ${res.deletedSearchRows} wpisów wyszukiwania.`,
+      );
+      qc.invalidateQueries({ queryKey: ["project", id] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się zresetować źródeł"));
     }
   };
 
