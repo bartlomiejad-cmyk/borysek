@@ -1256,19 +1256,53 @@ function ProductDetail() {
                           </span>
                         )}
                       </CollapsibleTrigger>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!enrichment || audit.isPending}
-                        onClick={() => audit.mutate()}
-                      >
-                        {audit.isPending ? (
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                        )}
-                        {auditData ? "Uruchom ponownie" : "Uruchom audyt"}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const rs = ((data?.product as { review_status?: string | null } | undefined)?.review_status ?? "NONE") as string;
+                          if (rs === "APPROVED") {
+                            return (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-emerald-500/60 text-emerald-700 dark:text-emerald-300"
+                                onClick={async () => {
+                                  await unapproveFn({ data: { productId: pid } });
+                                  toast.success("Cofnięto zatwierdzenie");
+                                  invalidate();
+                                }}
+                              >
+                                <Undo2 className="h-3 w-3 mr-1" /> Cofnij zatwierdzenie
+                              </Button>
+                            );
+                          }
+                          return (
+                            <Button
+                              size="sm"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={async () => {
+                                await approveFn({ data: { productId: pid } });
+                                toast.success("Produkt zatwierdzony");
+                                invalidate();
+                              }}
+                            >
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Zatwierdź produkt
+                            </Button>
+                          );
+                        })()}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!enrichment || audit.isPending}
+                          onClick={() => audit.mutate()}
+                        >
+                          {audit.isPending ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3 mr-1" />
+                          )}
+                          {auditData ? "Uruchom ponownie" : "Uruchom audyt"}
+                        </Button>
+                      </div>
                     </div>
                     <CollapsibleContent className="mt-2 space-y-2 text-xs">
                       {!auditData && (
