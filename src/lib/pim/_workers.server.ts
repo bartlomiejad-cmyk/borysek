@@ -2411,6 +2411,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   let cacheHits = 0;
   let totalImages = 0;
   let goodHits = 0;
+  const scrapedNorm = new Set<string>();
   for (const url of filtered) {
     if (goodHits >= 3) {
       await emit(ctx, {
@@ -2422,6 +2423,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     if (cachedUrls.has(url)) {
       cacheHits++;
       goodHits++;
+      scrapedNorm.add(normalizeUrlForDedup(url));
       const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
       await emit(ctx, {
         level: "info",
@@ -2440,8 +2442,22 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     if (res.ok) {
       scraped++;
       totalImages += res.imageCount;
+      scrapedNorm.add(normalizeUrlForDedup(url));
       if (res.imageCount > 0) goodHits++;
     }
+  }
+  // Persist scraped flags back onto the query_variants JSON for UI transparency.
+  if (scrapedNorm.size) {
+    for (const b of perVariant) {
+      for (const r of b.results) {
+        if (scrapedNorm.has(normalizeUrlForDedup(r.url))) r.scraped = true;
+      }
+    }
+    await supabaseAdmin
+      .from("search_results")
+      .update({ query_variants: perVariant as never } as never)
+      .eq("project_id", product.project_id)
+      .eq("term", nazwa);
   }
   await emit(ctx, {
     level: scraped ? "success" : "warn",
