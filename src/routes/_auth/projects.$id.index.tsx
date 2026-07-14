@@ -191,6 +191,8 @@ function ProjectPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyForce, setVerifyForce] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
@@ -274,11 +276,17 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_ALLEGRO_DESCRIPTION" } }),
     refetchInterval: 3000,
   });
+  const { data: verifyJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_IMAGE_VERIFY"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_IMAGE_VERIFY" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
   const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
   const allegroActive = allegroJob && (allegroJob.status === "PENDING" || allegroJob.status === "PROCESSING");
+  const verifyActive = verifyJob && (verifyJob.status === "PENDING" || verifyJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
