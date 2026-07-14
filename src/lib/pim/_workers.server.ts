@@ -4086,6 +4086,23 @@ export async function runPimImageVerify(
     level: failed > 0 && succeeded === 0 ? "error" : "success",
     message: `✅ Weryfikacja: OK ${succeeded}, błędy ${failed}`,
   });
+  try {
+    const { data: p } = await supabaseAdmin
+      .from("source_products")
+      .select("project_id")
+      .eq("id", productId)
+      .maybeSingle();
+    const projectId = (p as { project_id?: string } | null)?.project_id;
+    if (projectId) {
+      await logProductEvent(supabaseAdmin, {
+        projectId,
+        productId,
+        kind: "image_verify",
+        message: `Weryfikacja zdjęć: ${succeeded} przeanalizowanych, ${failed} błędów`,
+        meta: { accepted_count: succeeded, rejected_images_count: failed },
+      });
+    }
+  } catch { /* best-effort */ }
 }
 
 // ---------------------------------------------------------------------------
