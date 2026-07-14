@@ -145,3 +145,41 @@ export function normalizeUrlForDedup(raw: string): string {
     return raw.trim().toLowerCase().replace(/\/+$/g, "");
   }
 }
+
+/**
+ * Removes tracking / attribution query parameters (Google `srsltid`,
+ * `gclid`, Facebook `fbclid`, all `utm_*`, etc.) while otherwise leaving
+ * the URL intact. Applied at ingestion of both Firecrawl and Apify
+ * results so stored URLs are canonical.
+ */
+const TRACKING_PARAM_NAMES = new Set([
+  "srsltid",
+  "gclid",
+  "gclsrc",
+  "dclid",
+  "fbclid",
+  "msclkid",
+  "yclid",
+  "mc_cid",
+  "mc_eid",
+  "_hsenc",
+  "_hsmi",
+]);
+
+export function stripTrackingParams(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const toDrop: string[] = [];
+    u.searchParams.forEach((_, k) => {
+      const kl = k.toLowerCase();
+      if (TRACKING_PARAM_NAMES.has(kl) || kl.startsWith("utm_")) toDrop.push(k);
+    });
+    for (const k of toDrop) u.searchParams.delete(k);
+    // Remove trailing "?" if we emptied the query string.
+    let out = u.toString();
+    if (out.endsWith("?")) out = out.slice(0, -1);
+    return out;
+  } catch {
+    return raw;
+  }
+}
