@@ -555,7 +555,7 @@ export const verifyProduct = createServerFn({ method: "POST" })
 
     const { data: enrichment } = await supabase
       .from("enrichments")
-      .select("id, picked_urls, golden_name, golden_features, hidden_images")
+      .select("id, picked_urls, golden_name, golden_features, hidden_images, image_scores")
       .eq("source_product_id", product.id)
       .maybeSingle();
     if (!enrichment) throw new Error("No enrichment record. Run matching first.");
@@ -580,6 +580,20 @@ export const verifyProduct = createServerFn({ method: "POST" })
       }
     }
     images = images.slice(0, 6);
+
+    // Pre-flight: drop stale URLs (404, unreachable) before the gateway
+    // fetches them server-side — one dead image makes the whole call 400.
+    const existingScores = ((enrichment as { image_scores?: Record<string, ImageScore> | null })
+      .image_scores ?? {}) as Record<string, ImageScore>;
+    if (images.length) {
+      const { alive } = await filterAliveImages(
+        supabase,
+        (enrichment as { id: string }).id,
+        images,
+        existingScores,
+      );
+      images = alive;
+    }
 
     const name = (enrichment as { golden_name?: string | null }).golden_name ?? product.nazwa ?? "";
     const features = ((enrichment as unknown as { golden_features?: Array<{ key: string; value: string }> }).golden_features ?? []);
