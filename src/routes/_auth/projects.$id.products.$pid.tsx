@@ -20,7 +20,8 @@ import {
   rejectThumbnailCandidate,
   saveVizAnalysisOverride,
 } from "@/lib/pim/regen.functions";
-import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
+import { recleanProductSources, startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import { supabase } from "@/integrations/supabase/client";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { attachManualSources, setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
@@ -669,6 +670,8 @@ function ProductDetail() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      <ProductSearchResults projectId={id} productId={pid} productName={product.nazwa ?? ""} />
 
       <ProductTimeline productId={pid} />
 
@@ -2069,6 +2072,165 @@ function ProductTimeline({ productId }: { productId: string }) {
           </CardContent>
         </Card>
       </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Per-product search results panel.
+// ---------------------------------------------------------------------------
+type SearchVariantResult = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  domain?: string;
+  providers?: Array<"firecrawl" | "apify">;
+  ai_pick?: boolean;
+  ai_reason?: string;
+  filtered_out?: "marketplace" | "host_dup";
+  scraped?: boolean;
+};
+type SearchVariantBucket = {
+  variant: string;
+  kind: string;
+  providers?: { firecrawl?: number; apify?: number };
+  results: SearchVariantResult[];
+};
+
+function ProductSearchResults({
+  projectId,
+  productId,
+  productName,
+}: { projectId: string; productId: string; productName: string }) {
+  const [open, setOpen] = useState(false);
+  const [rediscovering, setRediscovering] = useState(false);
+  const startDiscovery = useServerFn(startFirecrawlDiscovery);
+  const qc = useQueryClient();
+
+  const q = useQuery({
+    queryKey: ["search-results", projectId, productName],
+    enabled: open && !!productName,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("search_results")
+        .select("term, organic_urls, query_variants, created_at")
+        .eq("project_id", projectId)
+        .eq("term", productName)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw new Error(error.message);
+      const row = (data ?? [])[0];
+      if (!row) return null;
+      const variants = Array.isArray(row.query_variants) ? (row.query_variants as unknown as SearchVariantBucket[]) : [];
+      return { variants, createdAt: row.created_at as string };
+    },
+  });
+
+  async function onRediscover() {
+    setRediscovering(true);
+    try {
+      await startDiscovery({ data: { projectId, productIds: [productId], onlyMissing: false } });
+      toast.success("Uruchomiono ponowne wyszukiwanie w tle");
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["search-results", projectId, productName] }), 4000);
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
+    } finally {
+      setRediscovering(false);
+    }
+  }
+
+  const providerBadge = (p: "firecrawl" | "apify") => (
+    <span
+      key={p}
+      className={cn(
+        "text-[10px] px-1.5 py-0.5 rounded border",
+        p === "firecrawl" ? "bg-sky-500/10 border-sky-500/30 text-sky-700" : "bg-amber-500/10 border-amber-500/30 text-amber-700",
+      )}
+    >
+      {p === "firecrawl" ? "Firecrawl" : "Apify"}
+    </span>
+  );
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mt-6">
+      <Card>
+        <CollapsibleTrigger className="w-full">
+          <CardHeader className="cursor-pointer">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+              Wyniki wyszukiwania
+              <span className="text-xs text-muted-foreground font-normal ml-auto">
+                {q.data ? `${q.data.variants.reduce((s, v) => s + v.results.length, 0)} wyników` : ""}
+              </span>
+            </CardTitle>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Surowe wyniki SERP dla wariantów zapytań (Firecrawl + Apify). Znaczniki: [wybrane przez AI], [scrapowane], [odfiltrowane].
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={onRediscover} disabled={rediscovering}>
+                  {rediscovering ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                  Szukaj ponownie
+                </Button>
+              </div>
+            </div>
+            {q.isLoading ? (
+              <p className="text-sm text-muted-foreground">Ładuję…</p>
+            ) : !q.data ? (
+              <p className="text-sm text-muted-foreground">Brak zapisanych wyników wyszukiwania dla tego produktu.</p>
+            ) : q.data.variants.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Zapisano wynik, ale bez rozbicia na warianty (stary format).</p>
+            ) : (
+              q.data.variants.map((b, bi) => (
+                <div key={bi} className="rounded border p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">[{b.kind}]</Badge>
+                    <span className="text-sm font-medium">„{b.variant}"</span>
+                    <span className="text-xs text-muted-foreground">
+                      {b.results.length} wyników
+                      {b.providers?.firecrawl != null ? ` · Firecrawl: ${b.providers.firecrawl}` : ""}
+                      {b.providers?.apify != null ? ` · Apify: ${b.providers.apify}` : ""}
+                    </span>
+                  </div>
+                  <ol className="space-y-1.5 text-xs">
+                    {b.results.map((r, ri) => (
+                      <li key={ri} className={cn("flex flex-col gap-0.5", r.filtered_out && "opacity-60")}>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <a href={r.url} target="_blank" rel="noreferrer" className="font-medium underline break-all">
+                            {r.title || r.url}
+                          </a>
+                          {(r.providers ?? []).map(providerBadge)}
+                          {r.ai_pick ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-500/10 border-emerald-500/30 text-emerald-700" title={r.ai_reason}>
+                              wybrane przez AI
+                            </span>
+                          ) : null}
+                          {r.scraped ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-violet-500/10 border-violet-500/30 text-violet-700">
+                              scrapowane
+                            </span>
+                          ) : null}
+                          {r.filtered_out ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-muted text-muted-foreground">
+                              odfiltrowane ({r.filtered_out === "marketplace" ? "marketplace" : "duplikat hosta"})
+                            </span>
+                          ) : null}
+                        </div>
+                        {r.snippet ? <div className="text-muted-foreground line-clamp-2">{r.snippet}</div> : null}
+                        <div className="text-[10px] text-muted-foreground">{r.domain}</div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
     </Collapsible>
   );
 }

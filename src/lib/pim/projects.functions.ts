@@ -21,7 +21,11 @@ export const createProject = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const { data: row, error } = await supabase
       .from("projects")
-      .insert({ name: data.name, user_id: userId } as never)
+      .insert({
+        name: data.name,
+        user_id: userId,
+        settings: { search_provider: "both" } as never,
+      } as never)
       .select("id")
       .single();
     if (error) throw new Error(error.message);
