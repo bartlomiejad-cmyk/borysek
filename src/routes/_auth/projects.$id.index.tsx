@@ -1105,6 +1105,15 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <ClientGuidelinesDialog
+        open={guidelinesOpen}
+        onOpenChange={setGuidelinesOpen}
+        projectId={id}
+        initialValue={
+          ((meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings
+            ?.client_guidelines ?? "") as string
+        }
+      />
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(v) => {
