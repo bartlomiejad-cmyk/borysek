@@ -20,7 +20,11 @@ import {
   rejectThumbnailCandidate,
   saveVizAnalysisOverride,
 } from "@/lib/pim/regen.functions";
-import { recleanProductSources, startFirecrawlDiscovery } from "@/lib/pim/firecrawl.functions";
+import {
+  recleanProductSources,
+  resetProductSources,
+  startFirecrawlDiscovery,
+} from "@/lib/pim/firecrawl.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { attachManualSources, setMatchingMode, rerunMatchingForProduct } from "@/lib/pim/compat.functions";
@@ -95,6 +99,7 @@ function ProductDetail() {
   const pinFn = useServerFn(setPinnedMainImage);
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
+  const resetSourcesFn = useServerFn(resetProductSources);
   const deleteProductsFn = useServerFn(deleteProducts);
   const attachManualFn = useServerFn(attachManualSources);
   const setModeFn = useServerFn(setMatchingMode);
@@ -127,6 +132,19 @@ function ProductDetail() {
       qc.invalidateQueries({ queryKey: ["project", id, "products"] });
     },
     onError: (e) => toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł")),
+  });
+
+  const resetSourcesMut = useMutation({
+    mutationFn: () =>
+      resetSourcesFn({ data: { projectId: id, productIds: [pid] } }),
+    onSuccess: (res) => {
+      toast.success(
+        `Zresetowano produkt: usunięto ${res.deletedSearchRows} wpisów wyszukiwania. Wróć na etap Import.`,
+      );
+      qc.invalidateQueries({ queryKey: ["product", id, pid] });
+      qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+    },
+    onError: (e) => toast.error(friendlyError(e, "Nie udało się zresetować źródeł")),
   });
 
   const { data: vizJob } = useQuery({
