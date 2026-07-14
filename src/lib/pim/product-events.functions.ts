@@ -29,7 +29,6 @@ export type ProductEventMeta = {
   actor_id?: string | null;
   round?: number;
   count?: number;
-  [key: string]: unknown;
 };
 
 export type ProductEventRow = {
