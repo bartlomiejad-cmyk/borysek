@@ -772,17 +772,31 @@ function ProjectPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => exportFile("csv")}>
+              <DropdownMenuLabel>Dane produktowe (dla klienta/sklepu)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => exportFile("csv", false, "client")}>
                 <Download className="h-4 w-4 mr-2" /> CSV
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => exportFile("xlsx")}>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", false, "client")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => exportFile("csv", true)}>
+              <DropdownMenuItem onSelect={() => exportFile("csv", true, "client")}>
                 <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => exportFile("xlsx", true)}>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true, "client")}>
+                <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Roboczy (z metadanymi QC)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => exportFile("csv", false, "qc")}>
+                <Download className="h-4 w-4 mr-2" /> CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", false, "qc")}>
+                <Download className="h-4 w-4 mr-2" /> XLSX
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("csv", true, "qc")}>
+                <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true, "qc")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
               </DropdownMenuItem>
             </DropdownMenuContent>
