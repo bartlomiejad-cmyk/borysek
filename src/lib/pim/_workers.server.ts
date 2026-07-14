@@ -3283,7 +3283,7 @@ export async function runPimImageVerify(
   if (!toScore.length) {
     await emit(ctx, {
       level: "info",
-      message: "Wszystkie zdjęcia mają już aktualną weryfikację (użyj „wymuś" aby powtórzyć)",
+      message: 'Wszystkie zdjęcia mają już aktualną weryfikację (użyj „wymuś", aby powtórzyć)',
     });
     return;
   }
