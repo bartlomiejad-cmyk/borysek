@@ -16,13 +16,14 @@ import { extractDescriptionSection, filterImageUrls, sanitizeProductDescription 
 import {
   slugifyPl as slugifyPlShared,
   clampName as clampNameShared,
-  clampMetaDescription as clampMetaDescriptionShared,
   dedupeKeywords as dedupeKeywordsShared,
   GOLDEN_SEO_SYSTEM_PROMPT,
   sanitizeGoldenDescriptionHtml,
   ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
   sanitizeAllegroDescriptionHtml,
   buildClientGuidelinesBlock,
+  finalizeMetaDescription,
+  SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
@@ -76,6 +77,7 @@ const GoldenSchema = z.object({
     .max(60)
     .optional()
     .default([]),
+  data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
 });
 
 const VerifySourcesSchema = z.object({
@@ -240,7 +242,6 @@ function sanitize(text: string | null, blacklist: string[]): string | null {
 
 export const slugifyPl = slugifyPlShared;
 const clampName = clampNameShared;
-const clampMetaDescription = clampMetaDescriptionShared;
 const dedupeKeywords = dedupeKeywordsShared;
 
 // ---------------------------------------------------------------------------
