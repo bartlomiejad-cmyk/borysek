@@ -3247,12 +3247,12 @@ export async function runPimImageVerify(
   }
   const { data: sources } = await supabaseAdmin
     .from("product_sources")
-    .select("url, image_url, extra_image_urls")
+    .select("url, images, extra_images")
     .in("url", pickedUrls);
   const allUrls: string[] = [];
-  for (const s of (sources ?? []) as Array<{ image_url: string | null; extra_image_urls: string[] | null }>) {
-    if (s.image_url) allUrls.push(s.image_url);
-    for (const u of s.extra_image_urls ?? []) allUrls.push(u);
+  for (const s of (sources ?? []) as Array<{ images: string[] | null; extra_images: string[] | null }>) {
+    for (const u of s.images ?? []) allUrls.push(u);
+    for (const u of s.extra_images ?? []) allUrls.push(u);
   }
   const hidden = new Set((enRow.hidden_images ?? []) as string[]);
   const existing = (enRow.image_scores ?? {}) as Record<
