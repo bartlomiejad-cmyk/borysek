@@ -95,9 +95,9 @@ const STAGES: Stage[] = [
     Icon: ImageIcon,
     progress: (s) => ({ done: s.visuals_ready, total: s.total }),
     pending: (s) => s.golden_ready,
-    remainingLabel: (n) => `${n} do regeneracji/wizualizacji`,
+    remainingLabel: (n) => `${n} do generacji mediów`,
     ctaLabel: "Regeneruj tła",
-    nextSentence: (n) => `${n} produktów oczekuje na regenerację teł lub wizualizacje.`,
+    nextSentence: (n) => `${n} produktów do generacji mediów (miniatury lub wizualizacje AI).`,
   },
   {
     key: "REVIEW",
