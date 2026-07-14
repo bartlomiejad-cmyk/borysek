@@ -254,11 +254,17 @@ function ProductDetail() {
 
   const scoreFor = (url: string): number => {
     const m = imageMeta[url];
-    const area = (m?.w ?? 0) * (m?.h ?? 0);
     const s = imageScores[url];
+    // Prefer probed dimensions from image_scores (fresh) over image_meta.
+    const w = s?.w ?? m?.w ?? 0;
+    const h = s?.h ?? m?.h ?? 0;
+    const area = w * h;
+    const minSide = w && h ? Math.min(w, h) : 0;
+    // Boost images that comfortably clear the 800px main-image threshold.
+    const resolutionBoost = minSide >= 800 ? 2 : minSide >= 600 ? 1 : minSide > 0 ? 0.5 : 1;
     // Fallback gdy brak wymiarów (image_meta puste) — oceniaj tylko po AI.
-    const effectiveArea = area > 0 ? area : 1;
-    if (!s) return area;
+    const effectiveArea = (area > 0 ? area : 1) * resolutionBoost;
+    if (!s) return area * resolutionBoost;
     if (s.is_banner_or_trash) return 0;
     const pkg = s.has_packaging ?? 0;
     return (s.is_central + s.is_clean + 1.5 * pkg) * effectiveArea;
