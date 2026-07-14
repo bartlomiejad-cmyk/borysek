@@ -213,3 +213,52 @@ export const attachManualSources = createServerFn({ method: "POST" })
 
     return { ok: true, added: scrapedOk.length, failed };
   });
+
+/**
+ * Remove a picked source URL from a product's enrichment. The URL is:
+ *   - dropped from `enrichments.picked_urls`
+ *   - dropped from `enrichments.score_breakdown`
+ *   - tracked in `enrichments.removed_urls` so subsequent re-runs of
+ *     discovery/matching skip it as user-rejected.
+ * The scraped `product_sources` row is kept (idempotent cache).
+ */
+export const removePickedSource = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        productId: z.string().uuid(),
+        url: z.string().url(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: enRow, error } = await supabase
+      .from("enrichments")
+      .select("id, picked_urls, score_breakdown, removed_urls")
+      .eq("source_product_id", data.productId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!enRow) return { ok: false, reason: "no_enrichment" };
+    const row = enRow as {
+      id: string;
+      picked_urls: string[] | null;
+      score_breakdown: BreakdownEntry[] | null;
+      removed_urls: string[] | null;
+    };
+    const picked = (row.picked_urls ?? []).filter((u) => u !== data.url);
+    const bd = (row.score_breakdown ?? []).filter((b) => b.url !== data.url);
+    const removed = Array.from(new Set([...(row.removed_urls ?? []), data.url]));
+    const { error: upErr } = await supabase
+      .from("enrichments")
+      .update({
+        picked_urls: picked as never,
+        score_breakdown: bd as never,
+        removed_urls: removed as never,
+      } as never)
+      .eq("id", row.id);
+    if (upErr) throw new Error(upErr.message);
+    return { ok: true, removed_url: data.url, remaining: picked.length };
+  });
