@@ -578,7 +578,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw")
+    .select("id, project_id, nazwa, kod, ean, raw, product_notes")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -586,11 +586,15 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const { data: project } = await supabaseAdmin
     .from("projects")
-    .select("custom_prompt, blacklist")
+    .select("custom_prompt, blacklist, settings")
     .eq("id", product.project_id)
     .single();
   const customPrompt = project?.custom_prompt ?? "";
   const blacklist = (project?.blacklist as string[] | null) ?? [];
+  const clientGuidelines =
+    ((project?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+  const productNotes = (product as { product_notes?: string | null }).product_notes ?? "";
+  const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, productNotes);
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
@@ -640,8 +644,9 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     `ŹRÓDŁA:`,
     sourceBlocks || "(brak)",
     "",
+    guidelinesBlock ? guidelinesBlock + "\n" : "",
     'Wygeneruj JSON {"name", "slug", "description", "meta_description", "seo_keywords", "features"} zgodnie z regułami SEO opisanymi w system prompt.',
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   try {
     const parsed = await callGatewayJson(apiKey, GOLDEN_MODEL, [
