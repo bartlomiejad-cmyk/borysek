@@ -1340,6 +1340,13 @@ export async function runRegenerateMedia(
     // Only advance the pipeline when we actually produced a usable thumbnail.
     if (mainPublic) {
       await advancePipelineStatus(supabaseAdmin as never, product.id, "VISUALS_READY");
+      await logProductEvent(supabaseAdmin, {
+        projectId: product.project_id,
+        productId: product.id,
+        kind: "media_generated",
+        message: `Miniatura wygenerowana (galeria: ${galleryUrls.length})`,
+        meta: { slot: 0, gallery_count: galleryUrls.length },
+      });
     }
   } finally {
     for (const p of preparedMain) {
