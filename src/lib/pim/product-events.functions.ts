@@ -7,7 +7,7 @@ export type ProductEventRow = {
   at: string;
   kind: string;
   message: string;
-  meta: unknown;
+  meta: null;
 };
 
 /**
@@ -36,5 +36,5 @@ export const getProductEvents = createServerFn({ method: "POST" })
     if (data.beforeAt) q = q.lt("at", data.beforeAt);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
-    return (rows ?? []) as ProductEventRow[];
+    return (rows ?? []) as unknown as ProductEventRow[];
   });
