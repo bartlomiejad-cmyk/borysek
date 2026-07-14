@@ -671,11 +671,15 @@ function ProjectPage() {
     }
   };
 
-  const exportFile = async (fmt: "csv" | "xlsx", approvedOnly = false) => {
-    const allRows = await exportFn({ data: { projectId: id, approvedOnly } });
+  const exportFile = async (
+    fmt: "csv" | "xlsx",
+    approvedOnly = false,
+    mode: "client" | "qc" = "client",
+  ) => {
+    const allRows = await exportFn({ data: { projectId: id, approvedOnly, mode } });
     const rows =
       selectedIds.size > 0
-        ? allRows.filter((r: Record<string, unknown>) => {
+        ? (allRows as Array<Record<string, unknown>>).filter((r) => {
             const pid = (r.id ?? r.product_id ?? r.productId) as string | undefined;
             return pid ? selectedIds.has(pid) : true;
           })
@@ -768,17 +772,31 @@ function ProjectPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => exportFile("csv")}>
+              <DropdownMenuLabel>Dane produktowe (dla klienta/sklepu)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => exportFile("csv", false, "client")}>
                 <Download className="h-4 w-4 mr-2" /> CSV
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => exportFile("xlsx")}>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", false, "client")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => exportFile("csv", true)}>
+              <DropdownMenuItem onSelect={() => exportFile("csv", true, "client")}>
                 <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => exportFile("xlsx", true)}>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true, "client")}>
+                <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Roboczy (z metadanymi QC)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => exportFile("csv", false, "qc")}>
+                <Download className="h-4 w-4 mr-2" /> CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", false, "qc")}>
+                <Download className="h-4 w-4 mr-2" /> XLSX
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("csv", true, "qc")}>
+                <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true, "qc")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
               </DropdownMenuItem>
             </DropdownMenuContent>

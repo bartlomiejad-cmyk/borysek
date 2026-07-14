@@ -4,6 +4,15 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { pickImages, pickThumbsForList, type ImageMeta, type ImageScores } from "./images";
 import { getVisibleGallery, type GalleryImageScore } from "./gallery";
 import { sanitizeAllegroHtml } from "./seo";
+import { PIPELINE_STATUS_LABEL, type PimPipelineStatus } from "./pipeline-status";
+
+type AuditPayload = {
+  verdict?: "pass" | "warn" | "fail" | null;
+  llm?: {
+    factual_issues?: string[] | null;
+    guideline_violations?: string[] | null;
+  } | null;
+} | null;
 
 export const exportProject = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -12,11 +21,13 @@ export const exportProject = createServerFn({ method: "GET" })
       .object({
         projectId: z.string().uuid(),
         approvedOnly: z.boolean().optional(),
+        mode: z.enum(["client", "qc"]).optional(),
       })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    const mode = data.mode ?? "client";
 
     const { data: project } = await supabase
       .from("projects")
@@ -27,7 +38,7 @@ export const exportProject = createServerFn({ method: "GET" })
 
     let prodQ = supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, review_status")
+      .select("id, ext_id, nazwa, kod, ean, review_status, pipeline_status, approved_at, manual_lock")
       .eq("project_id", data.projectId)
       ;
     if (data.approvedOnly) prodQ = prodQ.eq("review_status", "APPROVED");
@@ -37,7 +48,7 @@ export const exportProject = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at, allegro_description, allegro_generated_at",
+        "source_product_id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, hidden_images, image_meta, image_scores, regenerated_main_image, ai_gallery_urls, pinned_main_url, model, generated_at, allegro_description, allegro_generated_at, audit, data_sufficiency, score_breakdown",
       )
       .eq("project_id", data.projectId)
       .limit(100000);
@@ -130,7 +141,7 @@ export const exportProject = createServerFn({ method: "GET" })
       }
       const galleryCols: Record<string, string> = {};
       for (let i = 0; i < maxGallery; i++) galleryCols[`ai_gallery_${i + 1}`] = gallery[i] ?? "";
-      return {
+      const base = {
         id: p.ext_id ?? "",
         nazwa: p.nazwa ?? "",
         kod: p.kod ?? "",
@@ -164,6 +175,31 @@ export const exportProject = createServerFn({ method: "GET" })
         allegro_generated_at: ((e as { allegro_generated_at?: string | null } | undefined)?.allegro_generated_at) ?? "",
         model: e?.model ?? "",
         generated_at: e?.generated_at ?? "",
+      };
+      if (mode !== "qc") return base;
+
+      // --- QC / roboczy columns --------------------------------------------
+      const pipeline = ((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED") as PimPipelineStatus;
+      const audit = ((e as { audit?: AuditPayload } | undefined)?.audit ?? null) as AuditPayload;
+      const factual = audit?.llm?.factual_issues ?? [];
+      const guideline = audit?.llm?.guideline_violations ?? [];
+      const uwagi = [...factual, ...guideline].filter(Boolean).join("; ").slice(0, 500);
+      const scoreBreakdown = ((e as { score_breakdown?: Array<{ ean_confirmed?: boolean }> | null } | undefined)?.score_breakdown) ?? [];
+      const eanConfirmed = scoreBreakdown.filter((s) => s?.ean_confirmed === true).length;
+      const mainUrl = allegroMainImage || listImages[0] || "";
+      const mainScore = mainUrl ? (identityScores as Record<string, GalleryImageScore>)[mainUrl] : undefined;
+      const mainPx = mainScore?.w && mainScore?.h ? `${mainScore.w}x${mainScore.h}` : "";
+      return {
+        ...base,
+        status_pipeline: PIPELINE_STATUS_LABEL[pipeline] ?? pipeline,
+        status_review: (p as { review_status?: string | null }).review_status ?? "",
+        zatwierdzony_kiedy: (p as { approved_at?: string | null }).approved_at ?? "",
+        blokada_reczna: (p as { manual_lock?: boolean | null }).manual_lock ? "TAK" : "",
+        jakosc_danych: ((e as { data_sufficiency?: string | null } | undefined)?.data_sufficiency) ?? "",
+        audyt_werdykt: audit?.verdict ?? "",
+        audyt_uwagi: uwagi,
+        zrodla_ean_potwierdzone: eanConfirmed,
+        zdjecie_glowne_px: mainPx,
       };
     });
   });
