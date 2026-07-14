@@ -785,6 +785,7 @@ function ProjectPage() {
             const f = stageToFilter(s);
             updateSearch({ filter: f, stage: "NONE", page: 1 });
           }}
+          onRunAudit={() => void auditAll()}
         />
       )}
 
