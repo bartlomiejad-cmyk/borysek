@@ -8,6 +8,7 @@ import {
   extractHostname,
 } from "./source-cleanup";
 import { llmCleanDescription, type CleaningMeta } from "./llm-cleaner.server";
+import { advancePipelineStatus } from "./pipeline-status";
 
 const LLM_CLEAN_MIN_CHARS = 200;
 
