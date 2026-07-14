@@ -671,7 +671,7 @@ function ProductDetail() {
         </CollapsibleContent>
       </Collapsible>
 
-      <ProductSearchResults projectId={id} productName={product.nazwa ?? ""} />
+      <ProductSearchResults projectId={id} productId={pid} productName={product.nazwa ?? ""} />
 
       <ProductTimeline productId={pid} />
 
@@ -2097,7 +2097,11 @@ type SearchVariantBucket = {
   results: SearchVariantResult[];
 };
 
-function ProductSearchResults({ projectId, productName }: { projectId: string; productName: string }) {
+function ProductSearchResults({
+  projectId,
+  productId,
+  productName,
+}: { projectId: string; productId: string; productName: string }) {
   const [open, setOpen] = useState(false);
   const [rediscovering, setRediscovering] = useState(false);
   const startDiscovery = useServerFn(startFirecrawlDiscovery);
@@ -2125,11 +2129,10 @@ function ProductSearchResults({ projectId, productName }: { projectId: string; p
   async function onRediscover() {
     setRediscovering(true);
     try {
-      await startDiscovery({ data: { projectId, productIds: [], onlyMissing: false } as never });
+      await startDiscovery({ data: { projectId, productIds: [productId], onlyMissing: false } });
       toast.success("Uruchomiono ponowne wyszukiwanie w tle");
       setTimeout(() => qc.invalidateQueries({ queryKey: ["search-results", projectId, productName] }), 4000);
     } catch (e) {
-      // productIds validator is min 1? we sent []. Handle by passing selected pid via prop if needed.
       toast.error(friendlyError(e));
     } finally {
       setRediscovering(false);
