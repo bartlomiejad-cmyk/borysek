@@ -117,6 +117,7 @@ import {
   LockOpen,
   Wrench,
   ChevronDown,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   PIPELINE_STATUS_LABEL,
@@ -217,6 +218,7 @@ function ProjectPage() {
   const [verifyForce, setVerifyForce] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [guidelinesOpen, setGuidelinesOpen] = useState(false);
+  const [remapOpen, setRemapOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
@@ -303,16 +305,22 @@ function ProjectPage() {
     queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_IMAGE_VERIFY" } }),
     refetchInterval: 3000,
   });
+  const { data: auditJob } = useQuery({
+    queryKey: ["project", id, "bulk-job", "PIM_AUDIT"],
+    queryFn: () => getActiveJobFn({ data: { projectId: id, kind: "PIM_AUDIT" } }),
+    refetchInterval: 3000,
+  });
   const genActive = genJob && (genJob.status === "PENDING" || genJob.status === "PROCESSING");
   const regenActive = regenJob && (regenJob.status === "PENDING" || regenJob.status === "PROCESSING");
   const discActive = discJob && (discJob.status === "PENDING" || discJob.status === "PROCESSING");
   const vizActive = vizJob && (vizJob.status === "PENDING" || vizJob.status === "PROCESSING");
   const allegroActive = allegroJob && (allegroJob.status === "PENDING" || allegroJob.status === "PROCESSING");
   const verifyActive = verifyJob && (verifyJob.status === "PENDING" || verifyJob.status === "PROCESSING");
+  const auditActive = auditJob && (auditJob.status === "PENDING" || auditJob.status === "PROCESSING");
 
   // Show toast once per terminal job state + refetch products.
   useEffect(() => {
-    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob]) {
+    for (const job of [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob, auditJob]) {
       if (!job) continue;
       if (job.status !== "COMPLETED" && job.status !== "CANCELLED" && job.status !== "FAILED") continue;
       if (lastTerminalToastRef.current[job.id] === job.status) continue;
@@ -330,7 +338,9 @@ function ProjectPage() {
                   ? "Doscrapowanie źródeł"
                   : job.kind === "PIM_IMAGE_VERIFY"
                     ? "Weryfikacja zdjęć AI"
-                    : "Wizualizacje produktowe";
+                    : job.kind === "PIM_AUDIT"
+                      ? "Audyt AI"
+                      : "Wizualizacje produktowe";
       if (job.status === "COMPLETED") {
         toast.success(`${label}: gotowe ${job.processed_count}/${job.total}${job.failed_count ? `, ${job.failed_count} błędów` : ""}`);
       } else if (job.status === "CANCELLED") {
@@ -340,7 +350,7 @@ function ProjectPage() {
       }
       refetchProducts();
     }
-  }, [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob, refetchProducts]);
+  }, [genJob, regenJob, discJob, vizJob, allegroJob, verifyJob, auditJob, refetchProducts]);
 
   useEffect(() => {
     if (!vizActive) return;
@@ -451,7 +461,17 @@ function ProjectPage() {
         void regenerateAll();
         break;
       case "REVIEW":
-        setVerifyOpen(true);
+        // If any eligible product still lacks an audit, prompt Audyt AI
+        // first — it flags issues before the human review pass. Otherwise
+        // fall through to the classic image-verification dialog.
+        if (
+          summary &&
+          Math.max(0, (summary.audit_eligible ?? 0) - (summary.audit_completed ?? 0)) > 0
+        ) {
+          void auditAll();
+        } else {
+          setVerifyOpen(true);
+        }
         break;
     }
   };
@@ -619,6 +639,33 @@ function ProjectPage() {
     }
   };
 
+  /**
+   * Bulk AI audit — deterministic checks + LLM cross-check for every product
+   * with a Golden Record (pipeline_status GOLDEN_READY or VISUALS_READY).
+   * Products still in earlier stages are skipped by the worker itself.
+   */
+  const auditAll = async (productIds?: string[]) => {
+    const idSet = productIds ? new Set(productIds) : null;
+    const source = idSet ? products.filter((p) => idSet.has(p.id)) : products;
+    const targets = source.filter((p) => {
+      const ps = ((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED");
+      return ps === "GOLDEN_READY" || ps === "VISUALS_READY";
+    });
+    if (!targets.length) {
+      toast.info("Brak produktów ze złotym rekordem — najpierw wygeneruj złote rekordy.");
+      return;
+    }
+    try {
+      await createJobFn({
+        data: { projectId: id, kind: "PIM_AUDIT", items: targets.map((t) => t.id) },
+      });
+      toast.success(`Uruchomiono Audyt AI: ${targets.length} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_AUDIT"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić Audytu AI"));
+    }
+  };
+
   const exportFile = async (fmt: "csv" | "xlsx") => {
     const allRows = await exportFn({ data: { projectId: id } });
     const rows =
@@ -685,7 +732,16 @@ function ProjectPage() {
               <DropdownMenuItem onSelect={() => void runReclean()}>
                 <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setRemapOpen(true)}>
+                <Wand2 className="h-4 w-4 mr-2" /> Uzupełnij dane z CSV
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => void auditAll()}
+                disabled={!!auditActive}
+              >
+                <ClipboardCheck className="h-4 w-4 mr-2" /> Audyt AI
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link to="/projects/$id/verify" params={{ id }}>
                   <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
@@ -729,6 +785,7 @@ function ProjectPage() {
             const f = stageToFilter(s);
             updateSearch({ filter: f, stage: "NONE", page: 1 });
           }}
+          onRunAudit={() => void auditAll()}
         />
       )}
 
@@ -883,6 +940,52 @@ function ProjectPage() {
           </CardContent>
         </Card>
       )}
+
+      {auditActive && auditJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {auditJob.cancel_requested ? "Zatrzymywanie… " : "Audyt AI "}
+                {auditJob.processed_count}/{auditJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">
+                  {Math.round((auditJob.processed_count / Math.max(1, auditJob.total)) * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: auditJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_AUDIT"] });
+                  }}
+                  disabled={auditJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(auditJob.processed_count / Math.max(1, auditJob.total)) * 100} />
+            <BulkJobLog jobId={auditJob.id} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Controlled "Uzupełnij dane z CSV" — launched from the Narzędzia dropdown. */}
+      <RemapCsvDialog
+        projectId={id}
+        defaults={{
+          id_column: (meta?.project as { settings?: { id_column?: string } } | undefined)?.settings?.id_column,
+          name_column: (meta?.project as { settings?: { name_column?: string } } | undefined)?.settings?.name_column,
+          code_column: (meta?.project as { settings?: { code_column?: string } } | undefined)?.settings?.code_column,
+          ean_column: (meta?.project as { settings?: { ean_column?: string } } | undefined)?.settings?.ean_column,
+        }}
+        open={remapOpen}
+        onOpenChange={setRemapOpen}
+        onDone={() => refetchProducts()}
+      />
 
       <Tabs defaultValue="data" className="mb-4">
         <TabsList>
@@ -1259,6 +1362,27 @@ function ProjectPage() {
                             <><LockOpen className="h-3 w-3" /> Odblokowany</>
                           )}
                         </button>
+                        {(() => {
+                          const audit = (p as { audit?: { verdict?: "pass" | "warn" | "fail"; at?: string } | null }).audit;
+                          if (!audit) return null;
+                          const v = audit.verdict ?? "warn";
+                          const cls =
+                            v === "pass"
+                              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : v === "warn"
+                                ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                : "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300";
+                          const label = v === "pass" ? "Audyt OK" : v === "warn" ? "Audyt: ostrzeżenia" : "Audyt: błędy";
+                          return (
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-1.5 py-0 ${cls}`}
+                              title={audit.at ? `Audyt AI: ${new Date(audit.at).toLocaleString("pl-PL")}` : "Audyt AI"}
+                            >
+                              <ClipboardCheck className="h-3 w-3 mr-1" /> {label}
+                            </Badge>
+                          );
+                        })()}
                       </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];

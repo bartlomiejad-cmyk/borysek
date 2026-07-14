@@ -36,11 +36,23 @@ type Props = {
     ean_column?: string;
   };
   onDone?: () => void;
+  /**
+   * When provided, the trigger button is hidden and the parent controls
+   * open state (used to launch the dialog from the Narzędzia dropdown).
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
-export function RemapCsvDialog({ projectId, defaults, onDone }: Props) {
+export function RemapCsvDialog({ projectId, defaults, onDone, open: openProp, onOpenChange }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? !!openProp : openInternal;
+  const setOpen = (v: boolean) => {
+    if (!controlled) setOpenInternal(v);
+    onOpenChange?.(v);
+  };
   const [csv, setCsv] = useState<RawCsv | null>(null);
   const [keyField, setKeyField] = useState<Field>("ext_id");
   const [keyColumn, setKeyColumn] = useState<string>("");
@@ -159,10 +171,12 @@ export function RemapCsvDialog({ projectId, defaults, onDone }: Props) {
         if (!v) reset();
       }}
     >
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Wand2 className="h-4 w-4 mr-2" />
-        Uzupełnij dane z CSV
-      </Button>
+      {!controlled && (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Wand2 className="h-4 w-4 mr-2" />
+          Uzupełnij dane z CSV
+        </Button>
+      )}
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Uzupełnij dane z CSV</DialogTitle>

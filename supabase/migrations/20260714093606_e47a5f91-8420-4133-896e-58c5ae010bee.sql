@@ -1,0 +1,2 @@
+ALTER TYPE public.bulk_job_kind ADD VALUE IF NOT EXISTS 'PIM_AUDIT';
+ALTER TABLE public.enrichments ADD COLUMN IF NOT EXISTS audit jsonb DEFAULT NULL;

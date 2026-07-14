@@ -15,6 +15,7 @@ export const BULK_JOB_KIND_LABELS: Record<string, string> = {
   PIM_ALLEGRO_DESCRIPTION: "Opisy Allegro",
   PIM_RESCRAPE: "Doscrapowanie źródeł",
   PIM_IMAGE_VERIFY: "Weryfikacja zdjęć AI",
+  PIM_AUDIT: "Audyt AI",
 };
 
 type EventRow = {

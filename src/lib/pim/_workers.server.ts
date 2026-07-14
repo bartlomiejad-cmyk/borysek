@@ -28,6 +28,16 @@ import {
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
 import { advancePipelineStatus } from "./pipeline-status";
+import {
+  auditChecks,
+  AUDIT_SYSTEM_PROMPT,
+  buildAuditUserPrompt,
+  combineAuditVerdict,
+  verdictToReviewStatus,
+  visibleText,
+  type AuditLlmResult,
+  type AuditResult,
+} from "./audit";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -3413,5 +3423,215 @@ export async function runPimImageVerify(
   await emit(ctx, {
     level: failed > 0 && succeeded === 0 ? "error" : "success",
     message: `✅ Weryfikacja: OK ${succeeded}, błędy ${failed}`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// runPimAudit — deterministic checks + LLM cross-check for a single product.
+// Eligible when pipeline_status is GOLDEN_READY or VISUALS_READY. Skips
+// products still in earlier stages. Runs on manually locked products too —
+// it never modifies golden data, only enrichments.audit and review_status.
+// ---------------------------------------------------------------------------
+export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<void> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+  const { data: product, error: pErr } = await supabaseAdmin
+    .from("source_products")
+    .select("id, project_id, nazwa, ean, pipeline_status, review_status")
+    .eq("id", productId)
+    .single();
+  if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  const ps = (product as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED";
+  if (ps !== "GOLDEN_READY" && ps !== "VISUALS_READY") {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (etap ${ps}): ${product.nazwa ?? productId} — audyt wymaga złotego rekordu`,
+    });
+    return;
+  }
+
+  const { data: enrichment } = await supabaseAdmin
+    .from("enrichments")
+    .select(
+      "id, golden_name, golden_slug, golden_meta_description, golden_description, golden_features, data_sufficiency, score_breakdown, picked_urls, pinned_main_url, regenerated_main_image, image_scores, quality",
+    )
+    .eq("source_product_id", product.id)
+    .maybeSingle();
+  if (!enrichment) {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (brak enrichment): ${product.nazwa ?? productId}`,
+    });
+    return;
+  }
+
+  const en = enrichment as typeof enrichment & {
+    id: string;
+    golden_name?: string | null;
+    golden_slug?: string | null;
+    golden_meta_description?: string | null;
+    golden_description?: string | null;
+    golden_features?: Array<{ key: string; value: string }> | null;
+    data_sufficiency?: "full" | "partial" | "poor" | null;
+    score_breakdown?: Array<{ url: string; total: number; ean_confirmed?: boolean }> | null;
+    picked_urls?: string[] | null;
+    pinned_main_url?: string | null;
+    regenerated_main_image?: string | null;
+    image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string | null }> | null;
+    quality?: { watermark_urls?: string[]; name_mismatch?: boolean } | null;
+  };
+
+  await emit(ctx, {
+    level: "info",
+    message: `🔎 Audyt AI: „${en.golden_name ?? product.nazwa ?? productId}"…`,
+  });
+
+  // Phase 1 — deterministic checks.
+  const checks = auditChecks({
+    golden_name: en.golden_name,
+    golden_slug: en.golden_slug,
+    golden_meta_description: en.golden_meta_description,
+    golden_description: en.golden_description,
+    golden_features: en.golden_features,
+    data_sufficiency: en.data_sufficiency,
+    ean: (product as { ean?: string | null }).ean,
+    score_breakdown: en.score_breakdown,
+    pinned_main_url: en.pinned_main_url,
+    regenerated_main_image: en.regenerated_main_image,
+    image_scores: en.image_scores,
+    quality: en.quality,
+  });
+
+  const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;
+
+  // Phase 2 — LLM cross-check, only when Phase 1 passed golden_complete.
+  let llm: AuditLlmResult | null = null;
+  if (goldenComplete) {
+    const { data: projRow } = await supabaseAdmin
+      .from("projects")
+      .select("settings")
+      .eq("id", product.project_id)
+      .single();
+    const clientGuidelines =
+      ((projRow?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+
+    // Top 2 picked sources by score (falls back to picked_urls order).
+    const picked = (en.picked_urls ?? []) as string[];
+    const scoreByUrl = new Map<string, number>();
+    for (const b of en.score_breakdown ?? []) scoreByUrl.set(b.url, b.total ?? 0);
+    const topUrls = [...picked]
+      .sort((a, b) => (scoreByUrl.get(b) ?? 0) - (scoreByUrl.get(a) ?? 0))
+      .slice(0, 2);
+
+    const { data: srcRows } = topUrls.length
+      ? await supabaseAdmin
+          .from("product_sources")
+          .select("url, title, description")
+          .in("url", topUrls)
+      : { data: [] as Array<{ url: string; title: string | null; description: string | null }> };
+
+    const userPrompt = buildAuditUserPrompt({
+      goldenName: (en.golden_name ?? "").trim(),
+      goldenDescriptionVisible: visibleText(en.golden_description ?? ""),
+      features: en.golden_features ?? [],
+      topSources: (srcRows ?? []) as Array<{
+        url: string;
+        title: string | null;
+        description: string | null;
+      }>,
+      clientGuidelines,
+    });
+
+    try {
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Lovable-API-Key": apiKey,
+          "X-Lovable-AIG-SDK": "raw",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: AUDIT_SYSTEM_PROMPT },
+            { role: "user", content: userPrompt },
+          ],
+        }),
+      });
+      if (res.status === 429) throw new Error("RATE_LIMIT");
+      if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
+      if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+      const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const raw = json.choices?.[0]?.message?.content ?? "{}";
+      const parsed = JSON.parse(raw) as Partial<AuditLlmResult>;
+      llm = {
+        factual_issues: Array.isArray(parsed.factual_issues)
+          ? parsed.factual_issues.slice(0, 10).map(String)
+          : [],
+        guideline_violations: Array.isArray(parsed.guideline_violations)
+          ? parsed.guideline_violations.slice(0, 10).map(String)
+          : [],
+        style_issues: Array.isArray(parsed.style_issues)
+          ? parsed.style_issues.slice(0, 10).map(String)
+          : [],
+        verdict:
+          parsed.verdict === "pass" || parsed.verdict === "warn" || parsed.verdict === "fail"
+            ? parsed.verdict
+            : "warn",
+      };
+    } catch (e) {
+      await emit(ctx, {
+        level: "warn",
+        message: `Audyt LLM pominięty: ${e instanceof Error ? e.message : "błąd"}`,
+      });
+      llm = null;
+    }
+  } else {
+    await emit(ctx, {
+      level: "warn",
+      message: "Pominięto weryfikację LLM — złoty rekord niekompletny",
+    });
+  }
+
+  const verdict = combineAuditVerdict(checks, llm);
+  const result: AuditResult = {
+    at: new Date().toISOString(),
+    checks,
+    llm,
+    verdict,
+  };
+
+  const { error: upErr } = await supabaseAdmin
+    .from("enrichments")
+    .update({ audit: result as never } as never)
+    .eq("id", en.id);
+  if (upErr) throw new Error(upErr.message);
+
+  const nextReview = verdictToReviewStatus(
+    (product as { review_status?: string | null }).review_status ?? null,
+    verdict,
+  );
+  if (nextReview) {
+    await supabaseAdmin
+      .from("source_products")
+      .update({ review_status: nextReview } as never)
+      .eq("id", product.id);
+  }
+
+  const summary =
+    verdict === "pass"
+      ? "✅ Audyt: OK"
+      : verdict === "warn"
+        ? "⚠ Audyt: ostrzeżenia — do przeglądu"
+        : "❌ Audyt: błędy — do przeglądu";
+  const failedNames = checks
+    .filter((c) => !c.ok)
+    .map((c) => c.check)
+    .join(", ");
+  await emit(ctx, {
+    level: verdict === "fail" ? "error" : verdict === "warn" ? "warn" : "success",
+    message: `${summary}${failedNames ? ` · ${failedNames}` : ""}`,
   });
 }

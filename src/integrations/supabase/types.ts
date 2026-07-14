@@ -163,6 +163,7 @@ export type Database = {
           ai_gallery_urls: Json
           allegro_description: string | null
           allegro_generated_at: string | null
+          audit: Json | null
           data_sufficiency: string | null
           error: string | null
           generated_at: string | null
@@ -196,6 +197,7 @@ export type Database = {
           ai_gallery_urls?: Json
           allegro_description?: string | null
           allegro_generated_at?: string | null
+          audit?: Json | null
           data_sufficiency?: string | null
           error?: string | null
           generated_at?: string | null
@@ -229,6 +231,7 @@ export type Database = {
           ai_gallery_urls?: Json
           allegro_description?: string | null
           allegro_generated_at?: string | null
+          audit?: Json | null
           data_sufficiency?: string | null
           error?: string | null
           generated_at?: string | null
@@ -680,6 +683,7 @@ export type Database = {
         | "PIM_ALLEGRO_DESCRIPTION"
         | "PIM_RESCRAPE"
         | "PIM_IMAGE_VERIFY"
+        | "PIM_AUDIT"
       bulk_job_status:
         | "PENDING"
         | "PROCESSING"
@@ -834,6 +838,7 @@ export const Constants = {
         "PIM_ALLEGRO_DESCRIPTION",
         "PIM_RESCRAPE",
         "PIM_IMAGE_VERIFY",
+        "PIM_AUDIT",
       ],
       bulk_job_status: [
         "PENDING",
