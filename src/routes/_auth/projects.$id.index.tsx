@@ -376,6 +376,10 @@ function ProjectPage() {
       if (filter === "LOCKED") {
         if (!(p as { manual_lock?: boolean }).manual_lock) return false;
       }
+      if (filter === "REVIEW") {
+        const rs = (p as { review_status?: string | null }).review_status ?? "NONE";
+        if (rs !== "AI_FLAGGED" && rs !== "NEEDS_REVIEW") return false;
+      }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
@@ -395,6 +399,62 @@ function ProjectPage() {
   useEffect(() => {
     if (page !== 1) updateSearch({ page: 1 });
   }, [filter, search, pageSize]);
+
+  const handleStageClick = (s: Exclude<StageKey, "NONE">) => {
+    if (stage === s) {
+      // Toggle off — clear filter.
+      updateSearch({ stage: "NONE", filter: "ALL", page: 1 });
+    } else {
+      updateSearch({ stage: s, filter: stageToFilter(s), page: 1 });
+    }
+  };
+
+  const runFirecrawl = async () => {
+    if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
+    try {
+      const res = await firecrawlFn({ data: { projectId: id, onlyMissing: true } });
+      toast.success(`Uruchomiono w tle: ${res.total} produktów.`);
+      qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
+    }
+  };
+
+  const runReclean = async () => {
+    try {
+      const res = await recleanFn({ data: { projectId: id } });
+      toast.success(
+        `Wyczyszczono: ${res.updated}/${res.scanned} źródeł, usunięto ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków opisu.`,
+      );
+      qc.invalidateQueries({ queryKey: ["project", id] });
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
+    }
+  };
+
+  const handleStagePrimary = (s: Exclude<StageKey, "NONE">) => {
+    switch (s) {
+      case "IMPORT":
+        // Ensure Import cards are visible.
+        if (stage !== "IMPORT") updateSearch({ stage: "IMPORT", filter: "ALL", page: 1 });
+        break;
+      case "SOURCES":
+        void runFirecrawl();
+        break;
+      case "MATCH":
+        matchMut.mutate();
+        break;
+      case "CONTENT":
+        void generateAll();
+        break;
+      case "MEDIA":
+        void regenerateAll();
+        break;
+      case "REVIEW":
+        setVerifyOpen(true);
+        break;
+    }
+  };
 
   const toggleSelected = (pid: string) => {
     setSelectedIds((prev) => {
