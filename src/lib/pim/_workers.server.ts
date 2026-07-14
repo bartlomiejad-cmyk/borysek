@@ -2523,6 +2523,13 @@ export async function runPimRescrape(productId: string, ctx?: WorkerCtx): Promis
     level: "success",
     message: `✅ ${nazwa} — doscrapowanie: +${newlyScraped.length} źródeł, przeliczono scoring (runda ${rounds + 1}/2)`,
   });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "rescrape",
+    message: `Doscrapowanie runda ${rounds + 1}/2: dodano ${newlyScraped.length} źródeł`,
+    meta: { round: rounds + 1, added_urls: newlyScraped, count: newlyScraped.length },
+  });
 }
 
 // Single-product rescorer. Mirrors the scoring block from runMatching but for
