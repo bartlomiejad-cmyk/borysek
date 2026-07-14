@@ -224,6 +224,27 @@ export function auditChecks(input: AuditInput): AuditCheck[] {
   }
 
   // f) data_sufficiency_ok
+  // e2) viz_qc_ok — warn if ANY lifestyle visualisation failed Vision QC.
+  {
+    const vizMap = input.viz_qc ?? {};
+    const failedUrls = Object.entries(vizMap)
+      .filter(([, v]) => v && v.passed === false)
+      .map(([u]) => u);
+    if (failedUrls.length) {
+      const firstIssue = Object.values(vizMap)
+        .flatMap((v) => (v?.issues ?? []))
+        .find(Boolean);
+      checks.push({
+        check: "viz_qc_ok",
+        ok: false,
+        severity: "warn",
+        detail: `${failedUrls.length} wizualizacj${failedUrls.length === 1 ? "a" : "e"} nie zgadza się z referencją${firstIssue ? `: ${String(firstIssue).slice(0, 140)}` : ""}`,
+      });
+    } else {
+      checks.push({ check: "viz_qc_ok", ok: true, severity: "warn" });
+    }
+  }
+
   const ds = input.data_sufficiency ?? "full";
   if (ds === "full") {
     checks.push({ check: "data_sufficiency_ok", ok: true, severity: "warn" });
@@ -335,6 +356,7 @@ export const AUDIT_CHECK_LABELS: Record<AuditCheckKey, string> = {
   ean_valid: "Poprawność EAN",
   sources_ok: "Silne źródła",
   main_image_ok: "Główne zdjęcie",
+  viz_qc_ok: "QC wizualizacji",
   data_sufficiency_ok: "Wystarczalność danych",
 };
 
