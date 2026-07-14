@@ -45,6 +45,9 @@ type ImgScore = {
   is_banner_or_trash: boolean;
   identity?: "same" | "different" | "unsure";
   manual_keep?: boolean;
+  w?: number;
+  h?: number;
+  large_url?: string;
 };
 type ImgMeta = { w: number; h: number };
 
