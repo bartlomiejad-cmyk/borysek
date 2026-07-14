@@ -1945,6 +1945,7 @@ function VizAnalysisPanel({
 function eventIcon(kind: string): string {
   switch (kind) {
     case "discovery_search": return "🔎";
+    case "ai_preselect": return "🎯";
     case "discovery_scrape": return "🧾";
     case "matching_done": return "🧩";
     case "rescrape": return "🔁";
