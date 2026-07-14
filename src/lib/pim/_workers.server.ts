@@ -2671,7 +2671,7 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw")
+    .select("id, project_id, nazwa, raw, product_notes")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
@@ -2679,6 +2679,15 @@ export async function runPimVisualization(
   const productDesc = (((product as { raw?: { opis?: string | null; description?: string | null } | null }).raw?.opis
     ?? (product as { raw?: { description?: string | null } | null }).raw?.description
     ?? "") as string).trim();
+  const productNotes = ((product as { product_notes?: string | null }).product_notes ?? "").trim();
+
+  const { data: projRow } = await supabaseAdmin
+    .from("projects")
+    .select("settings")
+    .eq("id", (product as { project_id: string }).project_id)
+    .single();
+  const clientGuidelines =
+    ((projRow?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "").trim();
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
@@ -2749,6 +2758,8 @@ export async function runPimVisualization(
         productDesc: descForPrompt,
         requirementsPl,
         projectStyle,
+        clientGuidelines,
+        productNotes,
       });
       lifePrompt = built.lifestyle_prompt;
     } catch (err) {
