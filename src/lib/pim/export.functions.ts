@@ -7,7 +7,14 @@ import { sanitizeAllegroHtml } from "./seo";
 
 export const exportProject = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ projectId: z.string().uuid() }).parse(i))
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        approvedOnly: z.boolean().optional(),
+      })
+      .parse(i),
+  )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
 
@@ -18,10 +25,13 @@ export const exportProject = createServerFn({ method: "GET" })
       .single();
     const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
 
-    const { data: products, error } = await supabase
+    let prodQ = supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean")
+      .select("id, ext_id, nazwa, kod, ean, review_status")
       .eq("project_id", data.projectId)
+      ;
+    if (data.approvedOnly) prodQ = prodQ.eq("review_status", "APPROVED");
+    const { data: products, error } = await prodQ
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
     const { data: ens } = await supabase
