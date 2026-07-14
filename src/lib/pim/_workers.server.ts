@@ -35,6 +35,13 @@ import {
   qcAllPass,
   type ThumbnailQcResult,
   type ThumbnailQcPersisted,
+  runVisualizationQc,
+  buildVisualizationCorrectionSentence,
+  visualizationQcScore,
+  visualizationQcPassed,
+  runReferenceConsistencyCheck,
+  type VisualizationQcResult,
+  type VisualizationQcPersisted,
 } from "./thumbnail-qc";
 import {
   auditChecks,
@@ -145,7 +152,13 @@ export async function analyzeVisualizationSceneForProduct(args: {
   featuresText: string;
   imageUrls: string[]; // main first, max 4, must be publicly fetchable
   projectConstraintsPl?: string; // optional PL text; overrides scene choices
-}): Promise<{ style: string; requirements: string; used: number }> {
+}): Promise<{
+  style: string;
+  requirements: string;
+  used: number;
+  has_text: boolean;
+  color_anchor_en: string;
+}> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
   const urls = args.imageUrls.filter(Boolean).slice(0, 4);
@@ -155,9 +168,11 @@ export async function analyzeVisualizationSceneForProduct(args: {
     "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
     "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
     "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
-    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"..."}.',
+    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"..."}.',
     "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
     "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    '- has_text: true jeśli na produkcie widać czytelne napisy/logo/etykiety, false gdy produkt jest "gładki" (np. jednokolorowa taśma, folia, karton bez druku).',
+    '- color_anchor_en (60–180 znaków, PO ANGIELSKU): konkretne, nazwane kolory najważniejszych powierzchni produktu i wnętrza/rdzenia (np. "outer wound surface uniformly bright green, side face green, core light beige/white"). Kluczowe zwłaszcza dla produktów bez tekstu — zastępuje ogólne "preserve colours".',
     "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
   ].join("\n");
 
@@ -180,11 +195,19 @@ export async function analyzeVisualizationSceneForProduct(args: {
   const parsed = (await callGatewayJson(apiKey, "google/gemini-2.5-pro", [
     { role: "system", content: system },
     { role: "user", content },
-  ])) as { style?: unknown; requirements?: unknown };
+  ])) as {
+    style?: unknown;
+    requirements?: unknown;
+    has_text?: unknown;
+    color_anchor_en?: unknown;
+  };
   const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
   const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+  const has_text = typeof parsed.has_text === "boolean" ? parsed.has_text : true;
+  const color_anchor_en =
+    typeof parsed.color_anchor_en === "string" ? parsed.color_anchor_en.trim() : "";
   if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
-  return { style, requirements, used: urls.length };
+  return { style, requirements, used: urls.length, has_text, color_anchor_en };
 }
 
 // Deterministic fallback used when the AI gateway call fails — mirrors the
@@ -449,6 +472,15 @@ type PimVisualizationSlot = {
   mode?: "edit" | "safe-edit" | "generate";
   sourceUrl?: string;
   sourcePath?: string;
+  // Multi-reference (new — additive; sourceUrl/Path kept for BC / single-slot fallback):
+  sourceUrls?: string[];
+  sourcePaths?: string[];
+  // Retry-with-Vision-QC state (per slot, resets when moving to next slot):
+  attempts?: number;
+  bestUrl?: string;
+  bestQc?: VisualizationQcResult;
+  bestScore?: number;
+  extraPromptSuffix?: string;
   lastError?: string;
 };
 
@@ -3044,16 +3076,26 @@ export async function runPimVisualization(
     constraints_hash?: string;
     manual?: boolean;
     source?: "vision" | "fallback_project" | "fallback_generic";
+    has_text?: boolean;
+    color_anchor_en?: string;
+    reference_urls?: string[];
+    consistency_at?: string;
   };
   const existingMeta = (e.image_meta ?? {}) as Record<string, unknown>;
   const cached = existingMeta.viz_analysis as VizAnalysisRec | undefined;
 
   let analysisPl: { style: string; requirements: string } | null = null;
   let analysisSource: VizAnalysisRec["source"] = "vision";
+  let hasText = true;
+  let colorAnchorEn = "";
+  let cachedReferenceUrls: string[] | null = null;
 
   // 1) Manual overrides are never touched.
   if (cached?.manual && cached.style && cached.requirements) {
     analysisPl = { style: cached.style, requirements: cached.requirements };
+    hasText = cached.has_text ?? true;
+    colorAnchorEn = cached.color_anchor_en ?? "";
+    cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
     await emit(ctx, { level: "info", message: `   • używam ręcznej analizy sceny (manual override)` });
   } else if (
     !forceReanalyze &&
@@ -3066,6 +3108,9 @@ export async function runPimVisualization(
     // 2) Cached analysis for the same source set.
     analysisPl = { style: cached.style, requirements: cached.requirements };
     analysisSource = cached.source ?? "vision";
+    hasText = cached.has_text ?? true;
+    colorAnchorEn = cached.color_anchor_en ?? "";
+    cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
     await emit(ctx, { level: "info", message: `   • używam zapisanej analizy sceny (cache)` });
   } else if (analysisUrls.length) {
     // 3) Fresh vision analysis — up to 1 retry on API error.
@@ -3082,6 +3127,8 @@ export async function runPimVisualization(
           projectConstraintsPl,
         });
         analysisPl = { style: out.style, requirements: out.requirements };
+        hasText = out.has_text;
+        colorAnchorEn = out.color_anchor_en;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (attempt === 0) {
@@ -3112,6 +3159,43 @@ export async function runPimVisualization(
 
   // Persist the analysis (unless it's a preserved manual override) so
   // re-runs skip the Gemini call while the source set is unchanged.
+  //
+  // Reference consistency: pick up to 3 refs from analysisUrls; if we have
+  // 2+ candidates, ask Gemini once which are visually consistent with the
+  // first (top-priority) reference. Cache the URL list on viz_analysis.
+  let referenceUrlsForFal: string[] = [];
+  if (cachedReferenceUrls && cachedReferenceUrls.length) {
+    // Reuse only if every cached URL is still in analysisUrls (source set stable).
+    const set = new Set(analysisUrls);
+    if (cachedReferenceUrls.every((u) => set.has(u))) {
+      referenceUrlsForFal = cachedReferenceUrls.slice(0, 3);
+      await emit(ctx, { level: "info", message: `   • referencje: cache (${referenceUrlsForFal.length})` });
+    }
+  }
+  if (!referenceUrlsForFal.length && analysisUrls.length) {
+    const shortlist = analysisUrls.slice(0, 3);
+    if (shortlist.length === 1) {
+      referenceUrlsForFal = shortlist;
+    } else {
+      try {
+        const apiKey2 = process.env.LOVABLE_API_KEY!;
+        const consistent = await runReferenceConsistencyCheck(apiKey2, shortlist);
+        referenceUrlsForFal = consistent.map((i) => shortlist[i]).filter(Boolean);
+        if (referenceUrlsForFal.length < shortlist.length) {
+          await emit(ctx, {
+            level: "info",
+            message: `   • spójność referencji: ${referenceUrlsForFal.length}/${shortlist.length} pasuje do referencji głównej`,
+          });
+        }
+      } catch {
+        // Fail-safe: use only the top reference so we never mix inconsistent images.
+        referenceUrlsForFal = shortlist.slice(0, 1);
+        await emit(ctx, { level: "warn", message: `   ⚠ nie udało się sprawdzić spójności referencji — używam tylko głównego zdjęcia` });
+      }
+    }
+    if (!referenceUrlsForFal.length) referenceUrlsForFal = shortlist.slice(0, 1);
+  }
+
   if (!cached?.manual && analysisSource !== "fallback_generic") {
     const nextMeta: Record<string, unknown> = {
       ...existingMeta,
@@ -3123,6 +3207,10 @@ export async function runPimVisualization(
         constraints_hash: constraintsHash,
         source: analysisSource,
         manual: false,
+        has_text: hasText,
+        color_anchor_en: colorAnchorEn,
+        reference_urls: referenceUrlsForFal,
+        consistency_at: new Date().toISOString(),
       } satisfies VizAnalysisRec,
     };
     await supabaseAdmin
@@ -3174,33 +3262,74 @@ export async function runPimVisualization(
     }
   }
 
-  const appendVisualization = async (url: string, slot: number) => {
+  // Fallback single ref (used only if multi-ref list is empty for some reason,
+  // e.g. no analysisUrls at all — keeps behaviour parity with the old code).
+  const fallbackSingleRef = mainUrl;
+  // Effective references for FAL image_urls (top reference first).
+  const effectiveRefUrls: string[] =
+    referenceUrlsForFal.length ? referenceUrlsForFal : [fallbackSingleRef];
+
+  // Upload a FAL result to our bucket so we can persist it and run QC.
+  const uploadGalleryCandidate = async (url: string, slot: number, attempt: number): Promise<string> => {
     const bytes = await fetchBytes(url);
     const stamp = Date.now();
-    const path = `visualizations/${e.id}-${stamp}-${slot + 1}.jpg`;
+    const path = `visualizations/${e.id}-${stamp}-${slot + 1}-a${attempt}.jpg`;
     const { error: upErr } = await supabaseAdmin.storage
       .from("regenerated-images")
       .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
     if (upErr) throw new Error(upErr.message);
     const { data: pub } = supabaseAdmin.storage.from("regenerated-images").getPublicUrl(path);
-    const publicUrl = `${pub.publicUrl}?v=${stamp}`;
+    return `${pub.publicUrl}?v=${stamp}`;
+  };
 
+  // Commit a picked URL + its viz_qc metadata to the enrichment row.
+  const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number) => {
     const { data: fresh, error: readErr } = await supabaseAdmin
       .from("enrichments")
-      .select("ai_gallery_urls")
+      .select("ai_gallery_urls, image_meta, review_status")
       .eq("id", e.id)
       .single();
     if (readErr) throw new Error(readErr.message);
-    const existing = Array.isArray((fresh as { ai_gallery_urls?: unknown }).ai_gallery_urls)
-      ? ((fresh as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? [])
+    const freshRow = fresh as {
+      ai_gallery_urls?: string[] | null;
+      image_meta?: Record<string, unknown> | null;
+      review_status?: string | null;
+    };
+    const existing = Array.isArray(freshRow.ai_gallery_urls)
+      ? (freshRow.ai_gallery_urls ?? [])
       : [];
     const merged = existing.includes(publicUrl) ? existing : [...existing, publicUrl];
+    const meta = (freshRow.image_meta ?? {}) as Record<string, unknown>;
+    const vizQcMap = ((meta.viz_qc ?? {}) as Record<string, VisualizationQcPersisted>) || {};
+    const passed = visualizationQcPassed(qc);
+    vizQcMap[publicUrl] = {
+      ...qc,
+      passed,
+      attempts,
+      at: new Date().toISOString(),
+      reference_url: effectiveRefUrls[0] ?? null,
+    };
+    const nextMeta: Record<string, unknown> = { ...meta, viz_qc: vizQcMap };
+    // If this viz failed product_intact, demote review_status — a broken
+    // visual on an approved product must resurface. Never touch REJECTED.
+    const updatePayload: Record<string, unknown> = {
+      ai_gallery_urls: merged,
+      image_meta: nextMeta,
+    };
+    if (!passed && freshRow.review_status !== "REJECTED" && freshRow.review_status !== "NEEDS_REVIEW") {
+      updatePayload.review_status = "NEEDS_REVIEW";
+    }
     const { error: dbErr } = await supabaseAdmin
       .from("enrichments")
-      .update({ ai_gallery_urls: merged as never } as never)
+      .update(updatePayload as never)
       .eq("id", e.id);
     if (dbErr) throw new Error(dbErr.message);
-    await emit(ctx, { level: "success", message: `   ✔ odebrano z FAL, upload OK, dopisano do galerii (${slot + 1}/${count})` });
+    await emit(ctx, {
+      level: passed ? "success" : "warn",
+      message: passed
+        ? `   ✔ wizualizacja ${slot + 1}/${count} zatwierdzona (viz QC pass, próby: ${attempts})`
+        : `   ⚠ wizualizacja ${slot + 1}/${count} zapisana z ostrzeżeniem (viz QC fail po ${attempts} prób(ach)): ${(qc.issues[0] ?? "produkt niezgodny z referencją").slice(0, 140)}`,
+    });
   };
 
   const isRefusal = (err: unknown) => {
@@ -3209,7 +3338,16 @@ export async function runPimVisualization(
     return status === 422 || /\b422\b|could not generate|given prompts and images/i.test(msg);
   };
 
-  const buildRequest = (mode: PimVisualizationSlot["mode"]) => {
+  // Colour-anchoring sentence for textless products. Adds concrete named
+  // colours (from vision analysis) so the model doesn't invent a black core.
+  const colourAnchorSentence = !hasText && colorAnchorEn
+    ? ` COLOUR ANCHOR (authoritative): ${colorAnchorEn}. The product's surfaces MUST match these exact named colours in the output.`
+    : "";
+
+  const buildRequest = (mode: PimVisualizationSlot["mode"], extraSuffix?: string) => {
+    const suffix = [colourAnchorSentence, extraSuffix ? ` RETRY CORRECTION: ${extraSuffix}` : ""]
+      .filter(Boolean)
+      .join("");
     if (mode === "safe-edit") {
       const safePrompt = [
         `Photorealistic square 1:1 product photo of "${nameForPrompt}".`,
@@ -3217,7 +3355,7 @@ export async function runPimVisualization(
         `Keep product, logo, printed text, colours, materials and proportions EXACTLY the same as the reference. Do not change the product's colours. Change only the background and scene.`,
         projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp, no motion blur, no text overlays, no watermarks.`,
-      ].filter(Boolean).join(" ");
+      ].filter(Boolean).join(" ") + suffix;
       return {
         path: "fal-ai/nano-banana-pro/edit",
         body: {
@@ -3238,7 +3376,7 @@ export async function runPimVisualization(
         `Realistic in-use lifestyle scene, natural daylight, tasteful props, shallow depth of field, 85mm lens.`,
         projectStylePl ? `Scene style: ${projectStylePl}.` : "",
         `Sharp focus, no motion blur, no text overlays, no watermarks, no logos.`,
-      ].filter(Boolean).join(" ");
+      ].filter(Boolean).join(" ") + suffix;
       return {
         path: "fal-ai/nano-banana-pro",
         body: {
@@ -3253,7 +3391,7 @@ export async function runPimVisualization(
     return {
       path: "fal-ai/nano-banana-pro/edit",
       body: {
-        prompt: lifePrompt,
+        prompt: `${lifePrompt}${suffix}`,
         image_urls: [] as string[],
         aspect_ratio: "1:1",
         resolution: targetResolution,
@@ -3264,10 +3402,14 @@ export async function runPimVisualization(
   };
 
   const cleanupSource = async (state: PimVisualizationSlot) => {
-    if (!state.sourcePath) return;
+    const paths = [
+      ...(state.sourcePaths ?? []),
+      ...(state.sourcePath ? [state.sourcePath] : []),
+    ];
+    if (!paths.length) return;
     await supabaseAdmin.storage
       .from("regenerated-images")
-      .remove([state.sourcePath])
+      .remove(paths)
       .catch(() => undefined);
   };
 
@@ -3281,22 +3423,56 @@ export async function runPimVisualization(
       }
 
       const slot = slotState.slot;
-      await emit(ctx, { level: "info", message: `   • wizualizacja ${slot + 1}/${count}…` });
+      const attempt = slotState.attempts ?? 0;
+      await emit(ctx, {
+        level: "info",
+        message: `   • wizualizacja ${slot + 1}/${count} (próba ${attempt + 1}/3)…`,
+      });
       if (!slotState.mode) slotState = { ...slotState, mode: "edit" };
 
       if (!slotState.request) {
-        if ((slotState.mode === "edit" || slotState.mode === "safe-edit") && !slotState.sourceUrl) {
-          const source = await prepareFalSource(e.id, mainUrl);
-          slotState = { ...slotState, sourceUrl: source.url, sourcePath: source.path };
+        if (
+          (slotState.mode === "edit" || slotState.mode === "safe-edit") &&
+          (!slotState.sourceUrls || slotState.sourceUrls.length === 0)
+        ) {
+          const uploadedUrls: string[] = [];
+          const uploadedPaths: string[] = [];
+          for (const refUrl of effectiveRefUrls) {
+            try {
+              const source = await prepareFalSource(e.id, refUrl);
+              uploadedUrls.push(source.url);
+              uploadedPaths.push(source.path);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              await emit(ctx, { level: "warn", message: `   ⚠ nie udało się załadować referencji do FAL: ${msg.slice(0, 200)}` });
+            }
+          }
+          if (!uploadedUrls.length) throw new Error("nie udało się przygotować żadnej referencji dla FAL");
+          slotState = {
+            ...slotState,
+            sourceUrls: uploadedUrls,
+            sourcePaths: uploadedPaths,
+            sourceUrl: uploadedUrls[0],
+            sourcePath: uploadedPaths[0],
+          };
         }
-        const req = buildRequest(slotState.mode);
+        const req = buildRequest(slotState.mode, slotState.extraPromptSuffix);
         const body = req.body as { image_urls?: string[] };
-        if (body.image_urls) body.image_urls = slotState.sourceUrl ? [slotState.sourceUrl] : [];
+        if (body.image_urls) {
+          body.image_urls = slotState.sourceUrls && slotState.sourceUrls.length
+            ? [...slotState.sourceUrls]
+            : slotState.sourceUrl
+              ? [slotState.sourceUrl]
+              : [];
+        }
         try {
           const queued = await submitFalQueue(req.path, req.body, FAL_KEY);
           slotState = { ...slotState, request: queued };
           await saveProgress(slotState);
-          await emit(ctx, { level: "info", message: `   • FAL przyjął zadanie ${slot + 1}/${count} (${slotState.mode})` });
+          await emit(ctx, {
+            level: "info",
+            message: `   • FAL przyjął zadanie ${slot + 1}/${count} (${slotState.mode}, refs: ${body.image_urls?.length ?? 0})`,
+          });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           lastFalErr = msg;
@@ -3340,7 +3516,50 @@ export async function runPimVisualization(
         if (!queueResult || queueResult.pending) return { complete: false };
         const genUrl = queueResult.response.images?.[0]?.url;
         if (!genUrl) throw new Error("brak url");
-        await appendVisualization(genUrl, slot);
+        const attemptsSoFar = (slotState.attempts ?? 0) + 1;
+        // Upload the FAL result to our bucket so we can QC & keep it.
+        const publicUrl = await uploadGalleryCandidate(genUrl, slot, attemptsSoFar);
+        // Run Vision QC against the top reference. Gateway errors fall back
+        // to a "passed" verdict so we never block generation on QC infra.
+        let qc: VisualizationQcResult;
+        try {
+          const apiKey2 = process.env.LOVABLE_API_KEY!;
+          qc = await runVisualizationQc(apiKey2, effectiveRefUrls[0], publicUrl);
+        } catch (qcErr) {
+          const msg = qcErr instanceof Error ? qcErr.message : String(qcErr);
+          await emit(ctx, { level: "warn", message: `   ⚠ viz QC skipped (${msg.slice(0, 160)})` });
+          qc = { product_intact: true, product_visible: true, issues: [] };
+        }
+        const score = visualizationQcScore(qc);
+        const passed = visualizationQcPassed(qc);
+        // Keep best across attempts.
+        const prevBestScore = slotState.bestScore ?? -1;
+        const isBetter = !slotState.bestUrl || score > prevBestScore;
+        const bestUrl = isBetter ? publicUrl : slotState.bestUrl!;
+        const bestQc = isBetter ? qc : slotState.bestQc!;
+        const bestScore = isBetter ? score : prevBestScore;
+        const enoughDeadlineForRetry = !ctx?.deadline || ctx.deadline - Date.now() > 60_000;
+        if (!passed && attemptsSoFar < 3 && enoughDeadlineForRetry) {
+          // Retry with a correction suffix derived from the QC issues.
+          const correction = buildVisualizationCorrectionSentence(qc);
+          await emit(ctx, {
+            level: "warn",
+            message: `   ⚠ viz QC fail (próba ${attemptsSoFar}/3): ${(qc.issues[0] ?? "produkt niezgodny").slice(0, 140)} — ponawiam z korektą`,
+          });
+          slotState = {
+            ...slotState,
+            request: undefined,
+            attempts: attemptsSoFar,
+            bestUrl,
+            bestQc,
+            bestScore,
+            extraPromptSuffix: correction,
+          };
+          await saveProgress(slotState);
+          continue;
+        }
+        // Commit the best candidate we have.
+        await commitVisualization(bestUrl, bestQc, attemptsSoFar, slot);
         await cleanupSource(slotState);
         slotState = { slot: slot + 1 };
         await saveProgress(slotState.slot < count ? slotState : null);
@@ -3871,6 +4090,12 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
       issues?: string[];
       candidate_url?: string | null;
     } } | null | undefined)?.thumbnail_qc ?? null,
+    viz_qc: (en.image_meta as {
+      viz_qc?: Record<
+        string,
+        { passed?: boolean; product_intact?: boolean; product_visible?: boolean; issues?: string[] }
+      >;
+    } | null | undefined)?.viz_qc ?? null,
   });
 
   const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;

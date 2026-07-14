@@ -25,6 +25,7 @@ export type AuditCheckKey =
   | "ean_valid"
   | "sources_ok"
   | "main_image_ok"
+  | "viz_qc_ok"
   | "data_sufficiency_ok";
 
 export type AuditCheck = {
@@ -81,6 +82,15 @@ export type AuditInput = {
     issues?: string[];
     candidate_url?: string | null;
   } | null;
+  /**
+   * Post-generation Vision QC results for lifestyle visualisations
+   * (persisted on `enrichments.image_meta.viz_qc` as a URL-keyed map). Any
+   * entry with `passed:false` demotes the audit to a warning.
+   */
+  viz_qc?: Record<
+    string,
+    { passed?: boolean; product_intact?: boolean; product_visible?: boolean; issues?: string[] }
+  > | null;
 };
 
 // --- Helpers ---------------------------------------------------------------
@@ -214,6 +224,27 @@ export function auditChecks(input: AuditInput): AuditCheck[] {
   }
 
   // f) data_sufficiency_ok
+  // e2) viz_qc_ok — warn if ANY lifestyle visualisation failed Vision QC.
+  {
+    const vizMap = input.viz_qc ?? {};
+    const failedUrls = Object.entries(vizMap)
+      .filter(([, v]) => v && v.passed === false)
+      .map(([u]) => u);
+    if (failedUrls.length) {
+      const firstIssue = Object.values(vizMap)
+        .flatMap((v) => (v?.issues ?? []))
+        .find(Boolean);
+      checks.push({
+        check: "viz_qc_ok",
+        ok: false,
+        severity: "warn",
+        detail: `${failedUrls.length} wizualizacj${failedUrls.length === 1 ? "a" : "e"} nie zgadza się z referencją${firstIssue ? `: ${String(firstIssue).slice(0, 140)}` : ""}`,
+      });
+    } else {
+      checks.push({ check: "viz_qc_ok", ok: true, severity: "warn" });
+    }
+  }
+
   const ds = input.data_sufficiency ?? "full";
   if (ds === "full") {
     checks.push({ check: "data_sufficiency_ok", ok: true, severity: "warn" });
@@ -325,6 +356,7 @@ export const AUDIT_CHECK_LABELS: Record<AuditCheckKey, string> = {
   ean_valid: "Poprawność EAN",
   sources_ok: "Silne źródła",
   main_image_ok: "Główne zdjęcie",
+  viz_qc_ok: "QC wizualizacji",
   data_sufficiency_ok: "Wystarczalność danych",
 };
 
