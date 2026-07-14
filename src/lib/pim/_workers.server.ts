@@ -2938,6 +2938,11 @@ export async function runPimVisualization(
     .single();
   const clientGuidelines =
     ((projRow?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "").trim();
+  const constraintsHash = await sha256Hex(JSON.stringify({
+    style: projectStylePl,
+    requirements: projectRequirementsPl,
+    client_guidelines: clientGuidelines,
+  }));
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
@@ -3036,6 +3041,7 @@ export async function runPimVisualization(
     requirements: string;
     at: string;
     source_urls_hash: string;
+    constraints_hash?: string;
     manual?: boolean;
     source?: "vision" | "fallback_project" | "fallback_generic";
   };
@@ -3054,6 +3060,7 @@ export async function runPimVisualization(
     cached?.style &&
     cached?.requirements &&
     cached.source_urls_hash === sourceUrlsHash &&
+    cached.constraints_hash === constraintsHash &&
     sourceUrlsHash
   ) {
     // 2) Cached analysis for the same source set.
@@ -3113,6 +3120,7 @@ export async function runPimVisualization(
         requirements: analysisPl.requirements,
         at: new Date().toISOString(),
         source_urls_hash: sourceUrlsHash,
+        constraints_hash: constraintsHash,
         source: analysisSource,
         manual: false,
       } satisfies VizAnalysisRec,
