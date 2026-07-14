@@ -8,6 +8,7 @@ import { getProductDetail, updateGoldenRecord, setImageManualKeep } from "@/lib/
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
+import { runAuditForProduct } from "@/lib/pim/audit.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
@@ -72,6 +73,7 @@ function ProductDetail() {
   const analyzeFn = useServerFn(analyzeProductImages);
   const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
+  const auditFn = useServerFn(runAuditForProduct);
   const regenFn = useServerFn(regenerateMainImage);
   const analyzeForPromptFn = useServerFn(analyzeProductImagesForPrompt);
   const clearRegenFn = useServerFn(clearRegeneratedImage);
@@ -328,6 +330,15 @@ function ProductDetail() {
     mutationFn: () => verifyFn({ data: { productId: pid } }),
     onSuccess: () => { toast.success("Weryfikacja zakończona"); invalidate(); },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
+  });
+
+  const audit = useMutation({
+    mutationFn: () => auditFn({ data: { productId: pid } }),
+    onSuccess: () => {
+      toast.success("Audyt AI zakończony");
+      invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, "Audyt AI nie powiódł się")),
   });
 
   const saveFeat = useMutation({
