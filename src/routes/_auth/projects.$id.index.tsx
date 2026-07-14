@@ -1670,6 +1670,10 @@ function ProjectPage() {
           (meta?.project as { visualization_requirements_pl?: string | null } | undefined)
             ?.visualization_requirements_pl ?? null
         }
+        projectSettings={
+          (meta?.project as { settings?: Record<string, unknown> | null } | undefined)
+            ?.settings ?? null
+        }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
       <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
