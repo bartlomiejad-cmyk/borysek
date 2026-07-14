@@ -616,10 +616,13 @@ export type Database = {
           ext_id: string | null
           id: string
           kod: string | null
+          manual_lock: boolean
           nazwa: string | null
+          pipeline_status: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes: string | null
           project_id: string
           raw: Json
+          review_status: Database["public"]["Enums"]["pim_review_status"]
         }
         Insert: {
           created_at?: string
@@ -627,10 +630,13 @@ export type Database = {
           ext_id?: string | null
           id?: string
           kod?: string | null
+          manual_lock?: boolean
           nazwa?: string | null
+          pipeline_status?: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes?: string | null
           project_id: string
           raw?: Json
+          review_status?: Database["public"]["Enums"]["pim_review_status"]
         }
         Update: {
           created_at?: string
@@ -638,10 +644,13 @@ export type Database = {
           ext_id?: string | null
           id?: string
           kod?: string | null
+          manual_lock?: boolean
           nazwa?: string | null
+          pipeline_status?: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes?: string | null
           project_id?: string
           raw?: Json
+          review_status?: Database["public"]["Enums"]["pim_review_status"]
         }
         Relationships: [
           {
@@ -680,6 +689,13 @@ export type Database = {
       main_image_rule: "ONLY_A" | "A_AND_B_EXISTING" | "COMPOSITE_A_AND_B"
       mapping_strategy: "EAN" | "NAZWA" | "HYBRID"
       match_type: "EAN_MATCH" | "NAME_MATCH" | "HYBRID_MATCH" | "NO_MATCH"
+      pim_pipeline_status:
+        | "IMPORTED"
+        | "SOURCES_FOUND"
+        | "MATCHED"
+        | "GOLDEN_READY"
+        | "VISUALS_READY"
+      pim_review_status: "NONE" | "AI_FLAGGED" | "NEEDS_REVIEW" | "APPROVED"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -828,6 +844,14 @@ export const Constants = {
       main_image_rule: ["ONLY_A", "A_AND_B_EXISTING", "COMPOSITE_A_AND_B"],
       mapping_strategy: ["EAN", "NAZWA", "HYBRID"],
       match_type: ["EAN_MATCH", "NAME_MATCH", "HYBRID_MATCH", "NO_MATCH"],
+      pim_pipeline_status: [
+        "IMPORTED",
+        "SOURCES_FOUND",
+        "MATCHED",
+        "GOLDEN_READY",
+        "VISUALS_READY",
+      ],
+      pim_review_status: ["NONE", "AI_FLAGGED", "NEEDS_REVIEW", "APPROVED"],
     },
   },
 } as const
