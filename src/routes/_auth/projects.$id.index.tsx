@@ -510,6 +510,24 @@ function ProjectPage() {
           </Button>
           <Button
             variant="outline"
+            onClick={() => setGuidelinesOpen(true)}
+            title="Ustalenia z klientem — wstrzykiwane do promptów AI"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Wytyczne klienta
+            {(() => {
+              const s = (meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings;
+              const filled = Boolean(s?.client_guidelines?.trim());
+              return (
+                <span
+                  className={`ml-2 inline-block h-2 w-2 rounded-full ${filled ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                  aria-label={filled ? "Wytyczne uzupełnione" : "Brak wytycznych"}
+                />
+              );
+            })()}
+          </Button>
+          <Button
+            variant="outline"
             disabled={!!discActive}
             onClick={async () => {
               if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
