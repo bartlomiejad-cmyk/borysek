@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { probeManySizes } from "./image-size.server";
+import { probeImageUrls } from "./image-probe.server";
 import {
   slugifyPl,
   clampName,
