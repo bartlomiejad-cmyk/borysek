@@ -967,7 +967,10 @@ function ProjectPage() {
               onChange={(e) => updateSearch({ search: e.target.value })}
               className="w-64"
             />
-            <Select value={filter} onValueChange={(v) => updateSearch({ filter: v as typeof filter })}>
+            <Select
+              value={filter}
+              onValueChange={(v) => updateSearch({ filter: v as typeof filter, stage: "NONE" })}
+            >
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">Wszystkie</SelectItem>
@@ -978,6 +981,7 @@ function ProjectPage() {
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
                 <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
                 <SelectItem value="LOCKED">🔒 Zablokowane (manual)</SelectItem>
+                <SelectItem value="REVIEW">Kolejka review</SelectItem>
                 <SelectItem value="PIPE_IMPORTED">Etap: Zaimportowany</SelectItem>
                 <SelectItem value="PIPE_SOURCES_FOUND">Etap: Źródła znalezione</SelectItem>
                 <SelectItem value="PIPE_MATCHED">Etap: Dopasowany</SelectItem>
@@ -988,6 +992,61 @@ function ProjectPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {stage !== "NONE" && stage !== "IMPORT" && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+              <span>
+                Filtr etapu aktywny — akcja poniżej dotyczy widocznych <b>{filtered.length}</b> produktów.
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {stage === "SOURCES" && (
+                  <Button size="sm" disabled={!!discActive} onClick={() => void runFirecrawl()}>
+                    <Sparkles className="h-4 w-4 mr-1" /> Wyszukaj źródła
+                  </Button>
+                )}
+                {stage === "MATCH" && (
+                  <Button size="sm" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
+                    <Play className="h-4 w-4 mr-1" /> Dopasuj
+                  </Button>
+                )}
+                {stage === "CONTENT" && (
+                  <Button
+                    size="sm"
+                    disabled={!!genActive}
+                    onClick={() => generateAll(filtered.map((p) => p.id))}
+                  >
+                    <Sparkles className="h-4 w-4 mr-1" /> Generuj złote rekordy
+                  </Button>
+                )}
+                {stage === "MEDIA" && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!!regenActive}
+                      onClick={() => regenerateAll(filtered.map((p) => p.id))}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-1" /> Regeneruj tła
+                    </Button>
+                    <Button size="sm" onClick={() => setVizOpen(true)} disabled={!!vizActive}>
+                      <Sparkles className="h-4 w-4 mr-1" /> Wizualizacje
+                    </Button>
+                  </>
+                )}
+                {stage === "REVIEW" && (
+                  <>
+                    <Button asChild size="sm" variant="outline">
+                      <Link to="/projects/$id/verify" params={{ id }}>
+                        <ShieldCheck className="h-4 w-4 mr-1" /> Widok weryfikacyjny
+                      </Link>
+                    </Button>
+                    <Button size="sm" onClick={() => setVerifyOpen(true)} disabled={!!verifyActive}>
+                      <RefreshCw className="h-4 w-4 mr-1" /> Weryfikuj zdjęcia AI
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {selectedIds.size > 0 && (
             <div className="sticky top-0 z-20 -mx-6 px-6 py-2 mb-3 bg-primary/10 border-y border-primary/30 flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">
