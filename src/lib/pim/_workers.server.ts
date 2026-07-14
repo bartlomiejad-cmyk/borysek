@@ -667,7 +667,15 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const rawName = sanitize(out.name, blacklist) ?? "";
     const name = clampName(rawName, 70);
     const rawDescription = sanitize(out.description, blacklist) ?? "";
-    const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
+    const rawMeta = sanitizeStr(out.meta_description ?? "");
+    const metaDescription = await finalizeMetaDescription(rawMeta, async (text) => {
+      const shortened = await callGatewayJson(apiKey, GOLDEN_MODEL, [
+        { role: "system", content: SHORTEN_META_SYSTEM_PROMPT },
+        { role: "user", content: text },
+      ]);
+      return (shortened as { meta_description?: string }).meta_description ?? "";
+    });
+    const dataSufficiency = out.data_sufficiency ?? null;
     // Re-slugify by ourselves — gwarantujemy poprawność niezależnie od tego co zwróciło AI.
     const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
     const slug = slugifyPl(slugSource, 75);
@@ -709,6 +717,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       generated_at: new Date().toISOString(),
       error: null,
       previous: previous as never,
+      data_sufficiency: dataSufficiency,
     };
     if (shouldWriteFeatures) updatePayload.golden_features = newFeatures;
 
