@@ -38,6 +38,7 @@ import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
 import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
+import { ClientGuidelinesDialog } from "@/components/pim/ClientGuidelinesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -168,6 +169,7 @@ function ProjectPage() {
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
