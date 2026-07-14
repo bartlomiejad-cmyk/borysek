@@ -769,6 +769,64 @@ function ProductDetail() {
                   </div>
                 );
               })()}
+              {(() => {
+                const qc = ((imageMeta as unknown as { thumbnail_qc?: {
+                  bg_white?: boolean;
+                  product_intact?: boolean;
+                  framing_ok?: boolean;
+                  issues?: string[];
+                  candidate_url?: string | null;
+                  attempts?: number;
+                } }).thumbnail_qc) ?? null;
+                if (!qc) return null;
+                const candidate = qc.candidate_url ?? null;
+                if (!candidate) return null;
+                const reasons: string[] = [];
+                if (qc.bg_white === false) reasons.push("tło nie jest białe");
+                if (qc.product_intact === false) reasons.push("produkt zmieniony vs. referencja");
+                if (qc.framing_ok === false) reasons.push("kadr poza normą");
+                const reasonsText = reasons.length ? reasons.join(", ") : "kontrola jakości";
+                return (
+                  <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-[11px] space-y-2">
+                    <div className="font-medium text-amber-800 dark:text-amber-300">
+                      Nowa miniatura nie przeszła kontroli jakości ({reasonsText})
+                    </div>
+                    {qc.issues && qc.issues.length > 0 && (
+                      <ul className="list-disc pl-4 text-muted-foreground">
+                        {qc.issues.slice(0, 3).map((iss, idx) => (
+                          <li key={idx}>{iss}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <a href={candidate} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={candidate}
+                        alt="Kandydat miniatury"
+                        className="w-full max-h-56 object-contain rounded border bg-white"
+                      />
+                    </a>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!enrichment || rejectQcMut.isPending || acceptQcMut.isPending}
+                        onClick={() => enrichment && rejectQcMut.mutate(enrichment.id)}
+                      >
+                        {rejectQcMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                        Odrzuć
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!enrichment || acceptQcMut.isPending || rejectQcMut.isPending}
+                        onClick={() => enrichment && acceptQcMut.mutate(enrichment.id)}
+                      >
+                        {acceptQcMut.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                        Użyj mimo to
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
               {regeneratedUrl && (
                 <a href={regeneratedUrl} target="_blank" rel="noreferrer" className="block">
                   <img
