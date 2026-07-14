@@ -165,6 +165,7 @@ function ProjectPage() {
   const cancelJobFn = useServerFn(cancelBulkJob);
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
   const recleanFn = useServerFn(recleanProductSources);
+  const setLockFn = useServerFn(setManualLock);
   const deleteProductsFn = useServerFn(deleteProducts);
 
   const { data: meta } = useQuery({
