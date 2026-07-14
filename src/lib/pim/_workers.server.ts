@@ -2113,6 +2113,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const searchProvider: "firecrawl" | "apify" | "both" =
     rawProvider === "apify" ? "apify" : rawProvider === "firecrawl" ? "firecrawl" : "both";
 
+  // Optional locale override — future-proofs the actor call for
+  // non-Polish projects. Default to Poland / Polish.
+  const localeRaw = (projectSettings.serp_locale ?? null) as { gl?: unknown; hl?: unknown } | null;
+  const serpGl = (typeof localeRaw?.gl === "string" && localeRaw.gl.trim() ? localeRaw.gl.trim() : "PL").toUpperCase();
+  const serpHl = (typeof localeRaw?.hl === "string" && localeRaw.hl.trim() ? localeRaw.hl.trim() : "pl").toLowerCase();
+
   // Producent + MPN mogą być w raw.imported_extract (import z URL) lub — dla
   // CSV — częściowo w `source_products.kod` (kod producenta lub sklepu).
   const rawObj = (product.raw ?? {}) as {
@@ -2173,8 +2179,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     results: [],
   }));
   // key = variantIndex + "|" + normalizedUrl -> position in bucket.results
-  const upsertResult = (vi: number, url: string, provider: "firecrawl" | "apify", meta: Partial<VariantResult>) => {
+  const upsertResult = (vi: number, rawUrl: string, provider: "firecrawl" | "apify", meta: Partial<VariantResult>) => {
     const bucket = perVariant[vi];
+    const url = stripTrackingParams(rawUrl);
     const key = normalizeUrlForDedup(url);
     let existing = bucket.results.find((r) => normalizeUrlForDedup(r.url) === key);
     if (!existing) {
@@ -2227,13 +2234,14 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   // ---- Apify branch ----
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
+  const apifyVariantMeta: SerpMeta[] = [];
   if (useApify) {
-    let buckets: Array<{ query: string; results: SerpResult[] }> = [];
+    let buckets: SerpBucket[] = [];
     try {
       buckets = await runSerpSearch(variants.map((v) => v.query), {
-        country: "PL",
-        language: "pl",
-        resultsPerQuery: 100,
+        gl: serpGl,
+        hl: serpHl,
+        limit: 100,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2252,6 +2260,22 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const bucket = buckets.find((b) => b.query.trim().toLowerCase() === v.query.trim().toLowerCase())
         ?? buckets[vi];
       const results = bucket?.results ?? [];
+      if (bucket?.meta) {
+        apifyVariantMeta.push(bucket.meta);
+        if (bucket.meta.error) {
+          await emit(ctx, {
+            level: "warn",
+            message: `⚠️ ${nazwa} — Apify [${v.kind}] "${v.query}": ${bucket.meta.error}`,
+          });
+        }
+      } else {
+        apifyVariantMeta.push({
+          provider: "apify",
+          input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: 100 },
+          results_count: 0,
+          error: "no bucket returned",
+        });
+      }
       let n = 0;
       for (const r of results) {
         idx++;
@@ -2343,6 +2367,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     meta: {
       variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })),
       provider_mode: searchProvider,
+      apify: apifyVariantMeta.length ? apifyVariantMeta : undefined,
     },
   });
 
