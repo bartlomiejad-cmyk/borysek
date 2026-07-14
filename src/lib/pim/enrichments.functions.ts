@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { setManualLockOnProduct } from "./pipeline-status";
 
 const loadEnrichment = async (
   supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
@@ -8,12 +9,25 @@ const loadEnrichment = async (
 ) => {
   const { data, error } = await supabase
     .from("enrichments")
-    .select("id, hidden_images")
+    .select("id, hidden_images, source_product_id")
     .eq("id", enrichmentId)
     .single();
   if (error || !data) throw new Error(error?.message ?? "Enrichment not found");
-  return data as { id: string; hidden_images: string[] | null };
+  return data as { id: string; hidden_images: string[] | null; source_product_id: string };
 };
+
+async function lockByEnrichmentId(
+  supabase: { from: (t: string) => any },
+  enrichmentId: string,
+): Promise<void> {
+  const { data } = await supabase
+    .from("enrichments")
+    .select("source_product_id")
+    .eq("id", enrichmentId)
+    .maybeSingle();
+  const pid = (data as { source_product_id?: string } | null)?.source_product_id;
+  if (pid) await setManualLockOnProduct(supabase as never, pid, true);
+}
 
 export const hideImage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -33,6 +47,9 @@ export const hideImage = createServerFn({ method: "POST" })
       .update({ hidden_images: Array.from(set) } as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
+    if (cur.source_product_id) {
+      await setManualLockOnProduct(supabase as never, cur.source_product_id, true);
+    }
     return { ok: true, hidden: Array.from(set) };
   });
 
@@ -53,6 +70,9 @@ export const unhideImage = createServerFn({ method: "POST" })
       .update({ hidden_images: next } as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
+    if (cur.source_product_id) {
+      await setManualLockOnProduct(supabase as never, cur.source_product_id, true);
+    }
     return { ok: true, hidden: next };
   });
 
@@ -73,6 +93,7 @@ export const updateFeatures = createServerFn({ method: "POST" })
       .update({ golden_features: data.features } as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
+    await lockByEnrichmentId(supabase as never, data.enrichmentId);
     return { ok: true };
   });
 
@@ -99,6 +120,7 @@ export const hideImageByProduct = createServerFn({ method: "POST" })
       .update({ hidden_images: Array.from(set) } as never)
       .eq("id", (en as { id: string }).id);
     if (error) throw new Error(error.message);
+    await setManualLockOnProduct(supabase as never, data.productId, true);
     return { ok: true };
   });
 
@@ -117,6 +139,7 @@ export const setPinnedMainImage = createServerFn({ method: "POST" })
       .update({ pinned_main_url: data.url } as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
+    await lockByEnrichmentId(supabase as never, data.enrichmentId);
     return { ok: true };
   });
 
@@ -143,5 +166,30 @@ export const removeGalleryUrl = createServerFn({ method: "POST" })
       .update({ ai_gallery_urls: next as never } as never)
       .eq("id", data.enrichmentId);
     if (error) throw new Error(error.message);
+    await lockByEnrichmentId(supabase as never, data.enrichmentId);
     return { ok: true, ai_gallery_urls: next };
+  });
+
+/**
+ * Toggle the manual edit lock on a product. When locked, bulk workers
+ * (golden record, Allegro description, matching rescore, media/visualization
+ * regeneration) skip or refuse to overwrite the product's data. Firecrawl
+ * discovery still runs — it only adds new candidate sources.
+ */
+export const setManualLock = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      productId: z.string().uuid(),
+      locked: z.boolean(),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { error } = await supabase
+      .from("source_products")
+      .update({ manual_lock: data.locked } as never)
+      .eq("id", data.productId);
+    if (error) throw new Error(error.message);
+    return { ok: true, locked: data.locked };
   });
