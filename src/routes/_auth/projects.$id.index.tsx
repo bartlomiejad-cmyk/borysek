@@ -941,6 +941,52 @@ function ProjectPage() {
         </Card>
       )}
 
+      {auditActive && auditJob && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>
+                {auditJob.cancel_requested ? "Zatrzymywanie… " : "Audyt AI "}
+                {auditJob.processed_count}/{auditJob.total} (w tle)
+              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground">
+                  {Math.round((auditJob.processed_count / Math.max(1, auditJob.total)) * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    await cancelJobFn({ data: { jobId: auditJob.id } });
+                    toast.message("Zatrzymywanie…");
+                    qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "PIM_AUDIT"] });
+                  }}
+                  disabled={auditJob.cancel_requested}
+                >
+                  <XIcon className="h-3 w-3 mr-1" /> Zatrzymaj
+                </Button>
+              </div>
+            </div>
+            <Progress value={(auditJob.processed_count / Math.max(1, auditJob.total)) * 100} />
+            <BulkJobLog jobId={auditJob.id} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Controlled "Uzupełnij dane z CSV" — launched from the Narzędzia dropdown. */}
+      <RemapCsvDialog
+        projectId={id}
+        defaults={{
+          id_column: (meta?.project as { settings?: { id_column?: string } } | undefined)?.settings?.id_column,
+          name_column: (meta?.project as { settings?: { name_column?: string } } | undefined)?.settings?.name_column,
+          code_column: (meta?.project as { settings?: { code_column?: string } } | undefined)?.settings?.code_column,
+          ean_column: (meta?.project as { settings?: { ean_column?: string } } | undefined)?.settings?.ean_column,
+        }}
+        open={remapOpen}
+        onOpenChange={setRemapOpen}
+        onDone={() => refetchProducts()}
+      />
+
       <Tabs defaultValue="data" className="mb-4">
         <TabsList>
           <TabsTrigger value="data">Dane</TabsTrigger>
