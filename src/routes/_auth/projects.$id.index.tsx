@@ -977,6 +977,23 @@ function ProjectPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={p.status as string} error={p.error} />
+                      {(() => {
+                        const ds = (p as { data_sufficiency?: "full" | "partial" | "poor" | null }).data_sufficiency;
+                        if (ds !== "partial" && ds !== "poor") return null;
+                        const cls =
+                          ds === "poor"
+                            ? "ml-1 border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
+                            : "ml-1 border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+                        const title =
+                          ds === "poor"
+                            ? "Bardzo ubogie dane źródłowe — opis może być mocno skrócony."
+                            : "Częściowe dane źródłowe — opis krótszy, część sekcji może być pominięta.";
+                        return (
+                          <Badge variant="outline" className={cls} title={title}>
+                            {ds === "poor" ? "Ubogie dane" : "Częściowe dane"}
+                          </Badge>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
