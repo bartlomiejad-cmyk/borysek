@@ -2156,8 +2156,23 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const allUrls = Array.from(mergedByNorm.values());
   if (!allUrls.length) {
     await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak wyników w żadnym wariancie` });
+    await logProductEvent(supabaseAdmin, {
+      projectId: product.project_id,
+      productId: product.id,
+      kind: "discovery_search",
+      message: `Wyszukano źródła: ${variants.length} zapytań, 0 wyników`,
+      meta: { variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })) },
+    });
     return;
   }
+
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "discovery_search",
+    message: `Wyszukano źródła: ${variants.length} zapytań, ${allUrls.length} unikalnych adresów`,
+    meta: { variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })) },
+  });
 
   // 2) Persist raw search result. Wstawiamy wiersz per term używany przez
   //    matching (nazwa / ean / "nazwa ean"), wszystkie z tym samym mergem —
