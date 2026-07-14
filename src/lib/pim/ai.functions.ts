@@ -15,6 +15,12 @@ import {
   finalizeMetaDescription,
   SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
+import {
+  BUILT_IN_PRESETS,
+  readCustomPresets,
+  resolvePresetById,
+  type ScenePreset,
+} from "./scene-presets";
 
 const MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
