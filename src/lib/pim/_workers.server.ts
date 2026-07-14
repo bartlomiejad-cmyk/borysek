@@ -16,13 +16,14 @@ import { extractDescriptionSection, filterImageUrls, sanitizeProductDescription 
 import {
   slugifyPl as slugifyPlShared,
   clampName as clampNameShared,
-  clampMetaDescription as clampMetaDescriptionShared,
   dedupeKeywords as dedupeKeywordsShared,
   GOLDEN_SEO_SYSTEM_PROMPT,
   sanitizeGoldenDescriptionHtml,
   ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
   sanitizeAllegroDescriptionHtml,
   buildClientGuidelinesBlock,
+  finalizeMetaDescription,
+  SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
@@ -76,6 +77,7 @@ const GoldenSchema = z.object({
     .max(60)
     .optional()
     .default([]),
+  data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
 });
 
 const VerifySourcesSchema = z.object({
@@ -240,7 +242,6 @@ function sanitize(text: string | null, blacklist: string[]): string | null {
 
 export const slugifyPl = slugifyPlShared;
 const clampName = clampNameShared;
-const clampMetaDescription = clampMetaDescriptionShared;
 const dedupeKeywords = dedupeKeywordsShared;
 
 // ---------------------------------------------------------------------------
@@ -666,7 +667,15 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const rawName = sanitize(out.name, blacklist) ?? "";
     const name = clampName(rawName, 70);
     const rawDescription = sanitize(out.description, blacklist) ?? "";
-    const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
+    const rawMeta = sanitizeStr(out.meta_description ?? "");
+    const metaDescription = await finalizeMetaDescription(rawMeta, async (text) => {
+      const shortened = await callGatewayJson(apiKey, GOLDEN_MODEL, [
+        { role: "system", content: SHORTEN_META_SYSTEM_PROMPT },
+        { role: "user", content: text },
+      ]);
+      return (shortened as { meta_description?: string }).meta_description ?? "";
+    });
+    const dataSufficiency = out.data_sufficiency ?? null;
     // Re-slugify by ourselves — gwarantujemy poprawność niezależnie od tego co zwróciło AI.
     const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
     const slug = slugifyPl(slugSource, 75);
@@ -708,6 +717,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       generated_at: new Date().toISOString(),
       error: null,
       previous: previous as never,
+      data_sufficiency: dataSufficiency,
     };
     if (shouldWriteFeatures) updatePayload.golden_features = newFeatures;
 
@@ -3104,7 +3114,12 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
   const content = json.choices?.[0]?.message?.content ?? "";
   let parsed: unknown;
   try { parsed = JSON.parse(content); } catch { throw new Error("Model nie zwrócił poprawnego JSON"); }
-  const shape = z.object({ html: z.string().min(1).max(60000) }).parse(parsed);
+  const shape = z
+    .object({
+      html: z.string().min(1).max(60000),
+      data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
+    })
+    .parse(parsed);
   const html = sanitizeAllegroDescriptionHtml(shape.html);
   if (!html) throw new Error("Model zwrócił pusty opis");
 
@@ -3113,6 +3128,7 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
     .update({
       allegro_description: html,
       allegro_generated_at: new Date().toISOString(),
+      ...(shape.data_sufficiency ? { data_sufficiency: shape.data_sufficiency } : {}),
     } as never)
     .eq("id", enrichment.id);
   if (upErr) throw new Error(upErr.message);

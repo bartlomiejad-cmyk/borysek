@@ -110,7 +110,7 @@ const searchSchema = z.object({
   page: z.number().min(1).catch(1),
   pageSize: z.number().min(1).catch(25),
   filter: z
-    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES"])
+    .enum(["ALL", "MATCHED", "PENDING", "GENERATED", "NO_MATCH", "NO_IMAGES", "POOR_DATA"])
     .catch("ALL"),
   search: z.string().catch(""),
 });
@@ -309,6 +309,10 @@ function ProjectPage() {
           !!(p as { regenerated_main_image?: string | null }).regenerated_main_image ||
           (((p as { ai_gallery_urls?: string[] }).ai_gallery_urls?.length) ?? 0) > 0;
         if (hasAny) return false;
+      }
+      if (filter === "POOR_DATA") {
+        const ds = (p as { data_sufficiency?: string | null }).data_sufficiency ?? null;
+        if (ds !== "partial" && ds !== "poor") return false;
       }
       if (q) {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
@@ -791,6 +795,7 @@ function ProjectPage() {
                 <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
                 <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
+                <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -972,6 +977,23 @@ function ProjectPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={p.status as string} error={p.error} />
+                      {(() => {
+                        const ds = (p as { data_sufficiency?: "full" | "partial" | "poor" | null }).data_sufficiency;
+                        if (ds !== "partial" && ds !== "poor") return null;
+                        const cls =
+                          ds === "poor"
+                            ? "ml-1 border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
+                            : "ml-1 border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+                        const title =
+                          ds === "poor"
+                            ? "Bardzo ubogie dane źródłowe — opis może być mocno skrócony."
+                            : "Częściowe dane źródłowe — opis krótszy, część sekcji może być pominięta.";
+                        return (
+                          <Badge variant="outline" className={cls} title={title}>
+                            {ds === "poor" ? "Ubogie dane" : "Częściowe dane"}
+                          </Badge>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">

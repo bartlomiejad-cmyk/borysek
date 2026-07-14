@@ -1,0 +1,1 @@
+ALTER TABLE public.enrichments ADD COLUMN IF NOT EXISTS data_sufficiency text DEFAULT NULL;

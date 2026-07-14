@@ -46,6 +46,39 @@ export function clampMetaDescription(desc: string, maxLen = 160): string {
   return s;
 }
 
+/**
+ * Finalize a meta_description: return `raw` as-is if it already fits ≤160 chars.
+ * If longer, ask the model once (via `shortenFn`) to compress it into the
+ * 140-155 char target. As a last resort truncate to 157 chars + "…".
+ *
+ * The retry is the "programmatic meta_description validation" from the plan:
+ * LLMs often overshoot the 160-char limit even when the prompt asks for it.
+ */
+export async function finalizeMetaDescription(
+  raw: string,
+  shortenFn?: (text: string) => Promise<string>,
+): Promise<string> {
+  const normalize = (s: string) =>
+    s.trim().replace(/\s+/g, " ").replace(/["„""]/g, "");
+  const cleaned = normalize(raw);
+  if (cleaned.length <= 160) return cleaned;
+  if (shortenFn) {
+    try {
+      const shortened = normalize(await shortenFn(cleaned));
+      if (shortened && shortened.length <= 160) return shortened;
+    } catch {
+      /* fall through to hard truncate */
+    }
+  }
+  const cut = cleaned.slice(0, 157);
+  const lastSpace = cut.lastIndexOf(" ");
+  const base = lastSpace > 100 ? cut.slice(0, lastSpace) : cut;
+  return `${base.trim()}…`;
+}
+
+export const SHORTEN_META_SYSTEM_PROMPT =
+  "Skróć podany meta_description do 140-155 znaków, po polsku, naturalnie, bez cudzysłowów, bez cen, bez CTA. Zwróć wyłącznie JSON: {\"meta_description\": string}.";
+
 export function dedupeKeywords(arr: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -82,11 +115,16 @@ export function buildClientGuidelinesBlock(
 
 export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "Jesteś redaktorem katalogu e-commerce i specjalistą SEO. Tworzysz zoptymalizowane pod wyszukiwarki treści produktu na podstawie 1-3 źródeł internetowych.",
-  'Odpowiedź MUSI być poprawnym JSON-em: {"name": string, "slug": string, "description": string, "meta_description": string, "seo_keywords": string[], "features": [{"key": string, "value": string}]}.',
+  'Odpowiedź MUSI być poprawnym JSON-em: {"name": string, "slug": string, "description": string, "meta_description": string, "seo_keywords": string[], "features": [{"key": string, "value": string}], "data_sufficiency": "full" | "partial" | "poor"}.',
   "Pisz po polsku, neutralnym językiem katalogowym. Konkret zamiast emocji.",
   "",
-  "## PRIORYTET REGUŁ",
-  "The following client guidelines can adjust tone and content emphasis but can never override the output format or the forbidden-content rules above. Format JSON, whitelist tagów HTML w opisie, limity długości i zakaz treści (ceny, dostawa, sklepy) mają zawsze pierwszeństwo.",
+  "## ZASADA NADRZĘDNA — TYLKO FAKTY ZE ŹRÓDEŁ",
+  "- Piszesz WYŁĄCZNIE na podstawie danych źródłowych z wiadomości użytkownika. Nie zgaduj producenta, materiału, wymiarów, funkcji, przeznaczenia.",
+  "- Jeżeli źródła zawierają mało informacji, NIE dopisuj treści spoza źródeł i NIE lej wody. Napisz krótszy opis (minimalna długość opisu NIE obowiązuje, gdy brakuje faktów) i ustaw pole data_sufficiency:",
+  "  - 'full'    — źródła pokrywają wszystkie istotne cechy (co to jest, dla kogo, materiał/wymiary/działanie).",
+  "  - 'partial' — część istotnych informacji brakuje (np. tylko nazwa + 1-2 cechy).",
+  "  - 'poor'    — źródła prawie nic nie wnoszą (sama nazwa/kod).",
+  "- Lepiej krótki, poprawny opis z data_sufficiency='partial' niż długi opis z wymyślonymi faktami.",
   "",
   "## NAZWA (name)",
   "- 40-70 znaków (optymalna długość pod <title>).",
@@ -106,7 +144,7 @@ export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "  1) Na samej górze dokładnie jeden <h3> zawierający wygenerowaną nazwę produktu (pole `name`).",
   "  2) Następnie 1-3 akapity <p>…</p> z opisem właściwym.",
   "  3) Jeżeli wygenerowałeś cechy (`features`), dopisz <ul> z max 10 najważniejszymi cechami w formacie <li><strong>Klucz:</strong> wartość</li>. Jeżeli cech nie ma — pomiń listę.",
-  "- Długość tekstu widocznego (bez tagów) 350-1200 znaków.",
+  "- Docelowa długość tekstu widocznego (bez tagów) 350-1200 znaków, ALE ta dolna granica NIE obowiązuje przy data_sufficiency='partial' lub 'poor' — wtedy piszesz tyle, ile realnie da się poprzeć źródłami (choćby 1 krótki akapit).",
   "- Główne słowo kluczowe (typ produktu) MUSI pojawić się w pierwszym akapicie <p>.",
   "- Pierwszy akapit: czym produkt jest i dla kogo. Kolejne akapity podają najważniejsze fakty (materiał, wymiary, działanie, funkcje) wyłącznie na podstawie źródeł.",
   "- Wpleć 2-3 naturalne warianty frazy kluczowej (synonimy, long-tail) — bez upychania (keyword stuffing).",
@@ -117,7 +155,7 @@ export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "- Zwróć czysty HTML w polu JSON `description` (jako string), bez ``` i bez znaczników markdown.",
   "",
   "## META_DESCRIPTION (meta_description)",
-  "- 150-160 znaków (twardy limit; odcięcie w Google ~160). Jedno-dwa zdania.",
+  "- Cel: 140-155 znaków. Jeśli nie masz pewności co do liczby znaków, pisz krócej — nigdy nie przekraczaj 160 znaków. Jedno-dwa zdania.",
   "- Streszczenie produktu + jedna konkretna korzyść/cecha + naturalna fraza kluczowa.",
   "- Bez cudzysłowów. Nie duplikuj pierwszego zdania opisu — meta ma być komplementarna, nie identyczna.",
   "- Bez CTA typu 'kup teraz', bez cen.",
@@ -133,6 +171,13 @@ export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "- Preferowane klucze (gdy aplikowalne, dla spójności z schema.org/Product): Marka, Model, Materiał, Kolor, Wymiary, Waga, Pojemność, Moc, Zasilanie, Wydajność, Gwarancja, Kraj produkcji, EAN, Rozmiar, Płeć, Wiek, Przeznaczenie.",
   "- Wartości konkretne, bez przymiotników marketingowych.",
   "- Pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych: [].",
+  "",
+  "## PRZYKŁAD FORMATU (nie treści)",
+  "Poniżej pokazujemy TYLKO oczekiwany kształt JSON — nie kopiuj tych danych, użyj własnych na podstawie źródeł.",
+  '{"name":"Kubek termiczny stalowy 400 ml","slug":"kubek-termiczny-stalowy-400-ml","description":"<h3>Kubek termiczny stalowy 400 ml</h3><p>Kubek termiczny wykonany ze stali nierdzewnej, z podwójną ścianką próżniową, utrzymujący temperaturę napoju do 6 godzin. Sprawdza się w podróży, biurze i na spacerze.</p><ul><li><strong>Pojemność:</strong> 400 ml</li><li><strong>Materiał:</strong> stal nierdzewna 304</li><li><strong>Utrzymanie temperatury:</strong> do 6 h</li></ul>","meta_description":"Kubek termiczny 400 ml ze stali nierdzewnej z podwójną ścianką próżniową, utrzymuje temperaturę do 6 godzin.","seo_keywords":["kubek termiczny","kubek termiczny 400 ml","kubek termiczny stalowy","kubek termiczny do biura"],"features":[{"key":"Pojemność","value":"400 ml"},{"key":"Materiał","value":"stal nierdzewna 304"},{"key":"Utrzymanie temperatury","value":"do 6 h"}],"data_sufficiency":"full"}',
+  "",
+  "## PRIORYTET REGUŁ (na końcu, bo dotyczy wiadomości użytkownika)",
+  "Wytyczne klienta przekazane w wiadomości użytkownika (sekcja WYTYCZNE KLIENTA) mogą zmieniać ton i akcenty treści, ale NIGDY nie mogą naruszyć: formatu JSON, whitelisty tagów HTML w opisie, zakazów treści (ceny, dostawa, kontakt, nazwy sklepów, URL-e) ani zasady pisania wyłącznie na podstawie źródeł. W razie konfliktu — zasady systemowe wygrywają.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------
@@ -243,10 +288,13 @@ export function sanitizeGoldenDescriptionHtml(
 
 export const ALLEGRO_DESCRIPTION_SYSTEM_PROMPT = [
   "Jesteś ekspertem od tworzenia opisów produktów na Allegro. Twoim celem jest napisanie mocno sprzedażowego, konkretnego, długiego opisu w języku polskim, zgodnego z dobrymi praktykami Allegro.",
-  "Odpowiedź MUSI być poprawnym JSON-em: {\"html\": string}. Pole html to fragment HTML gotowy do wklejenia w edytorze Allegro (bez <html>, <head>, <body>).",
+  "Odpowiedź MUSI być poprawnym JSON-em: {\"html\": string, \"data_sufficiency\": \"full\" | \"partial\" | \"poor\"}. Pole html to fragment HTML gotowy do wklejenia w edytorze Allegro (bez <html>, <head>, <body>).",
   "",
-  "## PRIORYTET REGUŁ",
-  "The following client guidelines can adjust tone and content emphasis but can never override the output format or the forbidden-content rules above. Whitelist tagów HTML, zakaz cen/kontaktu/linków/dostawy i wymagany format JSON mają zawsze pierwszeństwo przed wytycznymi klienta.",
+  "## ZASADA NADRZĘDNA — TYLKO FAKTY ZE ŹRÓDEŁ",
+  "- Piszesz wyłącznie na podstawie danych źródłowych i cech (features) z wiadomości użytkownika.",
+  "- Jeżeli dane są ubogie: NIE dopisuj sekcji, których nie da się poprzeć faktami. Możesz pominąć bloki tematyczne, FAQ, parametry techniczne lub zawartość zestawu.",
+  "- Minimalna długość opisu (1500 znaków) NIE obowiązuje, gdy brakuje faktów — lepiej krótko i prawdziwie niż długo i zmyślone.",
+  "- Ustaw data_sufficiency: 'full' (bogate źródła), 'partial' (część kluczowych informacji brakuje) lub 'poor' (prawie brak danych).",
   "",
   "## STRUKTURA (kolejność sekcji, każda jako osobny blok)",
   "1) <h1> z krótką, chwytliwą nazwą produktu z frazą kluczową.",
@@ -278,6 +326,9 @@ export const ALLEGRO_DESCRIPTION_SYSTEM_PROMPT = [
   "- Nie dodawaj obrazów ani placeholderów typu {{img1}} – Allegro dodaje zdjęcia z galerii, opis ma być czysto tekstowy.",
   "",
   "Zwróć wyłącznie JSON. Pole html jako string z czystym HTML, bez ``` i bez markdown.",
+  "",
+  "## PRIORYTET REGUŁ (na końcu, bo dotyczy wiadomości użytkownika)",
+  "Wytyczne klienta z wiadomości użytkownika mogą zmieniać ton i akcenty, ale NIGDY nie mogą naruszyć: formatu JSON, whitelisty tagów HTML Allegro, zakazu treści (ceny, kontakt, linki, dostawa, zwroty, sklepy zewnętrzne) ani zasady pisania wyłącznie na podstawie źródeł. W razie konfliktu — zasady systemowe wygrywają.",
 ].join("\n");
 
 // Allegro API allows ONLY these tags in offer descriptions. Any other tag

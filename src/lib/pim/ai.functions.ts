@@ -5,13 +5,14 @@ import { probeManySizes } from "./image-size.server";
 import {
   slugifyPl,
   clampName,
-  clampMetaDescription,
   dedupeKeywords,
   GOLDEN_SEO_SYSTEM_PROMPT,
   sanitizeGoldenDescriptionHtml,
   ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
   sanitizeAllegroDescriptionHtml,
   buildClientGuidelinesBlock,
+  finalizeMetaDescription,
+  SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
 
 const MODEL = "google/gemini-3-flash-preview";
@@ -79,6 +80,7 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
       .max(60)
       .optional()
       .default([]),
+    data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
   });
   return schema.parse(parsed);
 };
@@ -205,7 +207,15 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const rawName = sanitize(out.name, blacklist) ?? "";
       const name = clampName(rawName, 70);
       const rawDescription = sanitize(out.description, blacklist) ?? "";
-      const metaDescription = clampMetaDescription(sanitizeStr(out.meta_description ?? ""), 160);
+      const rawMeta = sanitizeStr(out.meta_description ?? "");
+      const metaDescription = await finalizeMetaDescription(rawMeta, async (text) => {
+        const shortened = await callGatewayRaw(apiKey, MODEL, [
+          { role: "system", content: SHORTEN_META_SYSTEM_PROMPT },
+          { role: "user", content: text },
+        ]);
+        return (shortened as { meta_description?: string }).meta_description ?? "";
+      });
+      const dataSufficiency = out.data_sufficiency ?? null;
       const slugSource = (out.slug && out.slug.trim()) ? out.slug : name;
       const slug = slugifyPl(slugSource, 75);
       const seoKeywords = dedupeKeywords((out.seo_keywords ?? []).map(sanitizeStr));
@@ -247,6 +257,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         generated_at: new Date().toISOString(),
         error: null,
         previous: previous as never,
+        data_sufficiency: dataSufficiency,
       };
       if (shouldWriteFeatures) updatePayload.golden_features = newFeatures;
 
@@ -1106,7 +1117,12 @@ export const generateAllegroDescription = createServerFn({ method: "POST" })
     const content = json.choices?.[0]?.message?.content ?? "";
     let parsed: unknown;
     try { parsed = JSON.parse(content); } catch { throw new Error("Model nie zwrócił poprawnego JSON"); }
-    const shape = z.object({ html: z.string().min(1).max(60000) }).parse(parsed);
+    const shape = z
+      .object({
+        html: z.string().min(1).max(60000),
+        data_sufficiency: z.enum(["full", "partial", "poor"]).optional(),
+      })
+      .parse(parsed);
     const html = sanitizeAllegroDescriptionHtml(shape.html);
     if (!html) throw new Error("Model zwrócił pusty opis");
 
@@ -1115,6 +1131,7 @@ export const generateAllegroDescription = createServerFn({ method: "POST" })
       .update({
         allegro_description: html,
         allegro_generated_at: new Date().toISOString(),
+        ...(shape.data_sufficiency ? { data_sufficiency: shape.data_sufficiency } : {}),
       } as never)
       .eq("id", enrichment.id);
     if (upErr) throw new Error(upErr.message);

@@ -163,6 +163,7 @@ export type Database = {
           ai_gallery_urls: Json
           allegro_description: string | null
           allegro_generated_at: string | null
+          data_sufficiency: string | null
           error: string | null
           generated_at: string | null
           golden_description: string | null
@@ -195,6 +196,7 @@ export type Database = {
           ai_gallery_urls?: Json
           allegro_description?: string | null
           allegro_generated_at?: string | null
+          data_sufficiency?: string | null
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
@@ -227,6 +229,7 @@ export type Database = {
           ai_gallery_urls?: Json
           allegro_description?: string | null
           allegro_generated_at?: string | null
+          data_sufficiency?: string | null
           error?: string | null
           generated_at?: string | null
           golden_description?: string | null
