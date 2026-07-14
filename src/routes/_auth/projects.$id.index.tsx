@@ -653,8 +653,10 @@ function ProjectPage() {
         <div>
           <h1 className="font-serif text-5xl tracking-tight">{meta?.project.name ?? "..."}</h1>
           <p className="text-sm text-muted-foreground">
-            {meta?.counts.source_products ?? 0} produktów · {meta?.counts.search_results ?? 0} zapytań ·{" "}
-            {meta?.counts.product_sources ?? 0} stron źródłowych · {meta?.counts.enrichments_done ?? 0} złotych rekordów
+            {summary?.total ?? meta?.counts.source_products ?? 0} produktów ·{" "}
+            {summary ? Math.max(0, summary.total - summary.imported) : (meta?.counts.product_sources ?? 0)} ze źródłami ·{" "}
+            {summary ? Math.max(0, summary.total - summary.imported - summary.sources_found - summary.matched) : (meta?.counts.enrichments_done ?? 0)} złotych rekordów ·{" "}
+            {summary?.visuals_ready ?? 0} z wizualizacjami
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -722,9 +724,11 @@ function ProjectPage() {
       {summary && (
         <PipelineStages
           summary={summary}
-          activeStage={stage}
-          onStageClick={handleStageClick}
           onPrimaryAction={handleStagePrimary}
+          onShowPending={(s) => {
+            const f = stageToFilter(s);
+            updateSearch({ filter: f, stage: "NONE", page: 1 });
+          }}
         />
       )}
 
@@ -974,19 +978,13 @@ function ProjectPage() {
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">Wszystkie</SelectItem>
-                <SelectItem value="MATCHED">Dopasowane</SelectItem>
-                <SelectItem value="NO_MATCH">Bez dopasowania</SelectItem>
-                <SelectItem value="PENDING">Bez złotego rekordu</SelectItem>
-                <SelectItem value="GENERATED">Z złotym rekordem</SelectItem>
+                <SelectItem value="PIPE_IMPORTED">Bez źródeł (do wyszukania)</SelectItem>
+                <SelectItem value="PIPE_SOURCES_FOUND">Do dopasowania</SelectItem>
+                <SelectItem value="PIPE_MATCHED">Do generacji treści</SelectItem>
+                <SelectItem value="PIPE_GOLDEN_READY">Do generacji mediów</SelectItem>
+                <SelectItem value="REVIEW">Do przeglądu</SelectItem>
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
-                <SelectItem value="POOR_DATA">Ubogie dane (partial/poor)</SelectItem>
-                <SelectItem value="LOCKED">🔒 Zablokowane (manual)</SelectItem>
-                <SelectItem value="REVIEW">Kolejka review</SelectItem>
-                <SelectItem value="PIPE_IMPORTED">Etap: Zaimportowany</SelectItem>
-                <SelectItem value="PIPE_SOURCES_FOUND">Etap: Źródła znalezione</SelectItem>
-                <SelectItem value="PIPE_MATCHED">Etap: Dopasowany</SelectItem>
-                <SelectItem value="PIPE_GOLDEN_READY">Etap: Rekord gotowy</SelectItem>
-                <SelectItem value="PIPE_VISUALS_READY">Etap: Wizualizacje gotowe</SelectItem>
+                <SelectItem value="LOCKED">🔒 Zablokowane ręcznie</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1154,7 +1152,20 @@ function ProjectPage() {
                 {filtered.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                      Brak produktów do wyświetlenia
+                      {filter !== "ALL" ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <span>Brak produktów na tym etapie — wszystko zrobione ✅</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateSearch({ filter: "ALL", stage: "NONE", page: 1 })}
+                          >
+                            Pokaż wszystkie
+                          </Button>
+                        </div>
+                      ) : (
+                        "Brak produktów do wyświetlenia"
+                      )}
                     </TableCell>
                   </TableRow>
                 )}
