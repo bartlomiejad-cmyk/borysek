@@ -670,6 +670,8 @@ function ProductDetail() {
         </CollapsibleContent>
       </Collapsible>
 
+      <ProductTimeline productId={pid} />
+
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Golden record */}
         <Card className="lg:sticky lg:top-4 self-start">
