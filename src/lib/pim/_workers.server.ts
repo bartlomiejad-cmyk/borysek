@@ -3423,22 +3423,56 @@ export async function runPimVisualization(
       }
 
       const slot = slotState.slot;
-      await emit(ctx, { level: "info", message: `   • wizualizacja ${slot + 1}/${count}…` });
+      const attempt = slotState.attempts ?? 0;
+      await emit(ctx, {
+        level: "info",
+        message: `   • wizualizacja ${slot + 1}/${count} (próba ${attempt + 1}/3)…`,
+      });
       if (!slotState.mode) slotState = { ...slotState, mode: "edit" };
 
       if (!slotState.request) {
-        if ((slotState.mode === "edit" || slotState.mode === "safe-edit") && !slotState.sourceUrl) {
-          const source = await prepareFalSource(e.id, mainUrl);
-          slotState = { ...slotState, sourceUrl: source.url, sourcePath: source.path };
+        if (
+          (slotState.mode === "edit" || slotState.mode === "safe-edit") &&
+          (!slotState.sourceUrls || slotState.sourceUrls.length === 0)
+        ) {
+          const uploadedUrls: string[] = [];
+          const uploadedPaths: string[] = [];
+          for (const refUrl of effectiveRefUrls) {
+            try {
+              const source = await prepareFalSource(e.id, refUrl);
+              uploadedUrls.push(source.url);
+              uploadedPaths.push(source.path);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              await emit(ctx, { level: "warn", message: `   ⚠ nie udało się załadować referencji do FAL: ${msg.slice(0, 200)}` });
+            }
+          }
+          if (!uploadedUrls.length) throw new Error("nie udało się przygotować żadnej referencji dla FAL");
+          slotState = {
+            ...slotState,
+            sourceUrls: uploadedUrls,
+            sourcePaths: uploadedPaths,
+            sourceUrl: uploadedUrls[0],
+            sourcePath: uploadedPaths[0],
+          };
         }
-        const req = buildRequest(slotState.mode);
+        const req = buildRequest(slotState.mode, slotState.extraPromptSuffix);
         const body = req.body as { image_urls?: string[] };
-        if (body.image_urls) body.image_urls = slotState.sourceUrl ? [slotState.sourceUrl] : [];
+        if (body.image_urls) {
+          body.image_urls = slotState.sourceUrls && slotState.sourceUrls.length
+            ? [...slotState.sourceUrls]
+            : slotState.sourceUrl
+              ? [slotState.sourceUrl]
+              : [];
+        }
         try {
           const queued = await submitFalQueue(req.path, req.body, FAL_KEY);
           slotState = { ...slotState, request: queued };
           await saveProgress(slotState);
-          await emit(ctx, { level: "info", message: `   • FAL przyjął zadanie ${slot + 1}/${count} (${slotState.mode})` });
+          await emit(ctx, {
+            level: "info",
+            message: `   • FAL przyjął zadanie ${slot + 1}/${count} (${slotState.mode}, refs: ${body.image_urls?.length ?? 0})`,
+          });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           lastFalErr = msg;
@@ -3482,7 +3516,50 @@ export async function runPimVisualization(
         if (!queueResult || queueResult.pending) return { complete: false };
         const genUrl = queueResult.response.images?.[0]?.url;
         if (!genUrl) throw new Error("brak url");
-        await appendVisualization(genUrl, slot);
+        const attemptsSoFar = (slotState.attempts ?? 0) + 1;
+        // Upload the FAL result to our bucket so we can QC & keep it.
+        const publicUrl = await uploadGalleryCandidate(genUrl, slot, attemptsSoFar);
+        // Run Vision QC against the top reference. Gateway errors fall back
+        // to a "passed" verdict so we never block generation on QC infra.
+        let qc: VisualizationQcResult;
+        try {
+          const apiKey2 = process.env.LOVABLE_API_KEY!;
+          qc = await runVisualizationQc(apiKey2, effectiveRefUrls[0], publicUrl);
+        } catch (qcErr) {
+          const msg = qcErr instanceof Error ? qcErr.message : String(qcErr);
+          await emit(ctx, { level: "warn", message: `   ⚠ viz QC skipped (${msg.slice(0, 160)})` });
+          qc = { product_intact: true, product_visible: true, issues: [] };
+        }
+        const score = visualizationQcScore(qc);
+        const passed = visualizationQcPassed(qc);
+        // Keep best across attempts.
+        const prevBestScore = slotState.bestScore ?? -1;
+        const isBetter = !slotState.bestUrl || score > prevBestScore;
+        const bestUrl = isBetter ? publicUrl : slotState.bestUrl!;
+        const bestQc = isBetter ? qc : slotState.bestQc!;
+        const bestScore = isBetter ? score : prevBestScore;
+        const enoughDeadlineForRetry = !ctx?.deadline || ctx.deadline - Date.now() > 60_000;
+        if (!passed && attemptsSoFar < 3 && enoughDeadlineForRetry) {
+          // Retry with a correction suffix derived from the QC issues.
+          const correction = buildVisualizationCorrectionSentence(qc);
+          await emit(ctx, {
+            level: "warn",
+            message: `   ⚠ viz QC fail (próba ${attemptsSoFar}/3): ${(qc.issues[0] ?? "produkt niezgodny").slice(0, 140)} — ponawiam z korektą`,
+          });
+          slotState = {
+            ...slotState,
+            request: undefined,
+            attempts: attemptsSoFar,
+            bestUrl,
+            bestQc,
+            bestScore,
+            extraPromptSuffix: correction,
+          };
+          await saveProgress(slotState);
+          continue;
+        }
+        // Commit the best candidate we have.
+        await commitVisualization(bestUrl, bestQc, attemptsSoFar, slot);
         await cleanupSource(slotState);
         slotState = { slot: slot + 1 };
         await saveProgress(slotState.slot < count ? slotState : null);
