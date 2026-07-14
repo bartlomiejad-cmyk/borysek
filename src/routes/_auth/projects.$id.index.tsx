@@ -185,6 +185,8 @@ function ProjectPage() {
   const firecrawlFn = useServerFn(startFirecrawlDiscovery);
   const recleanFn = useServerFn(recleanProductSources);
   const setLockFn = useServerFn(setManualLock);
+  const setModeFn = useServerFn(setMatchingMode);
+  const rerunMatchFn = useServerFn(rerunMatchingForProduct);
   const deleteProductsFn = useServerFn(deleteProducts);
   const summaryFn = useServerFn(getPipelineSummary);
   const approveFn = useServerFn(approveProduct);
