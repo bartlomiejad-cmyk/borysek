@@ -4327,4 +4327,11 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     level: verdict === "fail" ? "error" : verdict === "warn" ? "warn" : "success",
     message: `${summary}${failedNames ? ` · ${failedNames}` : ""}`,
   });
+  await logProductEvent(supabaseAdmin, {
+    projectId: product.project_id,
+    productId: product.id,
+    kind: "audit_done",
+    message: `Audyt AI: ${verdict}${failedNames ? ` · ${failedNames}` : ""}`,
+    meta: { verdict, issues: checks.filter((c) => !c.ok).map((c) => c.check) },
+  });
 }
