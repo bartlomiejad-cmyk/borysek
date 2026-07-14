@@ -8,6 +8,7 @@ import {
   extractHostname,
 } from "./source-cleanup";
 import { llmCleanDescription, type CleaningMeta } from "./llm-cleaner.server";
+import { advancePipelineStatus } from "./pipeline-status";
 
 const LLM_CLEAN_MIN_CHARS = 200;
 
@@ -290,7 +291,7 @@ export const runMatching = createServerFn({ method: "POST" })
     const [{ data: products }, { data: searches }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, nazwa, ean, raw")
+        .select("id, nazwa, ean, raw, manual_lock")
         .eq("project_id", data.projectId),
       supabase
         .from("search_results")
@@ -298,6 +299,11 @@ export const runMatching = createServerFn({ method: "POST" })
         .eq("project_id", data.projectId),
     ]);
     if (!products || !searches) return { matched: 0 };
+    const lockedSet = new Set<string>(
+      (products as Array<{ id: string; manual_lock?: boolean | null }>)
+        .filter((p) => !!p.manual_lock)
+        .map((p) => p.id),
+    );
 
     const extractProducer = (raw: unknown): string | null => {
       if (!raw || typeof raw !== "object") return null;
@@ -561,10 +567,20 @@ export const runMatching = createServerFn({ method: "POST" })
     }
 
     if (updates.length) {
-      const { error } = await supabase
+      // Manually-locked products keep their existing picked_urls untouched.
+      const writable = updates.filter((u) => !lockedSet.has(u.source_product_id));
+      const { error } = writable.length
+        ? await supabase
         .from("enrichments")
-        .upsert(updates as never, { onConflict: "source_product_id" });
+        .upsert(writable as never, { onConflict: "source_product_id" })
+        : { error: null as unknown as { message: string } | null };
       if (error) throw new Error(error.message);
+      // Forward-only advance for products that ended up with picked sources.
+      for (const u of updates) {
+        if (u.picked_urls.length > 0) {
+          await advancePipelineStatus(supabase as never, u.source_product_id, "MATCHED");
+        }
+      }
     }
 
     // ---------------------------------------------------------------------
@@ -663,10 +679,14 @@ export async function scoreAndCapForProduct(
 
   const { data: productRow } = await supabaseAdmin
     .from("source_products")
-    .select("id, nazwa, ean, raw")
+    .select("id, nazwa, ean, raw, manual_lock")
     .eq("id", productId)
     .single();
   if (!productRow) return { count: 0, strong: 0 };
+  if ((productRow as { manual_lock?: boolean }).manual_lock) {
+    // Manually locked — do not rescore/overwrite picked_urls.
+    return { count: 0, strong: 0 };
+  }
   const rawObj = ((productRow as { raw?: unknown }).raw ?? {}) as Record<string, unknown>;
   const ie = (rawObj.imported_extract ?? {}) as Record<string, unknown>;
   const producer =
@@ -810,5 +830,8 @@ export async function scoreAndCapForProduct(
     .eq("id", enRow.id);
 
   const strong = breakdown.filter((b) => b.total >= SOURCE_SCORE_THRESHOLD).length;
+  if (ranked.length > 0) {
+    await advancePipelineStatus(supabaseAdmin as never, productId, "MATCHED");
+  }
   return { count: ranked.length, strong };
 }

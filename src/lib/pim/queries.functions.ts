@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { sanitizeGoldenDescriptionHtml } from "./seo";
 import { type ImageMeta, pickThumbsForList } from "./images";
+import { setManualLockOnProduct } from "./pipeline-status";
 
 export const listProductsWithEnrichment = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -12,7 +13,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean")
+      .select("id, ext_id, nazwa, kod, ean, pipeline_status, review_status, manual_lock")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);
@@ -77,6 +78,9 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         ...p,
         status: e?.status ?? "PENDING",
         match_type: e?.match_type ?? "NO_MATCH",
+        pipeline_status: (p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED",
+        review_status: (p as { review_status?: string | null }).review_status ?? "NONE",
+        manual_lock: !!(p as { manual_lock?: boolean }).manual_lock,
         golden_name: e?.golden_name ?? null,
         generated_at: e?.generated_at ?? null,
         error: e?.error ?? null,
@@ -256,11 +260,15 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
       patch.allegro_generated_at = new Date().toISOString();
     }
     if (!Object.keys(patch).length) return { ok: true };
-    const { error } = await supabase
+    const { data: enRow, error } = await supabase
       .from("enrichments")
       .update(patch as never)
-      .eq("id", data.enrichmentId);
+      .eq("id", data.enrichmentId)
+      .select("source_product_id")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    const pid = (enRow as { source_product_id?: string } | null)?.source_product_id;
+    if (pid) await setManualLockOnProduct(supabase as never, pid, true);
     return { ok: true };
   });
 
@@ -299,5 +307,6 @@ export const setImageManualKeep = createServerFn({ method: "POST" })
       .update({ image_scores: scores as never } as never)
       .eq("id", (enr as unknown as { id: string }).id);
     if (upErr) throw new Error(upErr.message);
+    await setManualLockOnProduct(supabase as never, data.productId, true);
     return { ok: true, manual_keep: data.keep };
   });

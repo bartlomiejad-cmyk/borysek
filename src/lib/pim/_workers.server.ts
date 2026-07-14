@@ -27,6 +27,7 @@ import {
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
+import { advancePipelineStatus } from "./pipeline-status";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -587,10 +588,17 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw, product_notes")
+    .select("id, project_id, nazwa, kod, ean, raw, product_notes, manual_lock")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  if ((product as { manual_lock?: boolean }).manual_lock) {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (zablokowane): ${product.nazwa ?? productId} — złoty rekord`,
+    });
+    return;
+  }
   await emit(ctx, { level: "info", message: `✍️  ${product.nazwa ?? productId} — generuję opis` });
 
   const { data: project } = await supabaseAdmin
@@ -727,6 +735,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .eq("id", enrichment.id);
     if (error) throw new Error(error.message);
     await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "GOLDEN_READY");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
@@ -911,10 +920,11 @@ export async function runRegenerateMedia(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id")
+    .select("id, project_id, manual_lock")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
+  const productLocked = !!(product as { manual_lock?: boolean }).manual_lock;
 
   const baseSettings = await loadMediaSettings(product.project_id);
   const settings = {
@@ -1081,11 +1091,13 @@ export async function runRegenerateMedia(
       .from("enrichments")
       .update({
         regenerated_main_image: mainPublic,
-        pinned_main_url: mainPublic,
+        // Never overwrite a manually-pinned main image on a locked product.
+        ...(productLocked ? {} : { pinned_main_url: mainPublic }),
         ai_gallery_urls: galleryUrls as never,
       } as never)
       .eq("id", enrichment.id);
     if (dbErr) throw new Error(dbErr.message);
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "VISUALS_READY");
   } finally {
     for (const p of preparedMain) {
       await supabaseAdmin.storage.from("regenerated-images").remove([p.path]).catch(() => undefined);
@@ -2011,6 +2023,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
     details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
   });
+  if (scraped > 0) {
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "SOURCES_FOUND");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2702,7 +2717,7 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw, product_notes")
+    .select("id, project_id, nazwa, raw, product_notes, manual_lock")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
@@ -3038,6 +3053,7 @@ export async function runPimVisualization(
       `FAL nie wygenerował żadnej wizualizacji dla „${label}". ${lastFalErr ? `Ostatni błąd: ${lastFalErr.slice(0, 200)}` : ""}`.trim(),
     );
   }
+  await advancePipelineStatus(supabaseAdmin as never, (product as { id: string }).id, "VISUALS_READY");
   return { complete: true };
 }
 
@@ -3052,10 +3068,17 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, product_notes")
+    .select("id, project_id, nazwa, kod, ean, product_notes, manual_lock")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
+  if ((product as { manual_lock?: boolean }).manual_lock) {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (zablokowane): ${product.nazwa ?? productId} — opis Allegro`,
+    });
+    return;
+  }
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
