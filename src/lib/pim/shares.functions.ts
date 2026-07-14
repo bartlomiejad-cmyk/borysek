@@ -427,6 +427,26 @@ export const submitShareFeedback = createServerFn({ method: "POST" })
       .select("id, created_at")
       .single();
     if (error) throw new Error(error.message);
+    // Client-reported "needs fix" on a specific product demotes it back to
+    // NEEDS_REVIEW so the review pipeline picks it up again. Only when the
+    // current status is APPROVED or NONE — never overwrite AI_FLAGGED.
+    if (data.kind === "needs_fix" && data.productId) {
+      const { data: cur } = await supabaseAdmin
+        .from("source_products")
+        .select("review_status")
+        .eq("id", data.productId)
+        .maybeSingle();
+      const rs = (cur as { review_status?: string | null } | null)?.review_status ?? "NONE";
+      if (rs === "APPROVED" || rs === "NONE") {
+        await supabaseAdmin
+          .from("source_products")
+          .update({
+            review_status: "NEEDS_REVIEW",
+            ...(rs === "APPROVED" ? { approved_at: null, approved_by: null } : {}),
+          } as never)
+          .eq("id", data.productId);
+      }
+    }
     return row as { id: string; created_at: string };
   });
 
