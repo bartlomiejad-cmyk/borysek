@@ -453,12 +453,18 @@ function ProductDetail() {
   const regeneratedUrl = resolveRegenUrl(
     (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null,
   );
-  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ url?: string; deduped?: boolean; ean_confirmed?: boolean }>;
+  const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ url?: string; deduped?: boolean; ean_confirmed?: boolean; manual?: boolean }>;
   const dedupedCount = scoreBreakdown.filter((s) => s.deduped === true).length;
   const eanConfirmedByUrl = new Map<string, boolean>();
+  const manualByUrl = new Map<string, boolean>();
   for (const b of scoreBreakdown) {
     if (b?.url) eanConfirmedByUrl.set(b.url, !!b.ean_confirmed);
+    if (b?.url && b.manual === true) manualByUrl.set(b.url, true);
   }
+  const productMatchingMode = ((product as { matching_mode?: string | null }).matching_mode === "compatible")
+    ? "compatible"
+    : "strict";
+  const compatSuggested = !!(enrichment as { compat_suggested?: boolean } | null)?.compat_suggested;
   const hasAnyEanConfirmed = Array.from(eanConfirmedByUrl.values()).some(Boolean);
   // The main image "comes from" a source when that image appears in the
   // source's images/extra_images list. Warn only when we have at least one
