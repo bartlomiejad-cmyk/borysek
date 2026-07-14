@@ -833,6 +833,26 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
       ((proj.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
     const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, "");
 
+    // Pull up to 5 sample product names so the model can infer the actual
+    // category even when the project name is opaque (e.g. "Projekt Kowalski Q3").
+    let sampleBlock = "";
+    try {
+      const { data: sampleRows } = await supabase
+        .from("source_products")
+        .select("nazwa")
+        .eq("project_id", data.projectId)
+        .order("created_at", { ascending: true })
+        .limit(5);
+      const names = (sampleRows ?? [])
+        .map((r) => ((r as { nazwa?: string | null }).nazwa ?? "").trim())
+        .filter((n) => n.length > 0);
+      if (names.length) {
+        sampleBlock = `\nPrzykładowe produkty w projekcie: ${names.map((n) => `„${n}"`).join(", ")}.`;
+      }
+    } catch {
+      // best-effort — jeżeli brak dostępu / błąd, pomijamy blok
+    }
+
     const system =
       data.field === "style"
         ? [
@@ -855,8 +875,8 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
 
     const user =
       data.field === "style"
-        ? `Nazwa projektu: "${projectName}".${guidelinesBlock ? `\n\n${guidelinesBlock}` : ""}`
-        : `Nazwa projektu: "${projectName}".${currentStyle ? `\nWybrany styl/scena: "${currentStyle}".` : ""}${guidelinesBlock ? `\n\n${guidelinesBlock}` : ""}`;
+        ? `Nazwa projektu: "${projectName}".${sampleBlock}${guidelinesBlock ? `\n\n${guidelinesBlock}` : ""}`
+        : `Nazwa projektu: "${projectName}".${sampleBlock}${currentStyle ? `\nWybrany styl/scena: "${currentStyle}".` : ""}${guidelinesBlock ? `\n\n${guidelinesBlock}` : ""}`;
 
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
