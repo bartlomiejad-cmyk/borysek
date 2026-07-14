@@ -4090,6 +4090,12 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
       issues?: string[];
       candidate_url?: string | null;
     } } | null | undefined)?.thumbnail_qc ?? null,
+    viz_qc: (en.image_meta as {
+      viz_qc?: Record<
+        string,
+        { passed?: boolean; product_intact?: boolean; product_visible?: boolean; issues?: string[] }
+      >;
+    } | null | undefined)?.viz_qc ?? null,
   });
 
   const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;
