@@ -251,3 +251,109 @@ export const recleanProductSources = createServerFn({ method: "POST" })
 
     return { scanned, updated, imagesRemoved, charsRemoved };
   });
+
+/**
+ * Pełny reset stanu wyszukiwania dla produktu/projektu:
+ *  • usuwa wpisy `search_results` dla objętych produktów (po `term`,
+ *    w ramach projektu, tylko jeśli dany term nie jest używany przez
+ *    inny produkt spoza selekcji),
+ *  • czyści discovery-related pola w `enrichments` (picked_urls,
+ *    matched_term, status, image_scores, hidden_images, image_meta,
+ *    score_breakdown, quality, error),
+ *  • ustawia `pipeline_status = 'IMPORTED'`.
+ * Nie modyfikuje: `manual_lock`, `review_status`, `approved_at`,
+ * `approved_by`, notatek klienta, audytu, ani ręcznych override'ów
+ * (np. `viz_analysis` z flagą `manual = true` — po prostu nie ruszamy
+ * tego pola).
+ */
+export const resetProductSources = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        productIds: z.array(z.string().uuid()).max(20000).optional(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: products, error } = await supabase
+      .from("source_products")
+      .select("id, nazwa")
+      .eq("project_id", data.projectId);
+    if (error) throw new Error(error.message);
+
+    const restrict = data.productIds ? new Set(data.productIds) : null;
+    const targeted = (products ?? []).filter((p) =>
+      restrict ? restrict.has(p.id as string) : true,
+    );
+    const untargeted = (products ?? []).filter((p) =>
+      restrict ? !restrict.has(p.id as string) : false,
+    );
+
+    const norm = (s: string | null | undefined) =>
+      (s ?? "").trim().toLowerCase();
+
+    const targetedTerms = new Set(
+      targeted.map((p) => norm(p.nazwa)).filter((t) => t.length > 0),
+    );
+    const sharedTerms = new Set(
+      untargeted.map((p) => norm(p.nazwa)).filter((t) => targetedTerms.has(t)),
+    );
+    const deletableTerms = [...targetedTerms].filter((t) => !sharedTerms.has(t));
+
+    let deletedSearchRows = 0;
+    if (deletableTerms.length) {
+      // Match case-insensitively (search_results.term is stored trimmed +
+      // lowercased by the worker; existing rows might not be, so we do a
+      // per-term delete with ilike).
+      for (const term of deletableTerms) {
+        const { data: del, error: dErr } = await supabase
+          .from("search_results")
+          .delete()
+          .eq("project_id", data.projectId)
+          .ilike("term", term)
+          .select("id");
+        if (dErr) throw new Error(dErr.message);
+        deletedSearchRows += (del ?? []).length;
+      }
+    }
+
+    const targetedIds = targeted.map((p) => p.id as string);
+    let enrichmentsReset = 0;
+    if (targetedIds.length) {
+      const { data: upd, error: uErr } = await supabase
+        .from("enrichments")
+        .update({
+          picked_urls: [] as never,
+          matched_term: null,
+          status: null,
+          image_scores: {} as never,
+          hidden_images: [] as never,
+          image_meta: {} as never,
+          score_breakdown: null,
+          quality: null,
+          error: null,
+        } as never)
+        .in("source_product_id", targetedIds)
+        .eq("project_id", data.projectId)
+        .select("source_product_id");
+      if (uErr) throw new Error(uErr.message);
+      enrichmentsReset = (upd ?? []).length;
+
+      const { error: spErr } = await supabase
+        .from("source_products")
+        .update({ pipeline_status: "IMPORTED" } as never)
+        .in("id", targetedIds)
+        .eq("project_id", data.projectId);
+      if (spErr) throw new Error(spErr.message);
+    }
+
+    return {
+      products: targetedIds.length,
+      deletedSearchRows,
+      enrichmentsReset,
+    };
+  });
