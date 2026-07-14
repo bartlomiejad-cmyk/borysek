@@ -17,6 +17,7 @@ import {
   clearRegeneratedImage,
   acceptThumbnailCandidate,
   rejectThumbnailCandidate,
+  saveVizAnalysisOverride,
 } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
