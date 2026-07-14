@@ -631,17 +631,35 @@ const ImageScoreSchema = z.object({
 export type ImageScore = z.infer<typeof ImageScoreSchema> & {
   scored_at: string;
   manual_keep?: boolean;
+  /**
+   * Version of the identity check that produced this entry. Bumped when the
+   * verification prompt / anchor-reference logic changes so we can refresh
+   * stale verdicts on next analyze without asking the user.
+   * v2 = anchor-image + broader "same/different/unsure" definitions.
+   */
+  identity_v?: number;
 };
+
+/** Current identity check schema version. Bump when prompt semantics change. */
+const IDENTITY_VERSION = 2;
 
 const SCORE_SYSTEM_PROMPT =
   "Jesteś ekspertem e-commerce. Oceń kompozycję zdjęcia pod kątem przydatności jako główna miniaturka produktu w sklepie. Zwróć surowy JSON według podanego schematu.";
 
-function buildScoreUserText(productName: string, brand: string): string {
+function buildScoreUserText(productName: string, brand: string, hasReference: boolean): string {
   const header = productName
     ? `Rozpatrywany produkt: „${productName}"${brand ? ` (marka: ${brand})` : ""}.`
     : "";
+  const referenceBlock = hasReference
+    ? [
+        "OBRAZ REFERENCYJNY (na pewno przedstawia właściwy produkt): obraz nr 1.",
+        "Oceń pozostałe obrazy porównując je z referencją ORAZ z nazwą produktu.",
+        "Kompozycję (is_central / is_clean / has_packaging / is_banner_or_trash) oceniaj WYŁĄCZNIE dla obrazu ocenianego (nie dla referencji).",
+      ].join("\n")
+    : "";
   return [
     header,
+    referenceBlock,
     "Oceń to zdjęcie i zwróć WYŁĄCZNIE JSON o strukturze:",
     '{"is_central": number (1-10), "is_clean": number (1-10), "has_packaging": number (0-10), "is_banner_or_trash": boolean, "identity": "same" | "different" | "unsure"}',
     "",
@@ -649,7 +667,9 @@ function buildScoreUserText(productName: string, brand: string): string {
     "is_clean: czy tło jest jednolite/białe/mało rozpraszające (10). Odejmij punkty za banery, napisy, logotypy, kolaż.",
     "has_packaging: 10 = w kadrze widać i opakowanie I sam produkt; 6-9 = tylko opakowanie; 3-5 = sam produkt bez opakowania; 0-2 = brak kontekstu.",
     "is_banner_or_trash: true, jeśli obrazek to baner, infografika, tabela rozmiarów, ikona, logo sklepu, znak wodny lub kolaż.",
-    "identity: 'same' = zdjęcie pokazuje DOKŁADNIE ten produkt z nagłówka (ta sama nazwa/marka/wariant); 'different' = to inny produkt (np. kafle „polecane/nowości\", inny wariant, inny model); 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true.",
+    hasReference
+      ? "identity: 'same' = ten sam produkt co na referencji/w nazwie (dopuszczalne inne ujęcie, kąt, opakowanie zbiorcze, zbliżenie na detal); 'different' = inny produkt, inny wariant lub inna kategoria (np. inne kafle z listingu, inny model, inny kolor/rozmiar zmieniający SKU); 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true."
+      : "identity: 'same' = zdjęcie pokazuje ten sam produkt co w nazwie (dopuszczalne inne ujęcie, kąt, opakowanie zbiorcze); 'different' = inny produkt, inny wariant lub inna kategoria; 'unsure' = nie można stwierdzić na podstawie samego zdjęcia. Jeżeli obraz jest banerem/logo/ikoną, ustaw 'unsure' i i tak zaznacz is_banner_or_trash=true.",
   ].filter(Boolean).join("\n");
 }
 
@@ -658,11 +678,18 @@ async function scoreOneImage(
   url: string,
   productName: string,
   brand: string,
+  anchorUrl: string | null,
   timeoutMs = 15000,
 ): Promise<ImageScore> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const hasReference = Boolean(anchorUrl) && anchorUrl !== url;
+    const imageBlocks: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+    if (hasReference && anchorUrl) {
+      imageBlocks.push({ type: "image_url", image_url: { url: anchorUrl } });
+    }
+    imageBlocks.push({ type: "image_url", image_url: { url } });
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
@@ -679,8 +706,8 @@ async function scoreOneImage(
           {
             role: "user",
             content: [
-              { type: "text", text: buildScoreUserText(productName, brand) },
-              { type: "image_url", image_url: { url } },
+              { type: "text", text: buildScoreUserText(productName, brand, hasReference) },
+              ...imageBlocks,
             ],
           },
         ],
@@ -694,7 +721,7 @@ async function scoreOneImage(
     let parsed: unknown;
     try { parsed = JSON.parse(content); } catch { throw new Error("Model did not return valid JSON"); }
     const out = ImageScoreSchema.parse(parsed);
-    return { ...out, scored_at: new Date().toISOString() };
+    return { ...out, scored_at: new Date().toISOString(), identity_v: IDENTITY_VERSION };
   } finally {
     clearTimeout(t);
   }
@@ -706,6 +733,11 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
     z.object({
       productId: z.string().uuid(),
       urls: z.array(z.string().url()).min(1).max(8),
+      /**
+       * When true, ignore cached scores for every provided URL and re-run
+       * the identity check. Manually kept entries are still preserved.
+       */
+      revalidate: z.boolean().optional(),
     }).parse(i),
   )
   .handler(async ({ data, context }) => {
@@ -726,64 +758,76 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
     const brand = String(importedExtract.marka ?? importedExtract.producent ?? "").trim();
     const productName = String((product as unknown as { nazwa?: string }).nazwa ?? "").trim();
 
-    // Aggregate image tiers across all product_sources for this project.
-    // Tier 1 (JSON-LD / og:image) skips Vision — the shop declared it as THE
-    // product image, so we save cost and avoid false "different" verdicts.
-    const { data: sources } = await supabase
-      .from("product_sources")
-      .select("image_meta")
-      .eq("project_id", (product as unknown as { project_id: string }).project_id);
-    const tierByUrl = new Map<string, 1 | 2 | 3>();
-    for (const row of (sources ?? []) as Array<{ image_meta?: Array<{ url: string; tier: 1 | 2 | 3 }> | null }>) {
-      const list = row.image_meta ?? [];
-      for (const it of list) {
-        const prev = tierByUrl.get(it.url) ?? 3;
-        if (it.tier < prev) tierByUrl.set(it.url, it.tier);
-      }
-    }
-
     const { data: enrichment, error: eErr } = await supabase
       .from("enrichments")
-      .select("id, image_scores")
+      .select("id, image_scores, pinned_main_url, regenerated_main_image")
       .eq("source_product_id", data.productId)
       .maybeSingle();
     if (eErr) throw new Error(eErr.message);
     if (!enrichment) throw new Error("No enrichment record. Run matching first.");
 
-    const existing = (((enrichment as unknown as { image_scores?: Record<string, ImageScore> }).image_scores) ?? {}) as Record<string, ImageScore>;
-    // Skip Tier 1 (JSON-LD/og:image) — mark them as trusted without a Vision call.
-    const tier1Auto: Record<string, ImageScore> = {};
-    for (const u of data.urls) {
-      if (existing[u]) continue;
-      if ((tierByUrl.get(u) ?? 3) === 1) {
-        tier1Auto[u] = {
-          is_central: 8,
-          is_clean: 8,
-          has_packaging: 5,
-          is_banner_or_trash: false,
-          identity: "same",
-          scored_at: new Date().toISOString(),
-        };
-      }
-    }
-    const toScore = data.urls.filter((u) => !existing[u] && !tier1Auto[u]);
+    const enRow = enrichment as unknown as {
+      id: string;
+      image_scores?: Record<string, ImageScore> | null;
+      pinned_main_url?: string | null;
+      regenerated_main_image?: string | null;
+    };
+    const existing = (enRow.image_scores ?? {}) as Record<string, ImageScore>;
 
-    if (!toScore.length && !Object.keys(tier1Auto).length) {
+    // Choose an anchor image the vision model can trust. Priority:
+    // 1) user-pinned main image, 2) regenerated main image (skip sentinel),
+    // 3) best-scored existing 'same' image in the cache. Fallback: no anchor
+    // (identity check compares against name only, current behaviour).
+    const pickBestSameAnchor = (): string | null => {
+      let bestUrl: string | null = null;
+      let bestScore = -Infinity;
+      for (const [u, s] of Object.entries(existing)) {
+        if (!s || s.identity !== "same" || s.is_banner_or_trash) continue;
+        const score = (s.is_central ?? 0) + (s.is_clean ?? 0);
+        if (score > bestScore) { bestScore = score; bestUrl = u; }
+      }
+      return bestUrl;
+    };
+    const regen = enRow.regenerated_main_image;
+    const anchorUrl: string | null =
+      (enRow.pinned_main_url && enRow.pinned_main_url !== "__imported__" ? enRow.pinned_main_url : null) ??
+      (regen && regen !== "__imported__" ? regen : null) ??
+      pickBestSameAnchor();
+
+    // Cache policy: re-check URLs missing from cache, OR whose stored verdict
+    // predates this identity schema version, OR when the caller explicitly
+    // asked to revalidate. Never touch manually-accepted entries.
+    const needsCheck = (u: string): boolean => {
+      const prev = existing[u];
+      if (!prev) return true;
+      if (prev.manual_keep === true) return false;
+      if (data.revalidate) return true;
+      return (prev.identity_v ?? 0) < IDENTITY_VERSION;
+    };
+    const toScore = data.urls.filter(needsCheck);
+
+    if (!toScore.length) {
       return { scores: existing, source: "cache" as const, failed: [] as string[] };
     }
 
     const settled = await Promise.allSettled(
-      toScore.map((u) => scoreOneImage(apiKey, u, productName, brand)),
+      toScore.map((u) => scoreOneImage(apiKey, u, productName, brand, anchorUrl && anchorUrl !== u ? anchorUrl : null)),
     );
-    const merged: Record<string, ImageScore> = { ...existing, ...tier1Auto };
+    const merged: Record<string, ImageScore> = { ...existing };
     const failed: string[] = [];
     settled.forEach((r, idx) => {
       const url = toScore[idx];
-      if (r.status === "fulfilled") merged[url] = r.value;
-      else failed.push(url);
+      if (r.status === "fulfilled") {
+        // Preserve manual_keep if it was somehow set on this URL between
+        // read and write (defence in depth — the filter above already skips).
+        const prevManual = existing[url]?.manual_keep;
+        merged[url] = prevManual ? { ...r.value, manual_keep: true } : r.value;
+      } else {
+        failed.push(url);
+      }
     });
 
-    const anySuccess = settled.some((r) => r.status === "fulfilled") || Object.keys(tier1Auto).length > 0;
+    const anySuccess = settled.some((r) => r.status === "fulfilled");
     if (anySuccess) {
       const { error: upErr } = await supabase
         .from("enrichments")
@@ -792,7 +836,7 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       if (upErr) throw new Error(upErr.message);
     }
 
-    const allFailed = toScore.length > 0 && failed.length === toScore.length && Object.keys(tier1Auto).length === 0;
+    const allFailed = toScore.length > 0 && failed.length === toScore.length;
     if (allFailed) throw new Error("AI scoring failed for all images");
 
     return {

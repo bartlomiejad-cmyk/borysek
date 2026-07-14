@@ -129,6 +129,7 @@ function ProductDetail() {
   const [allegroGenAt, setAllegroGenAt] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
   const analyzedKeyRef = useRef<string>("");
   const [productNotes, setProductNotes] = useState("");
@@ -184,6 +185,28 @@ function ProductDetail() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["product", id, pid] });
     qc.invalidateQueries({ queryKey: ["project", id, "products"] });
+  };
+
+  // Manual re-verify: force re-run of the identity check for every visible
+  // image (up to the server-fn cap) with the new anchor-reference logic.
+  // Manually-kept and hidden entries are protected server-side.
+  const revalidateImages = async () => {
+    const urls = allVisible.filter((u) => !hiddenSet.has(u)).slice(0, 8);
+    if (!urls.length) {
+      toast.info("Brak widocznych zdjęć do weryfikacji");
+      return;
+    }
+    setRevalidating(true);
+    try {
+      analyzedKeyRef.current = "revalidated"; // stop the auto-analyze effect from firing again
+      await analyzeFn({ data: { productId: pid, urls, revalidate: true } });
+      toast.success(`Zweryfikowano ${urls.length} zdjęć`);
+      invalidate();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się zweryfikować zdjęć"));
+    } finally {
+      setRevalidating(false);
+    }
   };
 
   // Derive top-4 visible images and trigger AI scoring for missing ones.
@@ -676,10 +699,26 @@ function ProductDetail() {
             <div className="rounded border bg-muted/30 p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">Wybrane zdjęcia</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {allVisible.filter((u) => !hiddenSet.has(u)).length} widocznych
-                  {hiddenImages.length ? ` · ${hiddenImages.length} ukrytych` : ""}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    {allVisible.filter((u) => !hiddenSet.has(u)).length} widocznych
+                    {hiddenImages.length ? ` · ${hiddenImages.length} ukrytych` : ""}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={revalidating}
+                    title="Ponownie sprawdź tożsamość widocznych zdjęć porównując je z obrazem referencyjnym (przypiętym/zregenerowanym) i nazwą produktu."
+                    onClick={revalidateImages}
+                  >
+                    {revalidating ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-3 w-3 mr-1" />
+                    )}
+                    {revalidating ? "Weryfikuję…" : "Zweryfikuj zdjęcia ponownie"}
+                  </Button>
+                </div>
               </div>
               {(() => {
                 const visible = allVisible.filter((u) => !hiddenSet.has(u));
@@ -754,6 +793,51 @@ function ProductDetail() {
                           >
                             <Undo2 className="h-3 w-3" />
                           </button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })()}
+              {(() => {
+                const unsure = (((data as { unsure_identity_images?: string[] } | undefined)?.unsure_identity_images) ?? []) as string[];
+                if (!unsure.length) return null;
+                return (
+                  <details className="pt-1">
+                    <summary className="text-[11px] text-sky-700 dark:text-sky-400 cursor-pointer hover:text-foreground">
+                      Niepewne — do weryfikacji ({unsure.length})
+                    </summary>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      AI nie mogła jednoznacznie potwierdzić, że to ten produkt. Zaakceptuj (dopisz do galerii) lub odrzuć (ukryj).
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                      {unsure.map((u) => (
+                        <div key={u} className="relative group rounded border border-sky-400/40 p-0.5">
+                          <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 flex justify-between opacity-0 group-hover:opacity-100 transition">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await restoreIdentityFn({ data: { productId: pid, url: u, keep: true } });
+                                  toast.success("Zaakceptowano zdjęcie");
+                                  invalidate();
+                                } catch (e) {
+                                  toast.error(friendlyError(e, "Nie udało się zaakceptować"));
+                                }
+                              }}
+                              className="bg-emerald-600 text-white rounded p-0.5"
+                              title="Zaakceptuj — dodaj do galerii"
+                            >
+                              <ShieldCheck className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => hideMut.mutate(u)}
+                              className="bg-destructive text-destructive-foreground rounded p-0.5"
+                              title="Odrzuć — ukryj"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
