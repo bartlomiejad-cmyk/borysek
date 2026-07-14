@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { getVisibleGallery, type GalleryImageScore } from "@/lib/pim/gallery";
+import { resolveRegenUrl } from "@/lib/pim/media";
 
 // UWAGA: node:crypto NIE MOŻE być importowane na top-level tego pliku,
 // bo `.functions.ts` jest w grafie klienta. Ładujemy helpery dynamicznie
@@ -12,17 +14,12 @@ export type SharePublicEnrichment = {
   golden_features: Array<{ key: string; value: string }> | null;
   golden_slug: string | null;
   golden_meta_description: string | null;
-  picked_urls: string[] | null;
-  regenerated_main_image: string | null;
-  pinned_main_url: string | null;
-  ai_gallery_urls: string[] | null;
-  hidden_images: string[] | null;
-  image_scores: Record<string, {
-    is_banner_or_trash?: boolean;
-    identity?: "same" | "different" | "unsure";
-    manual_keep?: boolean;
-    dead?: boolean;
-  }> | null;
+  /** Preferred hero image (regen if present, otherwise first accepted). */
+  main_image_url: string | null;
+  /** Accepted product photos, main first. AI verdicts already applied server-side. */
+  images: string[];
+  /** AI-generated visualizations, kept as a separate labeled gallery. */
+  ai_visualizations: string[];
   status: string;
 };
 
@@ -34,6 +31,56 @@ export type SharePublicProduct = {
   enrichment: SharePublicEnrichment | null;
   feedback: { comments: number; fixes: number };
 };
+
+type RawEnrichmentRow = {
+  golden_name: string | null;
+  golden_description: string | null;
+  golden_features: Array<{ key: string; value: string }> | null;
+  golden_slug: string | null;
+  golden_meta_description: string | null;
+  picked_urls: string[] | null;
+  regenerated_main_image: string | null;
+  pinned_main_url: string | null;
+  ai_gallery_urls: string[] | null;
+  hidden_images: string[] | null;
+  image_scores: Record<string, GalleryImageScore | undefined> | null;
+  status: string;
+} | null;
+
+function toPublicEnrichment(e: RawEnrichmentRow): SharePublicEnrichment | null {
+  if (!e) return null;
+  const pinned = e.pinned_main_url ?? null;
+  const regen = resolveRegenUrl(e.regenerated_main_image);
+  const base: string[] = [];
+  if (pinned) base.push(pinned);
+  for (const u of e.picked_urls ?? []) {
+    if (u && !base.includes(u)) base.push(u);
+  }
+  const { accepted } = getVisibleGallery(base, {
+    hidden_images: e.hidden_images ?? null,
+    image_scores: e.image_scores ?? null,
+    pinned_main_url: pinned,
+  });
+  const images: string[] = [];
+  if (regen) images.push(regen);
+  for (const u of accepted) {
+    if (u && !images.includes(u)) images.push(u);
+  }
+  const aiViz = (e.ai_gallery_urls ?? []).filter(
+    (u): u is string => typeof u === "string" && u.length > 0,
+  );
+  return {
+    golden_name: e.golden_name,
+    golden_description: e.golden_description,
+    golden_features: e.golden_features,
+    golden_slug: e.golden_slug,
+    golden_meta_description: e.golden_meta_description,
+    main_image_url: images[0] ?? null,
+    images,
+    ai_visualizations: aiViz,
+    status: e.status,
+  };
+}
 
 // -------- OWNER: create / rotate / revoke --------
 
@@ -290,9 +337,24 @@ export const listShareProducts = createServerFn({ method: "POST" })
     }
 
     const outRaw = (products ?? []).map((p) => {
-      const row = p as { id: string };
+      const row = p as {
+        id: string;
+        nazwa: string | null;
+        kod: string | null;
+        ean: string | null;
+        enrichment: RawEnrichmentRow | RawEnrichmentRow[] | null;
+      };
+      const enRaw = Array.isArray(row.enrichment) ? row.enrichment[0] ?? null : row.enrichment;
       const fbc = fbMap.get(row.id) ?? { comments: 0, fixes: 0 };
-      return { ...(p as Record<string, unknown>), feedback: fbc };
+      const out: SharePublicProduct = {
+        id: row.id,
+        nazwa: row.nazwa,
+        kod: row.kod,
+        ean: row.ean,
+        enrichment: toPublicEnrichment(enRaw ?? null),
+        feedback: fbc,
+      };
+      return out;
     });
     const payload = {
       projectName: (proj as { name?: string } | null)?.name ?? "Projekt",
@@ -384,5 +446,21 @@ export const getShareProduct = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!p) throw new Error("Nie znaleziono produktu");
-    return JSON.parse(JSON.stringify(p)) as SharePublicProduct;
+    const row = p as {
+      id: string;
+      nazwa: string | null;
+      kod: string | null;
+      ean: string | null;
+      enrichment: RawEnrichmentRow | RawEnrichmentRow[] | null;
+    };
+    const enRaw = Array.isArray(row.enrichment) ? row.enrichment[0] ?? null : row.enrichment;
+    const out: SharePublicProduct = {
+      id: row.id,
+      nazwa: row.nazwa,
+      kod: row.kod,
+      ean: row.ean,
+      enrichment: toPublicEnrichment(enRaw ?? null),
+      feedback: { comments: 0, fixes: 0 },
+    };
+    return JSON.parse(JSON.stringify(out)) as SharePublicProduct;
   });
