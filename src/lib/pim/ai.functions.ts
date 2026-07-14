@@ -639,7 +639,84 @@ export type ImageScore = z.infer<typeof ImageScoreSchema> & {
    * v2 = anchor-image + broader "same/different/unsure" definitions.
    */
   identity_v?: number;
+  /**
+   * True when a pre-flight HEAD probe (or gateway upstream_error) proved this
+   * URL is unreachable / returns 4xx. Cached to skip both HEAD and AI calls
+   * on subsequent runs. Manually accepted (manual_keep) images are never
+   * flipped to dead automatically.
+   */
+  dead?: boolean;
 };
+
+/**
+ * Filter a list of image URLs to those we believe are still reachable.
+ * Consults the enrichments.image_scores cache first ("dead:true" → skip
+ * without network), then runs bounded-parallel HEAD probes on the remainder
+ * and writes new dead markers back so the next run is free.
+ *
+ * Returns the ordered alive subset — safe to pass to AI Gateway as
+ * `image_url` blocks.
+ */
+async function filterAliveImages(
+  supabase: import("@supabase/supabase-js").SupabaseClient,
+  enrichmentId: string,
+  urls: string[],
+  currentScores: Record<string, ImageScore>,
+): Promise<{ alive: string[]; dead: string[] }> {
+  if (!urls.length) return { alive: [], dead: [] };
+
+  const cachedDead: string[] = [];
+  const toProbe: string[] = [];
+  for (const u of urls) {
+    const prev = currentScores[u];
+    if (prev?.dead === true && prev.manual_keep !== true) {
+      cachedDead.push(u);
+    } else {
+      toProbe.push(u);
+    }
+  }
+
+  let probedDead: string[] = [];
+  let alive = urls.filter((u) => !cachedDead.includes(u));
+  if (toProbe.length) {
+    const result = await probeImageUrls(toProbe, { timeoutMs: 4000, concurrency: 8 });
+    probedDead = result.dead;
+    if (probedDead.length) {
+      const nowIso = new Date().toISOString();
+      const merged: Record<string, ImageScore> = { ...currentScores };
+      for (const u of probedDead) {
+        const prev = merged[u];
+        if (prev?.manual_keep === true) continue;
+        merged[u] = {
+          ...(prev ?? {
+            is_central: 0,
+            is_clean: 0,
+            has_packaging: 0,
+            is_banner_or_trash: false,
+            identity: "unsure" as const,
+          }),
+          dead: true,
+          scored_at: nowIso,
+        };
+      }
+      try {
+        await supabase
+          .from("enrichments")
+          .update({ image_scores: merged as never } as never)
+          .eq("id", enrichmentId);
+      } catch (e) {
+        console.warn("[image-probe] failed to persist dead markers", e);
+      }
+      alive = alive.filter((u) => !probedDead.includes(u));
+    }
+  }
+
+  const dead = [...cachedDead, ...probedDead];
+  if (dead.length) {
+    console.log(`[image-probe] enrichment ${enrichmentId}: skipping ${dead.length} dead url(s)`);
+  }
+  return { alive, dead };
+}
 
 /** Current identity check schema version. Bump when prompt semantics change. */
 const IDENTITY_VERSION = 2;
