@@ -871,6 +871,13 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     } catch { /* review-reset is best-effort */ }
     await emit(ctx, { level: "success", message: `✅ ${product.nazwa ?? productId} — opis wygenerowany` });
     await advancePipelineStatus(supabaseAdmin as never, product.id, "GOLDEN_READY");
+    await logProductEvent(supabaseAdmin, {
+      projectId: product.project_id,
+      productId: product.id,
+      kind: "golden_generated",
+      message: `Wygenerowano złoty rekord (${dataSufficiency ?? "n/d"})`,
+      meta: { model: GOLDEN_MODEL, data_sufficiency: dataSufficiency ?? null },
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabaseAdmin
