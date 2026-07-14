@@ -22,7 +22,7 @@ export const PIPELINE_STATUS_LABEL: Record<PimPipelineStatus, string> = {
   SOURCES_FOUND: "Źródła znalezione",
   MATCHED: "Dopasowany",
   GOLDEN_READY: "Rekord gotowy",
-  VISUALS_READY: "Wizualizacje gotowe",
+  VISUALS_READY: "Media gotowe",
 };
 
 export function pipelineStatusRank(s: PimPipelineStatus | string | null | undefined): number {
