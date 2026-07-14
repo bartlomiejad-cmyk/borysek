@@ -30,6 +30,29 @@ type SourceMeta = {
   imagesCount: number;
 };
 
+/**
+ * True when the product's EAN (or its zero-stripped form) can be found inside
+ * the source's title, description or URL. Comparison is done on digit-only
+ * strings so separators (spaces, dashes, dots) don't hide a match.
+ */
+export function eanConfirmedFor(
+  productEan: string | null | undefined,
+  meta: { title: string | null; description: string | null },
+  url: string,
+): boolean {
+  const digits = (productEan ?? "").replace(/\D/g, "");
+  if (digits.length < 6) return false;
+  const stripped = digits.replace(/^0+/, "");
+  const hay = ((meta.title ?? "") + " " + (meta.description ?? "") + " " + (url ?? "")).replace(
+    /\D/g,
+    "",
+  );
+  if (!hay) return false;
+  if (hay.includes(digits)) return true;
+  if (stripped.length >= 6 && hay.includes(stripped)) return true;
+  return false;
+}
+
 type ScoreResult = {
   total: number;
   producer_boost: boolean;
