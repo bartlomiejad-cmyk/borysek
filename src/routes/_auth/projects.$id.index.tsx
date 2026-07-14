@@ -1150,7 +1150,20 @@ function ProjectPage() {
                 {filtered.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                      Brak produktów do wyświetlenia
+                      {filter !== "ALL" ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <span>Brak produktów na tym etapie — wszystko zrobione ✅</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateSearch({ filter: "ALL", stage: "NONE", page: 1 })}
+                          >
+                            Pokaż wszystkie
+                          </Button>
+                        </div>
+                      ) : (
+                        "Brak produktów do wyświetlenia"
+                      )}
                     </TableCell>
                   </TableRow>
                 )}
