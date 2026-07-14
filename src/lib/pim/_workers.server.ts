@@ -22,6 +22,7 @@ import {
   sanitizeGoldenDescriptionHtml,
   ALLEGRO_DESCRIPTION_SYSTEM_PROMPT,
   sanitizeAllegroDescriptionHtml,
+  buildClientGuidelinesBlock,
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
