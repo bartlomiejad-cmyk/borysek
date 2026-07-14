@@ -887,6 +887,8 @@ function ProjectPage() {
         </TabsList>
 
         <TabsContent value="data" className="space-y-3 pt-3">
+          {(stage === "IMPORT" || (meta?.counts.source_products ?? 0) === 0) && (
+            <>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
             <ImportCsvDialog
               projectId={id}
@@ -933,6 +935,8 @@ function ProjectPage() {
               onDone={() => refetchProducts()}
             />
           </div>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="settings" className="pt-3">
