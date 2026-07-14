@@ -15,6 +15,12 @@ import {
   finalizeMetaDescription,
   SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
+import {
+  BUILT_IN_PRESETS,
+  readCustomPresets,
+  resolvePresetById,
+  type ScenePreset,
+} from "./scene-presets";
 
 const MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -1088,6 +1094,120 @@ export const suggestVisualizationField = createServerFn({ method: "POST" })
     const text = (json.choices?.[0]?.message?.content ?? "").trim().replace(/^["„"]|["""]$/g, "");
     if (!text) throw new Error("Model nie zwrócił treści");
     return { text };
+  });
+
+// ---------------------------------------------------------------------------
+// Preset-based visualization suggestion.
+//
+// Given the project + sample product names, pick the best matching preset id
+// from a supplied list and return a short Polish `adjustments` string that
+// personalises the render for this catalogue. This replaces the free-text
+// "propose style/requirements" flow with a bounded, deterministic choice
+// that keeps outputs consistent across a project.
+// ---------------------------------------------------------------------------
+
+const SuggestPresetInput = z.object({
+  projectId: z.string().uuid(),
+});
+
+export const suggestVisualizationPreset = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => SuggestPresetInput.parse(input))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: proj, error } = await supabase
+      .from("projects")
+      .select("name, visualization_style_prompt, visualization_requirements_pl, settings")
+      .eq("id", data.projectId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!proj) throw new Error("Nie znaleziono projektu");
+
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
+
+    const custom = readCustomPresets((proj as { settings?: unknown }).settings ?? null);
+    const presets: ScenePreset[] = [...BUILT_IN_PRESETS, ...custom];
+
+    const projectName = (proj.name ?? "").trim() || "(bez nazwy)";
+    const clientGuidelines =
+      ((proj.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+    const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, "");
+
+    let sampleBlock = "";
+    try {
+      const { data: sampleRows } = await supabase
+        .from("source_products")
+        .select("nazwa")
+        .eq("project_id", data.projectId)
+        .order("created_at", { ascending: true })
+        .limit(8);
+      const names = (sampleRows ?? [])
+        .map((r) => ((r as { nazwa?: string | null }).nazwa ?? "").trim())
+        .filter((n) => n.length > 0);
+      if (names.length) {
+        sampleBlock = `Przykładowe produkty: ${names.map((n) => `„${n}"`).join(", ")}.`;
+      }
+    } catch {
+      // best-effort
+    }
+
+    const presetList = presets
+      .map((p) => `- id="${p.id}" — ${p.label_pl}: ${p.thumbnail_hint}`)
+      .join("\n");
+
+    const system = [
+      "Jesteś dyrektorem artystycznym fotografii produktowej e-commerce.",
+      "Dostajesz listę PRESETÓW SCEN oraz kontekst projektu (nazwa, przykładowe produkty).",
+      "Zwróć JSON: {\"preset_id\": string, \"adjustments\": string}.",
+      "- preset_id: dokładnie jedno id z listy (nie wymyślaj innych).",
+      "- adjustments: krótkie doprecyzowanie po polsku dla tego asortymentu (maks. 220 znaków; np. dodaj świeże liście i drewnianą deskę do prezentacji). Bez marek, bez ludzi, bez CTA. Zostaw puste, jeżeli preset wystarcza.",
+      "Zasady zachowania produktu (kolor, logo, proporcje, tekst) są nadrzędne — nie sugeruj ich zmiany.",
+    ].join("\n");
+
+    const user = [
+      `Nazwa projektu: "${projectName}".`,
+      sampleBlock,
+      guidelinesBlock,
+      "",
+      "PRESETY:",
+      presetList,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": apiKey,
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-5.5",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (res.status === 429) throw new Error("Przekroczono limit zapytań AI — spróbuj za chwilę.");
+    if (res.status === 402) throw new Error("Brak kredytów AI w workspace.");
+    if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = (json.choices?.[0]?.message?.content ?? "").trim();
+    let parsed: { preset_id?: unknown; adjustments?: unknown } = {};
+    try {
+      parsed = JSON.parse(content) as typeof parsed;
+    } catch {
+      throw new Error("Model nie zwrócił poprawnego JSON-a");
+    }
+    const presetId = typeof parsed.preset_id === "string" ? parsed.preset_id.trim() : "";
+    const adjustments = typeof parsed.adjustments === "string" ? parsed.adjustments.trim() : "";
+    const resolved = presetId ? resolvePresetById(presetId, custom) : null;
+    // Fall back to the first built-in preset if the model hallucinated an id.
+    const finalId = resolved ? resolved.id : BUILT_IN_PRESETS[0]!.id;
+    return { preset_id: finalId, adjustments: adjustments.slice(0, 240) };
   });
 
 // ---------------------------------------------------------------------------
