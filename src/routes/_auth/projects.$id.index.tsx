@@ -186,6 +186,9 @@ function ProjectPage() {
   const setLockFn = useServerFn(setManualLock);
   const deleteProductsFn = useServerFn(deleteProducts);
   const summaryFn = useServerFn(getPipelineSummary);
+  const approveFn = useServerFn(approveProduct);
+  const unapproveFn = useServerFn(unapproveProduct);
+  const bulkApprovePassFn = useServerFn(bulkApprovePass);
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
