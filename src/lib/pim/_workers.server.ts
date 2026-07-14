@@ -3002,7 +3002,7 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean")
+    .select("id, project_id, nazwa, kod, ean, product_notes")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -3031,6 +3031,16 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
 
   await emit(ctx, { level: "info", message: `📝 Allegro: generuję opis dla „${goldenName}"…` });
 
+  const { data: projRow } = await supabaseAdmin
+    .from("projects")
+    .select("settings")
+    .eq("id", product.project_id)
+    .single();
+  const clientGuidelines =
+    ((projRow?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+  const productNotes = (product as { product_notes?: string | null }).product_notes ?? "";
+  const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, productNotes);
+
   const userPrompt = [
     `NAZWA PRODUKTU: ${goldenName}`,
     `KOD: ${product.kod ?? ""}`,
@@ -3048,8 +3058,9 @@ export async function runPimAllegroDescription(productId: string, ctx?: WorkerCt
     "FRAZY KLUCZOWE:",
     keywords.length ? keywords.join(", ") : "(brak)",
     "",
+    guidelinesBlock ? guidelinesBlock + "\n" : "",
     'Wygeneruj JSON {"html": string} — kompletny, sprzedażowy opis Allegro zgodny z system promptem. Bierz fakty wyłącznie z podanych danych.',
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
