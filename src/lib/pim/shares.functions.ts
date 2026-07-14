@@ -433,7 +433,7 @@ export const submitShareFeedback = createServerFn({ method: "POST" })
     if (data.kind === "needs_fix" && data.productId) {
       const { data: cur } = await supabaseAdmin
         .from("source_products")
-        .select("review_status")
+        .select("review_status, project_id")
         .eq("id", data.productId)
         .maybeSingle();
       const rs = (cur as { review_status?: string | null } | null)?.review_status ?? "NONE";
@@ -446,6 +446,19 @@ export const submitShareFeedback = createServerFn({ method: "POST" })
           } as never)
           .eq("id", data.productId);
       }
+      try {
+        const projectId = (cur as { project_id?: string } | null)?.project_id;
+        if (projectId) {
+          const { logProductEvent } = await import("./product-events.server");
+          await logProductEvent(supabaseAdmin, {
+            projectId,
+            productId: data.productId,
+            kind: "review_change",
+            message: "Feedback klienta: wymaga poprawy",
+            meta: { action: "client_needs_fix" },
+          });
+        }
+      } catch { /* best-effort */ }
     }
     return row as { id: string; created_at: string };
   });
