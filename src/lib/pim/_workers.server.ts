@@ -27,7 +27,7 @@ import {
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
 import { buildQueryVariants, normalizeUrlForDedup, type QueryStrategy } from "./query-variants";
-import { advancePipelineStatus, isProductLocked } from "./pipeline-status";
+import { advancePipelineStatus } from "./pipeline-status";
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
