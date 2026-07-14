@@ -979,6 +979,43 @@ function ProjectPage() {
                       {p.golden_name && p.nazwa && (
                         <div className="text-xs text-muted-foreground line-clamp-1">{p.nazwa}</div>
                       )}
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                          title="Etap procesu"
+                        >
+                          {PIPELINE_STATUS_LABEL[
+                            (((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED") as PimPipelineStatus)
+                          ] ?? "Zaimportowany"}
+                        </Badge>
+                        <button
+                          type="button"
+                          className={
+                            (p as { manual_lock?: boolean }).manual_lock
+                              ? "inline-flex items-center gap-1 rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
+                              : "inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0 text-[10px] text-muted-foreground hover:bg-muted"
+                          }
+                          title={
+                            (p as { manual_lock?: boolean }).manual_lock
+                              ? "Zablokowane ręcznie — workery pomijają ten produkt. Kliknij, aby odblokować."
+                              : "Zablokuj ręcznie, aby workery nie nadpisywały zmian."
+                          }
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const locked = !(p as { manual_lock?: boolean }).manual_lock;
+                            await setLockFn({ data: { productId: p.id, locked } });
+                            toast.success(locked ? "Zablokowano produkt" : "Odblokowano produkt");
+                            refetchProducts();
+                          }}
+                        >
+                          {(p as { manual_lock?: boolean }).manual_lock ? (
+                            <><Lock className="h-3 w-3" /> Zablokowany</>
+                          ) : (
+                            <><LockOpen className="h-3 w-3" /> Odblokowany</>
+                          )}
+                        </button>
+                      </div>
                       {(() => {
                         const g = ((p as { ai_gallery_urls?: string[] }).ai_gallery_urls ?? []) as string[];
                         if (!g.length) return null;
