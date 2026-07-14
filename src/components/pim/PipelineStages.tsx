@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   ArrowRight,
   Check,
+  ClipboardCheck,
 } from "lucide-react";
 import type { PipelineSummary } from "@/lib/pim/queries.functions";
 
@@ -115,10 +116,17 @@ export function PipelineStages({
   summary,
   onPrimaryAction,
   onShowPending,
+  onRunAudit,
 }: {
   summary: PipelineSummary;
   onPrimaryAction: (stage: Exclude<StageKey, "NONE">) => void;
   onShowPending?: (stage: Exclude<StageKey, "NONE">) => void;
+  /**
+   * Optional handler for the "run AI audit" CTA in the Review stage. When
+   * provided AND audits have not yet been run on the eligible set, the
+   * Review "next step" strip switches to prompting an audit run first.
+   */
+  onRunAudit?: () => void;
 }) {
   // Determine "next step": the earliest stage with the largest pending count.
   let best: Stage | null = null;
@@ -131,6 +139,13 @@ export function PipelineStages({
     }
   }
 
+  // Audit-first override for Review: if there are audit-eligible products
+  // that haven't been audited yet, prompt for Audyt AI before manual review.
+  const auditEligible = summary.audit_eligible ?? 0;
+  const auditCompleted = summary.audit_completed ?? 0;
+  const auditPending = Math.max(0, auditEligible - auditCompleted);
+  const reviewNeedsAudit = auditPending > 0 && !!onRunAudit;
+
   return (
     <section className="mb-6">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -140,6 +155,10 @@ export function PipelineStages({
           const { done, total } = stg.progress(summary);
           const pending = stg.pending(summary);
           const complete = total > 0 && done >= total && pending === 0;
+          // Review stage substatus: if there are audit-eligible products that
+          // haven't been audited yet, tell the user to run Audyt AI first.
+          const showAuditFirst =
+            stg.key === "REVIEW" && !complete && reviewNeedsAudit;
           return (
             <div
               key={stg.key}
@@ -167,7 +186,13 @@ export function PipelineStages({
                 <span className="text-lg text-muted-foreground">/{total}</span>
               </div>
               <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                {complete ? "gotowe" : pending > 0 ? stg.remainingLabel(pending) : "—"}
+                {complete
+                  ? "gotowe"
+                  : showAuditFirst
+                    ? "najpierw uruchom Audyt AI"
+                    : pending > 0
+                      ? stg.remainingLabel(pending)
+                      : "—"}
               </div>
             </div>
           );
@@ -176,25 +201,46 @@ export function PipelineStages({
 
       {best && bestPending > 0 && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/50 bg-amber-500/5 px-4 py-3">
-          <div className="text-sm">
-            <span className="font-semibold">Następny krok · Etap {best.n} {best.title}:</span>{" "}
-            <span className="text-muted-foreground">{best.nextSentence(bestPending)}</span>
-            {onShowPending && best.key !== "IMPORT" && (
-              <>
-                {" "}
-                <button
-                  type="button"
-                  className="text-primary underline underline-offset-2 hover:no-underline"
-                  onClick={() => onShowPending(best!.key)}
-                >
-                  pokaż te produkty
-                </button>
-              </>
-            )}
-          </div>
-          <Button size="sm" onClick={() => onPrimaryAction(best!.key)}>
-            {best.ctaLabel} ({bestPending}) <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
+          {best.key === "REVIEW" && reviewNeedsAudit ? (
+            <>
+              <div className="text-sm">
+                <span className="font-semibold">Następny krok · Etap {best.n} {best.title}:</span>{" "}
+                <span className="text-muted-foreground">
+                  uruchom Audyt AI przed przeglądem ({auditPending}{" "}
+                  {auditPending === 1 ? "produkt" : "produktów"}).
+                </span>
+              </div>
+              <Button size="sm" onClick={() => onRunAudit?.()}>
+                <ClipboardCheck className="mr-2 h-4 w-4" /> Audyt AI ({auditPending})
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="text-sm">
+                <span className="font-semibold">Następny krok · Etap {best.n} {best.title}:</span>{" "}
+                <span className="text-muted-foreground">
+                  {best.key === "REVIEW"
+                    ? `${bestPending} produktów czeka na Twój przegląd.`
+                    : best.nextSentence(bestPending)}
+                </span>
+                {onShowPending && best.key !== "IMPORT" && (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="text-primary underline underline-offset-2 hover:no-underline"
+                      onClick={() => onShowPending(best!.key)}
+                    >
+                      pokaż te produkty
+                    </button>
+                  </>
+                )}
+              </div>
+              <Button size="sm" onClick={() => onPrimaryAction(best!.key)}>
+                {best.ctaLabel} ({bestPending}) <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
       )}
     </section>

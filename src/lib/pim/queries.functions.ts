@@ -18,6 +18,8 @@ export type PipelineSummary = {
   review_ai_flagged: number;
   review_needs_review: number;
   review_approved: number; // APPROVED
+  audit_eligible: number;    // GOLDEN_READY + VISUALS_READY
+  audit_completed: number;   // enrichments.audit is not null within eligible set
 };
 
 export const getPipelineSummary = createServerFn({ method: "GET" })
@@ -28,16 +30,16 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
     const [{ data: sp }, { data: en }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("pipeline_status, review_status")
+        .select("id, pipeline_status, review_status")
         .eq("project_id", data.projectId)
         .limit(20000),
       supabase
         .from("enrichments")
-        .select("source_product_id, rescrape_rounds, score_breakdown")
+        .select("source_product_id, rescrape_rounds, score_breakdown, audit")
         .eq("project_id", data.projectId)
         .limit(20000),
     ]);
-    const rows = (sp ?? []) as Array<{ pipeline_status?: string | null; review_status?: string | null }>;
+    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null }>;
     const s: PipelineSummary = {
       total: rows.length,
       imported: 0,
@@ -50,7 +52,10 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
       review_ai_flagged: 0,
       review_needs_review: 0,
       review_approved: 0,
+      audit_eligible: 0,
+      audit_completed: 0,
     };
+    const eligibleIds = new Set<string>();
     for (const r of rows) {
       const ps = r.pipeline_status ?? "IMPORTED";
       if (ps === "IMPORTED") s.imported++;
@@ -58,16 +63,21 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
       else if (ps === "MATCHED") s.matched++;
       else if (ps === "GOLDEN_READY") s.golden_ready++;
       else if (ps === "VISUALS_READY") s.visuals_ready++;
+      if (ps === "GOLDEN_READY" || ps === "VISUALS_READY") {
+        s.audit_eligible++;
+        eligibleIds.add(r.id);
+      }
       const rs = r.review_status ?? "NONE";
       if (rs === "AI_FLAGGED") { s.review_ai_flagged++; s.review_queue++; }
       else if (rs === "NEEDS_REVIEW") { s.review_needs_review++; s.review_queue++; }
       else if (rs === "APPROVED") s.review_approved++;
     }
-    for (const e of (en ?? []) as Array<{ rescrape_rounds?: number; score_breakdown?: Array<{ total?: number }> }>) {
+    for (const e of (en ?? []) as Array<{ source_product_id: string; rescrape_rounds?: number; score_breakdown?: Array<{ total?: number }>; audit?: unknown }>) {
       const rounds = e.rescrape_rounds ?? 0;
       const bd = Array.isArray(e.score_breakdown) ? e.score_breakdown : [];
       const strong = bd.filter((b) => (b?.total ?? 0) >= 4).length;
       if (rounds >= 2 && strong < 3) s.weak_sources++;
+      if (e.audit && eligibleIds.has(e.source_product_id)) s.audit_completed++;
     }
     return s;
   });
@@ -90,7 +100,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
     const { data: ens } = await supabase
       .from("enrichments")
       .select(
-        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, image_scores, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds, data_sufficiency",
+        "id, source_product_id, status, match_type, picked_urls, golden_name, generated_at, error, hidden_images, golden_features, quality, image_meta, image_scores, pinned_main_url, regenerated_main_image, ai_gallery_urls, golden_slug, golden_meta_description, golden_seo_keywords, score_breakdown, rescrape_rounds, data_sufficiency, audit",
       )
       .eq("project_id", data.projectId)
       .limit(10000);
@@ -199,6 +209,17 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         data_sufficiency:
           ((e as { data_sufficiency?: "full" | "partial" | "poor" | null } | undefined)
             ?.data_sufficiency ?? null) as "full" | "partial" | "poor" | null,
+        audit: ((e as { audit?: unknown } | undefined)?.audit ?? null) as null | {
+          at: string;
+          verdict: "pass" | "warn" | "fail";
+          checks: Array<{ check: string; ok: boolean; severity: "fail" | "warn"; detail?: string }>;
+          llm: null | {
+            factual_issues: string[];
+            guideline_violations: string[];
+            style_issues: string[];
+            verdict: "pass" | "warn" | "fail";
+          };
+        },
       };
     });
   });
