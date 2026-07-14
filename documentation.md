@@ -1,7 +1,7 @@
 # Dokumentacja projektu PIM (Lovable)
 
 > Dokument roboczy do przekazania do Claude jako kontekst do dalszej optymalizacji procesu.
-> Stan na: 2026-07-13. Język: PL.
+> Stan na: 2026-07-14. Język: PL.
 
 ---
 
@@ -121,6 +121,9 @@ Cron / hook: process-bulk-jobs
 
 `bulk_job_kind` (enum PG): `FIRECRAWL_DISCOVERY`, `PIM_VISUALIZATIONS`, `PIM_REGEN`, `PIM_MATCHING`, `PIM_FILL_MISSING_IMAGES`, `PIM_ALLEGRO_DESC`, `PIM_GOLDEN`.
 
+**Faktyczne wartości `bulk_job_kind`** (enum PG, w kolejności historycznej):
+`GENERATE_GOLDEN`, `REGENERATE_MEDIA`, `FIRECRAWL_DISCOVERY`, `PHOTO_TOOL_GENERATE`, `PHOTO_TOOL_EDIT_IMAGE`, `PIM_VISUALIZATIONS`, `PIM_ALLEGRO_DESCRIPTION`, `PIM_RESCRAPE`, `PIM_IMAGE_VERIFY`, `PIM_AUDIT`. Wcześniej cytowane skróty (`PIM_REGEN`, `PIM_GOLDEN`, `PIM_ALLEGRO_DESC`, `PIM_FILL_MISSING_IMAGES`, `PIM_MATCHING`) to były robocze etykiety — w bazie nie istnieją. Regenerację miniatury obsługuje `REGENERATE_MEDIA`, złote rekordy `GENERATE_GOLDEN`, opisy Allegro `PIM_ALLEGRO_DESCRIPTION`, powtórny scrape `PIM_RESCRAPE`, walidację wizualną galerii `PIM_IMAGE_VERIFY`, audyt jakości `PIM_AUDIT`. Uzupełnianie brakujących zdjęć jest realizowane jako `PIM_RESCRAPE` + `REGENERATE_MEDIA`, a matching jest wywoływany synchronicznie (bez własnego kind).
+
 ---
 
 ## 4. Model danych (Supabase, schema `public`)
@@ -128,17 +131,23 @@ Cron / hook: process-bulk-jobs
 | Tabela | Rola | Kluczowe kolumny |
 |---|---|---|
 | `projects` | Projekt klienta | `id`, `name`, `owner_id`, `strategy` (EAN/NAZWA/HYBRID), `settings` |
-| `source_products` | Wiersze z importu CSV/URL | `id`, `project_id`, `nazwa`, `ean`, `kod_producenta`, `producent`, `pinned_main_url`, `ai_gallery_urls[]` |
+| `source_products` | Wiersze z importu CSV/URL | `id`, `project_id`, `ext_id`, `nazwa`, `kod`, `ean`, `raw` (JSONB — tu żyją `producent`, `kod_producenta`/MPN, cena, zaimportowane URL-e obrazów i cokolwiek innego dostarczonego przez CSV/JSON-LD), `product_notes`, `pipeline_status` (enum `pim_pipeline_status`: `IMPORTED` → `SOURCES_FOUND` → `MATCHED` → `GOLDEN_READY` → `VISUALS_READY`, forward-only), `review_status` (enum `pim_review_status`: `NONE`/`AI_FLAGGED`/`NEEDS_REVIEW`/`APPROVED`), `manual_lock` (bool — zamraża pipeline dla ręcznych korekt), `approved_at`, `approved_by` |
 | `search_results` | Wynik Firecrawl search dla termu | `project_id`, `term`, `organic_urls[]` |
 | `product_sources` | Zescrapowane strony (per URL) | `project_id`, `url`, `title`, `description`, `images[]`, `extra_images[]` |
 | `imported_extract` | Surowe dane z importu z linku | `project_id`, `url`, `raw_json`, `extracted` |
-| `enrichments` | Wynik matchingu + złoty rekord | `source_product_id`, `status`, `match_type`, `matched_term`, `picked_urls[]`, `golden_*`, `image_scores` (JSON), `ai_gallery_urls[]` |
+| `enrichments` | Wynik matchingu + złoty rekord + widoczność galerii | `source_product_id`, `status`, `match_type`, `matched_term`, `picked_urls[]`, `golden_name`, `golden_description` (HTML), `golden_features`, `golden_slug`, `golden_meta_description`, `golden_seo_keywords`, `allegro_description`, `allegro_generated_at`, `pinned_main_url` (główny obraz produktu — **żyje na enrichments, nie na source_products**), `ai_gallery_urls[]` (obrazy wygenerowane przez FAL + wgrane z CSV z sentinelem `__imported__`), `hidden_images[]`, `image_scores` (JSON per URL: `identity`/`is_banner_or_trash`/`manual_keep`/`dead`/`identity_v`/`w`,`h`/`large_url`/`dedup_of`), `regenerated_main_image`, `audit` (JSON: wynik `runAuditForProduct`) |
 | `bulk_jobs` | Kolejka | `kind`, `status`, `items[]`, `progress`, `error`, `result` |
-| `project_shares` | Link udostępniania | `token_hash`, `password_hash` (PBKDF2 100k), `salt`, `expires_at` |
+| `project_shares` | Link udostępniania | `token_hash`, `password_hash` (PBKDF2 100k), `salt`, `expires_at`, `approved_only` (bool — udostępnia tylko produkty z `review_status=APPROVED`) |
 | `client_feedback` | Komentarze klienta | `share_id`, `product_id` (nullable = global), `body`, `flag` |
 | `user_roles` | Role użytkowników | `user_id`, `role` (enum `app_role`); dostęp przez `has_role(uid, role)` SECURITY DEFINER |
 
 **RLS:** każda tabela ma polityki — właściciel projektu widzi swoje dane; publiczne trasy `share.*` korzystają z serwerowej weryfikacji tokenu (nie RLS).
+
+**Statusy per produkt — dwie osie:**
+
+- `pipeline_status` (postęp automatyczny): każdy worker w `_workers.server.ts` woła `advancePipelineStatus()` — forward-only. Ranga: `IMPORTED=0` → `SOURCES_FOUND=1` → `MATCHED=2` → `GOLDEN_READY=3` → `VISUALS_READY=4`. Regeneracja **nie cofa** rangi.
+- `review_status` (kontrola człowieka): `NONE` → (audyt AI) `AI_FLAGGED`/`NEEDS_REVIEW` → (klient/operator) `APPROVED`. Regeneracja złotego rekordu lub opisu Allegro produktu w stanie `APPROVED` demotuje go do `NEEDS_REVIEW` z logiem `[review-reset]`. Feedback klienta `kind=needs_fix` również demotuje `APPROVED`/`NONE` → `NEEDS_REVIEW`. Ręczne edycje pól **nie** unieważniają zatwierdzenia.
+- `manual_lock=true` chroni pinned/ręczne dane przy powtórnych discovery/matching/regen.
 
 ---
 
@@ -150,7 +159,7 @@ Cron / hook: process-bulk-jobs
 - UI: `components/pim/ImportCsvDialog.tsx` (sticky header/footer, przewijalna preview).
 - Parser: `lib/pim/parsers.ts` — heurystyczne mapowanie kolumn (nazwa, ean, cena, obrazy, producent, mpn), auto-detekcja separatora.
 - Ingest: `lib/pim/ingest.functions.ts` — INSERT do `source_products`.
-- **Obrazy z CSV** → `pinned_main_url` + sentinel `__imported__` (żeby odróżnić od AI). **NIE** trafiają do `ai_gallery_urls` (to zarezerwowane dla wizualizacji AI).
+- **Obrazy z CSV** → `enrichments.pinned_main_url` (główne) + reszta trafia do `enrichments.ai_gallery_urls` z sentinelem `__imported__`, który odróżnia je od realnych wizualizacji AI. Producent, MPN, EAN i pozostałe kolumny CSV lądują w `source_products.raw` (JSONB) — schemat tabeli trzyma tylko `nazwa/kod/ean/ext_id`.
 - **Znany problem:** wiodące zera w EAN (Excel sformatuje `625` jako `000000000625`). TODO: auto-strip przy imporcie lub przycisk masowego czyszczenia.
 
 **5.1.2. Import z linków**
@@ -160,7 +169,7 @@ Cron / hook: process-bulk-jobs
   - Ekstrakcja nazwy: kolejno JSON-LD `Product.name` → `og:title` → `<h1.product-name>` → `<h1>` → `<title>`.
   - Ekstrakcja marki (`brand`), MPN (`sku`/`mpn`), EAN (`gtin*`).
   - **Detekcja blokad:** reCAPTCHA / Cloudflare challenge / lista fraz zabronionych w nazwie → produkt odrzucany zamiast zapisania „reCAPTCHA".
-  - Wynik → `imported_extract` (do dalszej analizy) + `source_products`.
+  - Wynik → `imported_extract` (surowy JSON-LD + markdown do dalszej analizy) + `source_products` z zaimportowanymi wartościami producenta/MPN/URL-i schowanymi w `raw` jsonb.
 
 ### 5.2. Discovery źródeł (Firecrawl)
 
@@ -178,6 +187,7 @@ Cron / hook: process-bulk-jobs
   - Speed-line i podobne: `/ai/140/` → `/ai/2000/`.
   - Lazy: `data-src`, `data-original`, `data-splide-lazy`, `srcset` → największy wariant.
 - **Filtr wizualny (Gemini Vision):** dla każdego obrazu prompt „Czy to zdjęcie produktu, czy baner/logo/kontakt?" → wynik w `enrichments.image_scores[url].is_banner_or_trash`. `recleanProductSources` używa tego jako czarnej listy bez ponownego scrape'u.
+- **Identity check + rozmiar obrazu:** `image-probe.server.ts` sonduje HEAD/GET dla URL-i bez zapisanych wymiarów (`w`/`h`) — probe leci **tylko dla URL-i bez cache**. `image-variants.ts` (`baseVariantKey`, `upgradeToLargeImageUrl`) grupuje warianty tego samego zdjęcia (mniejsza vs większa rozdzielczość Shopify/Woo/Magento) — w `getVisibleGallery` z klastra zostaje **największy** wariant (`dedup_of` wskazuje pochłonięty URL). Główny obraz preferowany, gdy `min(w,h) >= 800 px`; poniżej UI pokazuje badge „niska rozdzielczość". Weryfikację identyczności (Gemini Vision) prowadzi bulk job `PIM_IMAGE_VERIFY`, wersjonowany polem `identity_v` — bump wersji (obecnie `identity_v=3`, gdzie EAN-referenced anchor jest twardym dowodem tożsamości) wymusza rewalidację cache'u.
 
 ### 5.3. Matching (`runMatching`)
 
@@ -194,11 +204,14 @@ Plik: `lib/pim/matching.functions.ts`.
 3. **AI-walidacja (opcjonalna):** Gemini 2.5 Flash Lite decyduje czy źródło opisuje ten sam produkt (marka + model + wariant); response `{keep: number[]}`.
 4. **Scoring** (`scoreSource`, zawsze aktywny):
    - `descLen >= 200` → +3, `>= 40` → +1
-   - EAN w tytule/opisie → +2
+   - **EAN confirmed** (`eanConfirmedFor` — sprawdza EAN produktu, także po wystripowaniu wiodących zer, w tytule/opisie/URL-u na digits-only) → **+8** (dominujący sygnał zaufania; źródła z potwierdzonym EAN wygrywają scoring, dostarczają anchor-reference dla identity check w `PIM_IMAGE_VERIFY`, a rozjazdy opakowań względem tego anchoru są odrzucane).
    - Tokeny z nazwy (≥3 znaki) w tytule → +2
    - `min(imagesCount, 3)`
+   - Domena zawiera nazwę producenta (normalizowana) → +5 (`producer_boost`)
+   - Domena w `settings.trusted_domains` → dodatkowy boost (`trusted_boost`)
    - Śmieciowe źródło (brak tytułu + <40 znaków opisu + 0 obrazów) → −5
 5. **Cap TOP 5** — sortowanie po score desc, obcięcie.
+6. **Cluster dedup** — warianty tego samego produktu z jednej domeny (identyczna karta w różnych rozmiarach) są grupowane po `variant_key` i redukowane do najlepszej instancji przed capem.
 
 **Output:** `enrichments` upsert (`status`, `match_type`, `matched_term`, `picked_urls`).
 
@@ -249,6 +262,39 @@ Plik: `lib/pim/regen.functions.ts` + worker.
   - Async kolejka FAL API (submit → poll status → fetch result).
   - Wynik zapisywany do `enrichments.ai_gallery_urls`.
   - Widoczność: sekcja „Wizualizacje AI" w edytorze + badge z licznikiem na liście.
+
+### 5.11. Filtr galerii — jedno źródło prawdy (`lib/pim/gallery.ts`)
+
+`getVisibleGallery(urls, enrichment)` zwraca trójkę `{ accepted, unsure, rejected }` używaną **wszędzie**: lista produktów, edytor, karta preview, publiczny share, eksport CSV. Dzięki temu odrzucone/niepewne zdjęcia nigdy nie wyciekają do klienta. Reguły w kolejności:
+
+1. `hidden_images` → wykluczone ze wszystkich kubełków.
+2. `image_scores[url].manual_keep === true` → akceptowane (nadpisuje werdykty AI).
+3. `is_banner_or_trash === true` → wykluczone (baner/logo/kontakt).
+4. `dead === true` → wykluczone (URL nieosiągalny).
+5. `identity === 'same'` → akceptowane; `'unsure'` → do przeglądu; `'different'` → odrzucone. Brak werdyktu → akceptowane domyślnie.
+
+Klastry wariantów (`image-variants`) są zredukowane do największego przed zwróceniem. `pinned_main_url` — jeśli przeżyje reguły — zawsze pierwszy w `accepted`. `SharePublicProduct` renderuje **wyłącznie** wynik `getVisibleGallery` i nigdy nie ujawnia surowych `image_scores`/audytu.
+
+### 5.12. Audyt jakości (`PIM_AUDIT`)
+
+- `lib/pim/audit.ts` + serverFn `runAuditForProduct` + bulk job `PIM_AUDIT`.
+- Miks checków deterministycznych (kompletność pól złotego rekordu, długość opisu, EAN checksum, obecność cech, białe tło miniatury, min. rozdzielczość głównego obrazu) i LLM (Gemini Flash — spójność opisu z cechami/nazwą).
+- Zapis do `enrichments.audit` (JSON: `verdict`, `checks[]`, `notes`). Audyt **nie modyfikuje** złotego rekordu, obrazów, źródeł ani `pipeline_status` — tylko `enrichments.audit` oraz przejście `review_status` (`pass` → `NONE`, `warn` → `NEEDS_REVIEW`, `fail` → `AI_FLAGGED`). `APPROVED` **nigdy** nie jest tknięte przez audyt.
+- UI: przycisk „Uruchom audyt" w edytorze produktu + badge werdyktu na liście + akcja masowa z nagłówka projektu.
+
+### 5.13. Zatwierdzanie produktów (`review_status`)
+
+- `lib/pim/review.functions.ts`: `approveProduct`, `unapproveProduct`, `bulkApprovePass(projectId, productIds?)` (zatwierdza tylko produkty z audytem `verdict='pass'`, pomija już zatwierdzone).
+- UI: badge „Zatwierdzony" + akcje „Zatwierdź"/„Cofnij" w wierszu i w nagłówku edytora, pasek „Zatwierdź wszystkie z wynikiem Pass" przy filtrze **Do przeglądu**, checkbox „Udostępnij tylko zatwierdzone produkty" w `ShareProjectDialog`, wariant „Eksportuj tylko zatwierdzone" w menu Eksport.
+- Zatwierdzenie **nigdy** nie ustawia `manual_lock`. Automatyczne zatwierdzanie jest zabronione — jedyne wejścia to ręczna akcja operatora oraz `bulkApprovePass`.
+
+### 5.14. Redesign nagłówka projektu (Pipeline Stages)
+
+- `components/pim/PipelineStages.tsx` — 6-stopniowy pasek postępu (**Import → Źródła → Dopasowanie → Treści → Media → Review**) zamiast płaskiego rzędu przycisków.
+- Karty stopni pokazują `done/total` kumulatywnie: etap `k` „done", gdy `pipelineStatusRank(pipeline_status) >= k`; Review „done", gdy `review_status = APPROVED`. Kolumna „Status" na liście produktów została usunięta.
+- Pod paskiem strip „następny krok" z linkiem „pokaż te produkty" ustawiającym filtr listy (nie klikamy w same karty — filtr jest niezależny).
+- Filtr listy w polskich etykietach zorientowanych na pending: „Do dopasowania", „Do treści", „Do mediów", „Do przeglądu", „Wszystkie", plus stan pusty „Brak produktów na tym etapie — wszystko zrobione" z przyciskiem „Pokaż wszystkie".
+- Akcje operacyjne przeniesione do dropdownów **Narzędzia** (Guidelines, Reclean, Remap CSV, Uzupełnij dane z CSV, Audyt AI, weryfikacja obrazów, itp.) oraz **Eksport** (CSV/XLSX, warianty „tylko zatwierdzone"). Karty importu są zwinięte do stopnia 1 (Import).
 
 ### 5.8. Podgląd karty produktu (dla klienta live)
 
@@ -380,7 +426,15 @@ Plik: `lib/pim/export.functions.ts`. CSV ze złotymi rekordami (kolumny konfigur
 | `src/lib/pim/shares-crypto.server.ts` | PBKDF2 (100k) + HMAC token |
 | `src/lib/pim/_workers.server.ts` | Implementacja wszystkich workerów (Firecrawl, FAL, SEO, Allegro, regen, wizualizacje) |
 | `src/lib/pim/image-size.server.ts` | Rozmiar obrazu bez sharp (probe headers/magic bytes) |
+| `src/lib/pim/image-probe.server.ts` | HEAD/GET probe dla URL-i bez zapisanych wymiarów (cache w `image_scores.w/h`) |
+| `src/lib/pim/image-variants.ts` | Klastrowanie wariantów (`baseVariantKey`) + upgrade do największego rozmiaru |
+| `src/lib/pim/gallery.ts` | **Jedyne** źródło prawdy dla widocznej galerii (`getVisibleGallery`) |
+| `src/lib/pim/pipeline-status.ts` | Rangi + `advancePipelineStatus` (forward-only) |
+| `src/lib/pim/audit.ts` | Deterministyczne + LLM checki jakości golden record |
+| `src/lib/pim/audit.functions.ts` | `runAuditForProduct` serverFn + bulk job `PIM_AUDIT` |
+| `src/lib/pim/review.functions.ts` | `approveProduct` / `unapproveProduct` / `bulkApprovePass` |
 | `src/lib/pim/images.ts` | Helpery URL obrazów (upgrade, dedup) |
+| `src/components/pim/PipelineStages.tsx` | 6-stopniowy pasek postępu w nagłówku projektu |
 | `src/components/pim/ImportCsvDialog.tsx` | UI import CSV |
 | `src/components/pim/ImportUrlsDialog.tsx` | UI import z linków (+ tryb stealth) |
 | `src/components/pim/RemapCsvDialog.tsx` | Remap kolumn |
