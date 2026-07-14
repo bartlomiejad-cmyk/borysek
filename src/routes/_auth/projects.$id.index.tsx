@@ -1279,6 +1279,55 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
+        <DialogContent className="max-w-md">
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">Weryfikacja zdjęć AI</h3>
+            <p className="text-sm text-muted-foreground">
+              Gemini Vision sprawdzi każde zdjęcie i oznaczy „ten sam produkt", „inny produkt" lub
+              „niepewne". Odrzucone i niepewne nie pojawią się na liście, w eksporcie ani w linku
+              klienta. Zdjęcia oznaczone ręcznie jako zatwierdzone są zawsze pomijane.
+            </p>
+            {(() => {
+              const src = selectedIds.size > 0
+                ? products.filter((p) => selectedIds.has(p.id))
+                : filtered;
+              const targets = src.filter((p) => !!(p as { enrichment_id?: string | null }).enrichment_id);
+              const total = targets.reduce(
+                (n, p) => n + (((p as { total_images?: number }).total_images) ?? 0),
+                0,
+              );
+              const verified = targets.reduce(
+                (n, p) => n + (((p as { identity_v2_count?: number }).identity_v2_count) ?? 0),
+                0,
+              );
+              const est = verifyForce ? total : Math.max(0, total - verified);
+              return (
+                <div className="text-sm rounded border p-2 bg-muted/30">
+                  <div>Produktów w zakresie: <b>{targets.length}</b></div>
+                  <div>Do analizy: ~<b>{est}</b> zdjęć{verifyForce ? " (wymuszone)" : ""}</div>
+                </div>
+              );
+            })()}
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={verifyForce} onCheckedChange={(v) => setVerifyForce(v === true)} />
+              Wymuś ponowną analizę już sprawdzonych
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setVerifyOpen(false)}>Anuluj</Button>
+              <Button
+                onClick={async () => {
+                  const ids = selectedIds.size > 0 ? [...selectedIds] : undefined;
+                  setVerifyOpen(false);
+                  await verifyImagesAll({ force: verifyForce, productIds: ids });
+                }}
+              >
+                Uruchom
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <ClientGuidelinesDialog
         open={guidelinesOpen}
         onOpenChange={setGuidelinesOpen}
