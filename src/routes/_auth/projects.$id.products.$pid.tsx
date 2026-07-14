@@ -699,10 +699,26 @@ function ProductDetail() {
             <div className="rounded border bg-muted/30 p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">Wybrane zdjęcia</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {allVisible.filter((u) => !hiddenSet.has(u)).length} widocznych
-                  {hiddenImages.length ? ` · ${hiddenImages.length} ukrytych` : ""}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    {allVisible.filter((u) => !hiddenSet.has(u)).length} widocznych
+                    {hiddenImages.length ? ` · ${hiddenImages.length} ukrytych` : ""}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={revalidating}
+                    title="Ponownie sprawdź tożsamość widocznych zdjęć porównując je z obrazem referencyjnym (przypiętym/zregenerowanym) i nazwą produktu."
+                    onClick={revalidateImages}
+                  >
+                    {revalidating ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-3 w-3 mr-1" />
+                    )}
+                    {revalidating ? "Weryfikuję…" : "Zweryfikuj zdjęcia ponownie"}
+                  </Button>
+                </div>
               </div>
               {(() => {
                 const visible = allVisible.filter((u) => !hiddenSet.has(u));
