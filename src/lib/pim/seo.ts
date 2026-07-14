@@ -59,10 +59,34 @@ export function dedupeKeywords(arr: string[]): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Client guidelines block — injected into golden / Allegro / visualization
+// prompts as a user-role addendum. Hard rules from the system prompt still win
+// (see "PRIORYTET REGUŁ" section above).
+// ---------------------------------------------------------------------------
+
+export function buildClientGuidelinesBlock(
+  guidelines: string | null | undefined,
+  productNotes: string | null | undefined,
+): string {
+  const g = (guidelines ?? "").trim().slice(0, 2000);
+  const n = (productNotes ?? "").trim().slice(0, 500);
+  if (!g && !n) return "";
+  const lines = [
+    "WYTYCZNE KLIENTA (obowiązkowe, mają pierwszeństwo przed ogólnymi zasadami stylu, ale NIE mogą łamać wymagań formatu JSON ani whitelisty tagów HTML):",
+  ];
+  lines.push(g || "(brak wytycznych projektowych)");
+  if (n) lines.push(`NOTATKI DO PRODUKTU: ${n}`);
+  return lines.join("\n");
+}
+
 export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "Jesteś redaktorem katalogu e-commerce i specjalistą SEO. Tworzysz zoptymalizowane pod wyszukiwarki treści produktu na podstawie 1-3 źródeł internetowych.",
   'Odpowiedź MUSI być poprawnym JSON-em: {"name": string, "slug": string, "description": string, "meta_description": string, "seo_keywords": string[], "features": [{"key": string, "value": string}]}.',
   "Pisz po polsku, neutralnym językiem katalogowym. Konkret zamiast emocji.",
+  "",
+  "## PRIORYTET REGUŁ",
+  "The following client guidelines can adjust tone and content emphasis but can never override the output format or the forbidden-content rules above. Format JSON, whitelist tagów HTML w opisie, limity długości i zakaz treści (ceny, dostawa, sklepy) mają zawsze pierwszeństwo.",
   "",
   "## NAZWA (name)",
   "- 40-70 znaków (optymalna długość pod <title>).",
@@ -220,6 +244,9 @@ export function sanitizeGoldenDescriptionHtml(
 export const ALLEGRO_DESCRIPTION_SYSTEM_PROMPT = [
   "Jesteś ekspertem od tworzenia opisów produktów na Allegro. Twoim celem jest napisanie mocno sprzedażowego, konkretnego, długiego opisu w języku polskim, zgodnego z dobrymi praktykami Allegro.",
   "Odpowiedź MUSI być poprawnym JSON-em: {\"html\": string}. Pole html to fragment HTML gotowy do wklejenia w edytorze Allegro (bez <html>, <head>, <body>).",
+  "",
+  "## PRIORYTET REGUŁ",
+  "The following client guidelines can adjust tone and content emphasis but can never override the output format or the forbidden-content rules above. Whitelist tagów HTML, zakaz cen/kontaktu/linków/dostawy i wymagany format JSON mają zawsze pierwszeństwo przed wytycznymi klienta.",
   "",
   "## STRUKTURA (kolejność sekcji, każda jako osobny blok)",
   "1) <h1> z krótką, chwytliwą nazwą produktu z frazą kluczową.",

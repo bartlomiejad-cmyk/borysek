@@ -38,6 +38,7 @@ import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
 import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
+import { ClientGuidelinesDialog } from "@/components/pim/ClientGuidelinesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -102,6 +103,7 @@ import {
   ImagePlus,
   Wand2,
   Share2,
+  FileText,
 } from "lucide-react";
 
 const searchSchema = z.object({
@@ -168,6 +170,7 @@ function ProjectPage() {
   const [fillOpen, setFillOpen] = useState(false);
   const [vizOpen, setVizOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
@@ -505,6 +508,24 @@ function ProjectPage() {
           </Button>
           <Button variant="outline" onClick={() => setShareOpen(true)}>
             <Share2 className="h-4 w-4 mr-2" /> Udostępnij klientowi
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setGuidelinesOpen(true)}
+            title="Ustalenia z klientem — wstrzykiwane do promptów AI"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Wytyczne klienta
+            {(() => {
+              const s = (meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings;
+              const filled = Boolean(s?.client_guidelines?.trim());
+              return (
+                <span
+                  className={`ml-2 inline-block h-2 w-2 rounded-full ${filled ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                  aria-label={filled ? "Wytyczne uzupełnione" : "Brak wytycznych"}
+                />
+              );
+            })()}
           </Button>
           <Button
             variant="outline"
@@ -1084,6 +1105,15 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <ClientGuidelinesDialog
+        open={guidelinesOpen}
+        onOpenChange={setGuidelinesOpen}
+        projectId={id}
+        initialValue={
+          ((meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings
+            ?.client_guidelines ?? "") as string
+        }
+      />
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(v) => {

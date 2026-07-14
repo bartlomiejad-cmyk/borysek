@@ -1,0 +1,1 @@
+ALTER TABLE public.source_products ADD COLUMN IF NOT EXISTS product_notes text DEFAULT NULL;

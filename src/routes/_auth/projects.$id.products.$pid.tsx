@@ -12,7 +12,7 @@ import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.fu
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
-import { deleteProducts } from "@/lib/pim/products.functions";
+import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -30,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn, friendlyError } from "@/lib/utils";
 import { ArrowLeft, Sparkles, Save, ExternalLink, RefreshCw, ImageOff, Trash2, ListPlus, ShieldCheck, Plus, Undo2, AlertTriangle, Loader2, Crown, Wand2, Pin, PinOff, Eraser, Eye } from "lucide-react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileText } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export const Route = createFileRoute("/_auth/projects/$id/products/$pid")({
@@ -75,6 +75,7 @@ function ProductDetail() {
   const removeGalleryFn = useServerFn(removeGalleryUrl);
   const recleanFn = useServerFn(recleanProductSources);
   const deleteProductsFn = useServerFn(deleteProducts);
+  const updateNotesFn = useServerFn(updateProductNotes);
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const deleteMut = useMutation({
@@ -129,6 +130,32 @@ function ProductDetail() {
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
   const analyzedKeyRef = useRef<string>("");
+  const [productNotes, setProductNotes] = useState("");
+  const [notesInitial, setNotesInitial] = useState("");
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesSaving, setNotesSaving] = useState(false);
+
+  useEffect(() => {
+    const n = ((data as { product?: { product_notes?: string | null } } | undefined)?.product?.product_notes ?? "") || "";
+    setProductNotes(n);
+    setNotesInitial(n);
+    if (n) setNotesOpen(true);
+  }, [data?.product]);
+
+  const saveNotes = async () => {
+    if (productNotes === notesInitial) return;
+    setNotesSaving(true);
+    try {
+      await updateNotesFn({ data: { productId: pid, notes: productNotes || null } });
+      setNotesInitial(productNotes);
+      toast.success("Notatki zapisane");
+      qc.invalidateQueries({ queryKey: ["product", id, pid] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Nie udało się zapisać notatek");
+    } finally {
+      setNotesSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (data?.enrichment) {
@@ -490,6 +517,35 @@ function ProductDetail() {
         </Button>
         </div>
       </div>
+
+      <Collapsible open={notesOpen} onOpenChange={setNotesOpen} className="mb-6">
+        <CollapsibleTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full justify-between">
+            <span className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Notatki do tego produktu (wewnętrzne, wstrzykiwane do promptów AI)
+              {notesInitial.trim() ? (
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              ) : null}
+            </span>
+            <span className="text-xs text-muted-foreground">{notesOpen ? "Zwiń" : "Rozwiń"}</span>
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 space-y-2">
+          <Textarea
+            value={productNotes}
+            onChange={(e) => setProductNotes(e.target.value)}
+            onBlur={saveNotes}
+            rows={5}
+            maxLength={2000}
+            placeholder="Wskazówki tylko dla AI, np. „podkreśl wersję lewostronną”, „unikaj słowa X”, „w opisie wymień kompatybilność z modelem Y”."
+          />
+          <div className="flex justify-between items-center text-xs text-muted-foreground">
+            <span>{productNotes.length} / 2000 · zapis automatyczny po opuszczeniu pola</span>
+            <span>{notesSaving ? "Zapisywanie…" : productNotes !== notesInitial ? "Nie zapisano" : "Zapisane"}</span>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Golden record */}

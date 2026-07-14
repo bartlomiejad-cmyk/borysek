@@ -614,6 +614,7 @@ export type Database = {
           id: string
           kod: string | null
           nazwa: string | null
+          product_notes: string | null
           project_id: string
           raw: Json
         }
@@ -624,6 +625,7 @@ export type Database = {
           id?: string
           kod?: string | null
           nazwa?: string | null
+          product_notes?: string | null
           project_id: string
           raw?: Json
         }
@@ -634,6 +636,7 @@ export type Database = {
           id?: string
           kod?: string | null
           nazwa?: string | null
+          product_notes?: string | null
           project_id?: string
           raw?: Json
         }

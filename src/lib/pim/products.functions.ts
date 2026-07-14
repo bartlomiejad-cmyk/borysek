@@ -39,3 +39,56 @@ export const deleteProducts = createServerFn({ method: "POST" })
 
     return { deleted: (deletedRows ?? []).length };
   });
+
+// Per-product internal notes injected into AI prompts (never rendered publicly).
+export const updateProductNotes = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        productId: z.string().uuid(),
+        notes: z.string().max(2000).nullable(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const value = (data.notes ?? "").trim();
+    const { error } = await supabase
+      .from("source_products")
+      .update({ product_notes: value ? value : null } as never)
+      .eq("id", data.productId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// Persist per-project client guidelines inside projects.settings (jsonb merge).
+export const updateClientGuidelines = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        guidelines: z.string().max(4000),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: row, error: readErr } = await supabase
+      .from("projects")
+      .select("settings")
+      .eq("id", data.projectId)
+      .single();
+    if (readErr) throw new Error(readErr.message);
+    const settings = { ...((row?.settings as Record<string, unknown> | null) ?? {}) };
+    const value = data.guidelines.trim();
+    if (value) settings.client_guidelines = value;
+    else delete settings.client_guidelines;
+    const { error } = await supabase
+      .from("projects")
+      .update({ settings: settings as never } as never)
+      .eq("id", data.projectId);
+    if (error) throw new Error(error.message);
+    return { ok: true, hasGuidelines: Boolean(value) };
+  });
