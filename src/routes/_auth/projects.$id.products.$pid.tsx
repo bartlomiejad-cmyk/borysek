@@ -13,6 +13,7 @@ import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.func
 import { regenerateMainImage, clearRegeneratedImage } from "@/lib/pim/regen.functions";
 import { recleanProductSources } from "@/lib/pim/firecrawl.functions";
 import { deleteProducts, updateProductNotes } from "@/lib/pim/products.functions";
+import { resolveRegenUrl } from "@/lib/pim/media";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -190,7 +191,9 @@ function ProductDetail() {
   const imageScores = (((data as { image_scores?: Record<string, ImgScore> } | undefined)?.image_scores) ?? {}) as Record<string, ImgScore>;
 
   const allVisible: string[] = [];
-  const regenUrlEarly = (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null;
+  const regenUrlEarly = resolveRegenUrl(
+    (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null,
+  );
   if (regenUrlEarly) allVisible.push(regenUrlEarly);
   if (data?.sources) {
     for (const s of data.sources) {
@@ -377,7 +380,9 @@ function ProductDetail() {
   const hiddenImages = ((data as { hidden_images?: string[] }).hidden_images ?? []) as string[];
   const includeExtra = (data as { include_extra_images?: boolean }).include_extra_images ?? false;
   const quality = (enrichment as { quality?: { watermark_urls?: string[]; name_mismatch?: boolean; feature_mismatches?: string[]; notes?: string } | null } | null)?.quality ?? null;
-  const regeneratedUrl = (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null;
+  const regeneratedUrl = resolveRegenUrl(
+    (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ?? null,
+  );
   const scoreBreakdown = (((enrichment as { score_breakdown?: unknown } | null)?.score_breakdown) ?? []) as Array<{ deduped?: boolean }>;
   const dedupedCount = scoreBreakdown.filter((s) => s.deduped === true).length;
 
