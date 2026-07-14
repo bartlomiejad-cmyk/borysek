@@ -1015,6 +1015,29 @@ function ProductDetail() {
 
             {/* Wizualizacje AI (lifestyle) */}
             {(() => {
+              const viz = ((imageMeta as unknown as { viz_analysis?: {
+                style?: string;
+                requirements?: string;
+                at?: string;
+                manual?: boolean;
+                source?: string;
+              } }).viz_analysis) ?? null;
+              if (!viz) return null;
+              return (
+                <VizAnalysisPanel
+                  productId={pid}
+                  viz={viz}
+                  onSave={async (style, requirements) => {
+                    await saveVizFn({
+                      data: { productId: pid, style, requirements, manual: true },
+                    });
+                    toast.success("Zapisano manualne nadpisanie sceny");
+                    invalidate();
+                  }}
+                />
+              );
+            })()}
+            {(() => {
               const gallery = (((enrichment as { ai_gallery_urls?: string[] | null } | null)?.ai_gallery_urls) ?? []) as string[];
               if (!gallery.length) return null;
               return (
