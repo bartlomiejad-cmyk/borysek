@@ -830,7 +830,12 @@ export async function scoreAndCapForProduct(
   );
   const rankedFull = positive
     .filter((x) => dedup.keptUrls.has(x.url))
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => {
+      const ea = a.ean_confirmed ? 1 : 0;
+      const eb = b.ean_confirmed ? 1 : 0;
+      if (ea !== eb) return eb - ea;
+      return b.total - a.total;
+    })
     .slice(0, TOP_SOURCES_PER_PRODUCT);
   const ranked = rankedFull.map((x) => x.url);
   const winners: BreakdownEntry[] = rankedFull.map((x) => ({
@@ -840,6 +845,7 @@ export async function scoreAndCapForProduct(
     trusted_boost: x.trusted_boost,
     variant_key: dedup.keyByUrl.get(x.url) ?? null,
     deduped: false,
+    ean_confirmed: x.ean_confirmed,
   }));
   const dropped: BreakdownEntry[] = positive
     .filter((x) => dedup.deduped.has(x.url))
@@ -850,6 +856,7 @@ export async function scoreAndCapForProduct(
       trusted_boost: x.trusted_boost,
       variant_key: dedup.keyByUrl.get(x.url) ?? null,
       deduped: true,
+      ean_confirmed: x.ean_confirmed,
     }));
   const breakdown: BreakdownEntry[] = [...winners, ...dropped];
 
