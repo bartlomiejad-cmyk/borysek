@@ -488,6 +488,10 @@ export const runMatching = createServerFn({ method: "POST" })
       const metaMap = new Map<string, SourceMeta>();
       const confidenceMap = new Map<string, number | null>();
       const descLenMap = new Map<string, number>();
+      // URLs whose LLM cleaner said the page does NOT describe the product
+      // (or hallucination guard triggered). Treated as auto-reject for AI
+      // validation and as junk (score -5) in the scoring stage.
+      const mismatchedByUrl = new Set<string>();
       const productById = new Map(products.map((p) => [p.id, p]));
       // Load pinned_main_url per product so we can skip clustering on manually-pinned products.
       const { data: pinRows } = await supabase
@@ -543,6 +547,9 @@ export const runMatching = createServerFn({ method: "POST" })
             descClean = llm.description || regexClean;
             cleaningMeta = llm.meta;
           }
+          if (cleaningMeta.page_matches_product === false) {
+            mismatchedByUrl.add(rr.url);
+          }
           const mainIn = Array.isArray(rr.images) ? (rr.images as string[]) : [];
           const extraIn = Array.isArray(rr.extra_images) ? (rr.extra_images as string[]) : [];
           const mainClean = filterImageUrls(mainIn);
@@ -581,6 +588,7 @@ export const runMatching = createServerFn({ method: "POST" })
         const mode = modeById.get(u.source_product_id) ?? "strict";
         if (apiKey) {
           const sources = u.picked_urls
+            .filter((url) => !mismatchedByUrl.has(url))
             .map((url) => ({
               url,
               title: srcMap.get(url)?.title ?? null,
@@ -612,6 +620,17 @@ export const runMatching = createServerFn({ method: "POST" })
             description: null,
             imagesCount: 0,
           };
+          if (mismatchedByUrl.has(url)) {
+            // LLM cleaner declared this page unrelated → junk penalty,
+            // regardless of what the regex sanitizer produced.
+            return {
+              url,
+              total: -5,
+              producer_boost: false,
+              trusted_boost: false,
+              ean_confirmed: false,
+            };
+          }
           const r = scoreSource(
             meta,
             { nazwa: prod.nazwa, ean: prod.ean ?? null, producer },
