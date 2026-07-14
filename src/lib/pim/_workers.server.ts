@@ -2354,6 +2354,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       meta: {
         variants: perVariantUrls.map((v) => ({ kind: v.kind, query: v.variant, results_count: v.urls.length })),
         provider_mode: searchProvider,
+        apify: apifyVariantMeta.length ? apifyVariantMeta : undefined,
       },
     });
     return;
