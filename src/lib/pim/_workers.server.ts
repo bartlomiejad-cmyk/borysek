@@ -3332,14 +3332,14 @@ export async function runPimVisualization(
       const { data: prow } = await supabaseAdmin
         .from("source_products")
         .select("review_status")
-        .eq("id", e.source_product_id)
+        .eq("id", productId)
         .maybeSingle();
       const cur = (prow as { review_status?: string | null } | null)?.review_status ?? null;
       if (cur !== "REJECTED" && cur !== "NEEDS_REVIEW") {
         await supabaseAdmin
           .from("source_products")
           .update({ review_status: "NEEDS_REVIEW" } as never)
-          .eq("id", e.source_product_id);
+          .eq("id", productId);
       }
     }
     await emit(ctx, {
