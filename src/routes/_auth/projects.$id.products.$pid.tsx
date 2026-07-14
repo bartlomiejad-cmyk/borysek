@@ -1204,6 +1204,133 @@ function ProductDetail() {
               )}
             </div>
 
+            {/* Audit — deterministic checks + LLM cross-check against sources/guidelines. */}
+            {(() => {
+              const auditData = (enrichment as unknown as {
+                audit?: {
+                  at: string;
+                  verdict: "pass" | "warn" | "fail";
+                  checks: Array<{ check: string; ok: boolean; severity: "fail" | "warn"; detail?: string }>;
+                  llm: null | {
+                    factual_issues: string[];
+                    guideline_violations: string[];
+                    style_issues: string[];
+                    verdict: "pass" | "warn" | "fail";
+                  };
+                } | null;
+              } | null)?.audit ?? null;
+              const verdict = auditData?.verdict ?? null;
+              const badgeCls =
+                verdict === "pass"
+                  ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : verdict === "warn"
+                    ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                    : verdict === "fail"
+                      ? "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
+                      : "border-border bg-muted/30 text-muted-foreground";
+              const label =
+                verdict === "pass"
+                  ? "Audyt OK"
+                  : verdict === "warn"
+                    ? "Audyt: ostrzeżenia"
+                    : verdict === "fail"
+                      ? "Audyt: błędy"
+                      : "Audyt nieprzeprowadzony";
+              const failed = auditData?.checks.filter((c) => !c.ok) ?? [];
+              return (
+                <div className="pt-4 border-t mt-4 space-y-2">
+                  <Collapsible defaultOpen={!!verdict && verdict !== "pass"}>
+                    <div className="flex items-center justify-between">
+                      <CollapsibleTrigger className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                        <ChevronDown className="h-3 w-3" />
+                        <span>Audyt AI</span>
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${badgeCls}`}>
+                          {label}
+                        </Badge>
+                        {auditData?.at && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(auditData.at).toLocaleString("pl-PL")}
+                          </span>
+                        )}
+                      </CollapsibleTrigger>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!enrichment || audit.isPending}
+                        onClick={() => audit.mutate()}
+                      >
+                        {audit.isPending ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                        )}
+                        {auditData ? "Uruchom ponownie" : "Uruchom audyt"}
+                      </Button>
+                    </div>
+                    <CollapsibleContent className="mt-2 space-y-2 text-xs">
+                      {!auditData && (
+                        <p className="italic text-muted-foreground">
+                          Audyt jeszcze nie był uruchamiany.
+                        </p>
+                      )}
+                      {auditData && failed.length === 0 && (
+                        <p className="text-emerald-600">✓ Wszystkie sprawdzenia OK</p>
+                      )}
+                      {failed.length > 0 && (
+                        <ul className="space-y-1">
+                          {failed.map((c) => (
+                            <li
+                              key={c.check}
+                              className={
+                                c.severity === "fail" ? "text-destructive" : "text-amber-600"
+                              }
+                            >
+                              {c.severity === "fail" ? "❌" : "⚠"} {c.check}
+                              {c.detail ? ` — ${c.detail}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {auditData?.llm && (
+                        <div className="space-y-1 pt-1 border-t">
+                          {auditData.llm.factual_issues.length > 0 && (
+                            <div>
+                              <p className="font-medium">Niezgodności z źródłami:</p>
+                              <ul className="list-disc pl-5 text-destructive">
+                                {auditData.llm.factual_issues.map((s, i) => (
+                                  <li key={i}>{s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {auditData.llm.guideline_violations.length > 0 && (
+                            <div>
+                              <p className="font-medium">Naruszenia wytycznych klienta:</p>
+                              <ul className="list-disc pl-5 text-amber-600">
+                                {auditData.llm.guideline_violations.map((s, i) => (
+                                  <li key={i}>{s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {auditData.llm.style_issues.length > 0 && (
+                            <div>
+                              <p className="font-medium">Uwagi stylistyczne:</p>
+                              <ul className="list-disc pl-5 text-muted-foreground">
+                                {auditData.llm.style_issues.map((s, i) => (
+                                  <li key={i}>{s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+              );
+            })()}
+
             {hiddenImages.length > 0 && (
               <div className="pt-4 border-t mt-4">
                 <p className="text-xs font-medium text-muted-foreground mb-2">Ukryte zdjęcia ({hiddenImages.length})</p>
