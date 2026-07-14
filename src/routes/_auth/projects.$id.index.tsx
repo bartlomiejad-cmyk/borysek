@@ -657,82 +657,76 @@ function ProjectPage() {
             {meta?.counts.product_sources ?? 0} stron źródłowych · {meta?.counts.enrichments_done ?? 0} złotych rekordów
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => matchMut.mutate()} disabled={matchMut.isPending}>
-            <Play className="h-4 w-4 mr-2" /> Dopasuj
-          </Button>
-          <Button variant="outline" onClick={() => setShareOpen(true)}>
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Wrench className="h-4 w-4 mr-2" /> Narzędzia
+                <ChevronDown className="h-3 w-3 ml-1 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel>Narzędzia</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setGuidelinesOpen(true)}>
+                <FileText className="h-4 w-4 mr-2" />
+                Wytyczne klienta
+                {(() => {
+                  const s = (meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings;
+                  const filled = Boolean(s?.client_guidelines?.trim());
+                  return (
+                    <span
+                      className={`ml-auto inline-block h-2 w-2 rounded-full ${filled ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                    />
+                  );
+                })()}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void runReclean()}>
+                <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to="/projects/$id/verify" params={{ id }}>
+                  <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => setVerifyOpen(true)}
+                disabled={!!verifyActive}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" /> Weryfikuj zdjęcia AI
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="h-4 w-4 mr-2" /> Eksport
+                <ChevronDown className="h-3 w-3 ml-1 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => exportFile("csv")}>
+                <Download className="h-4 w-4 mr-2" /> CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx")}>
+                <Download className="h-4 w-4 mr-2" /> XLSX
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button onClick={() => setShareOpen(true)}>
             <Share2 className="h-4 w-4 mr-2" /> Udostępnij klientowi
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setGuidelinesOpen(true)}
-            title="Ustalenia z klientem — wstrzykiwane do promptów AI"
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            Wytyczne klienta
-            {(() => {
-              const s = (meta?.project as { settings?: { client_guidelines?: string } } | undefined)?.settings;
-              const filled = Boolean(s?.client_guidelines?.trim());
-              return (
-                <span
-                  className={`ml-2 inline-block h-2 w-2 rounded-full ${filled ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
-                  aria-label={filled ? "Wytyczne uzupełnione" : "Brak wytycznych"}
-                />
-              );
-            })()}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!!discActive}
-            onClick={async () => {
-              if (!confirm("Uruchomić wyszukiwanie źródeł przez Firecrawl dla produktów bez źródeł?")) return;
-              try {
-                const res = await firecrawlFn({ data: { projectId: id, onlyMissing: true } });
-                toast.success(`Uruchomiono w tle: ${res.total} produktów. Możesz zamknąć kartę.`);
-                qc.invalidateQueries({ queryKey: ["project", id, "bulk-job", "FIRECRAWL_DISCOVERY"] });
-              } catch (e) {
-                toast.error(friendlyError(e, "Nie udało się uruchomić wyszukiwania"));
-              }
-            }}
-          >
-            <Sparkles className="h-4 w-4 mr-2" /> Wyszukaj źródła (Firecrawl)
-          </Button>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              try {
-                const res = await recleanFn({ data: { projectId: id } });
-                toast.success(
-                  `Wyczyszczono: ${res.updated}/${res.scanned} źródeł, usunięto ${res.imagesRemoved} zdjęć i ${res.charsRemoved} znaków opisu.`,
-                );
-                qc.invalidateQueries({ queryKey: ["project", id] });
-              } catch (e) {
-                toast.error(friendlyError(e, "Nie udało się wyczyścić źródeł"));
-              }
-            }}
-          >
-            <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
-          </Button>
-          <Button onClick={() => generateAll()} disabled={!!genActive}>
-            <Sparkles className="h-4 w-4 mr-2" /> Generuj złote rekordy
-          </Button>
-          <Button variant="outline" onClick={() => regenerateAll()} disabled={!!regenActive}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Regeneruj tła
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/projects/$id/verify" params={{ id }}>
-              <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
-            </Link>
-          </Button>
-          <Button variant="outline" onClick={() => exportFile("csv")}>
-            <Download className="h-4 w-4 mr-2" /> CSV
-          </Button>
-          <Button variant="outline" onClick={() => exportFile("xlsx")}>
-            <Download className="h-4 w-4 mr-2" /> XLSX
           </Button>
         </div>
       </div>
+
+      {summary && (
+        <PipelineStages
+          summary={summary}
+          activeStage={stage}
+          onStageClick={handleStageClick}
+          onPrimaryAction={handleStagePrimary}
+        />
+      )}
 
       {genActive && genJob && (
         <Card className="mb-4">
