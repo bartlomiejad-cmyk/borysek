@@ -732,7 +732,16 @@ function ProjectPage() {
               <DropdownMenuItem onSelect={() => void runReclean()}>
                 <Sparkles className="h-4 w-4 mr-2" /> Wyczyść źródła
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setRemapOpen(true)}>
+                <Wand2 className="h-4 w-4 mr-2" /> Uzupełnij dane z CSV
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => void auditAll()}
+                disabled={!!auditActive}
+              >
+                <ClipboardCheck className="h-4 w-4 mr-2" /> Audyt AI
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link to="/projects/$id/verify" params={{ id }}>
                   <ShieldCheck className="h-4 w-4 mr-2" /> Widok weryfikacyjny
