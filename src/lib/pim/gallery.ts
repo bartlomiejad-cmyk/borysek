@@ -44,6 +44,38 @@ export type VisibleGallery = {
   accepted: string[];
   unsure: string[];
   rejected: string[];
+  /**
+   * URLs that failed the availability probe (404, non-image content-type,
+   * hotlink-protected, dimensions unparseable). Excluded from every
+   * client-facing surface; surfaced separately in the editor for re-probe.
+   * Manually-kept images that turned dead are excluded here too.
+   */
+  dead: string[];
+  /**
+   * Compatible-mode only: accepted images that come from equivalent
+   * (non-primary) sources. Never auto-selected as main; users can promote
+   * individually via manual_keep.
+   */
+  otherEquivalents: string[];
+};
+
+/**
+ * Per-source context used to enforce compatible-mode gallery policy:
+ * accepted images only come from the single best-ranked source (plus
+ * pinned + manual_keep). Everything else moves to `otherEquivalents`.
+ */
+export type GallerySourceContext = {
+  /** Source page URL. */
+  url: string;
+  /** Match score (from enrichments.score_breakdown[].total). */
+  score: number;
+  /** Image URLs contributed by this source (main + extra). */
+  images: string[];
+};
+
+export type GalleryOptions = {
+  matchingMode?: "strict" | "compatible";
+  sources?: readonly GallerySourceContext[];
 };
 
 import { baseVariantKey } from "./image-variants";
@@ -51,6 +83,7 @@ import { baseVariantKey } from "./image-variants";
 export function getVisibleGallery(
   urls: readonly string[],
   enrichment: GalleryEnrichment | null | undefined,
+  options?: GalleryOptions,
 ): VisibleGallery {
   const hidden = new Set((enrichment?.hidden_images ?? []) as string[]);
   const scores = (enrichment?.image_scores ?? {}) as Record<string, GalleryImageScore | undefined>;
@@ -59,6 +92,7 @@ export function getVisibleGallery(
   const accepted: string[] = [];
   const unsure: string[] = [];
   const rejected: string[] = [];
+  const dead: string[] = [];
   const seen = new Set<string>();
 
   for (const u of urls) {
@@ -67,11 +101,15 @@ export function getVisibleGallery(
     if (hidden.has(u)) continue;
     const s = scores[u];
     if (s?.manual_keep === true) {
+      // Manual keep wins over AI verdicts — but a manually-kept image that
+      // turned dead is still hidden from client surfaces (owner gets a
+      // warning icon in the editor).
+      if (s.dead === true) { dead.push(u); continue; }
       accepted.push(u);
       continue;
     }
     if (s?.is_banner_or_trash === true) continue;
-    if (s?.dead === true) continue;
+    if (s?.dead === true) { dead.push(u); continue; }
     const identity = s?.identity;
     if (identity === "different") rejected.push(u);
     else if (identity === "unsure") unsure.push(u);
@@ -125,7 +163,27 @@ export function getVisibleGallery(
     }
   }
 
-  return { accepted, unsure, rejected };
+  // Compatible-mode split: only the single best-ranked source's images
+  // (plus pinned + manual_keep) count as accepted. Everything else from
+  // equivalent sources moves to `otherEquivalents` — never auto-selected
+  // as main, but promotable by the user via manual_keep.
+  const otherEquivalents: string[] = [];
+  if (options?.matchingMode === "compatible" && options.sources && options.sources.length > 0) {
+    const bestSource = [...options.sources].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+    const bestImages = new Set(bestSource?.images ?? []);
+    const finalAccepted: string[] = [];
+    for (const u of accepted) {
+      const s = scores[u];
+      if (s?.manual_keep === true) { finalAccepted.push(u); continue; }
+      if (pinned && u === pinned) { finalAccepted.push(u); continue; }
+      if (bestImages.has(u)) { finalAccepted.push(u); continue; }
+      otherEquivalents.push(u);
+    }
+    accepted.length = 0;
+    accepted.push(...finalAccepted);
+  }
+
+  return { accepted, unsure, rejected, dead, otherEquivalents };
 }
 
 /**
