@@ -40,10 +40,13 @@ export const exportProject = createServerFn({ method: "GET" })
 
     let prodQ = supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, category, review_status, pipeline_status, approved_at, manual_lock")
+      .select("id, ext_id, nazwa, kod, ean, category, review_status, pipeline_status, approved_at, manual_lock, excluded")
       .eq("project_id", data.projectId)
       ;
     if (data.approvedOnly) prodQ = prodQ.eq("review_status", "APPROVED");
+    // Delivery mode is strictly about what to hand to the client — a product
+    // parked out of the pipeline has nothing to deliver.
+    if (mode === "delivery") prodQ = prodQ.eq("excluded", false);
     const { data: products, error } = await prodQ
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);

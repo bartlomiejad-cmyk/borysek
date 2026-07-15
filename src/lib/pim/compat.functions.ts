@@ -150,6 +150,18 @@ export const attachManualSources = createServerFn({ method: "POST" })
       return { ok: false, added: 0, failed };
     }
 
+    // A manually attached, successfully scraped source is enough to bring the
+    // product back into the pipeline regardless of whether the auto-exclusion
+    // was set. Manual exclusion is intentionally left alone here — the user
+    // must lift it explicitly.
+    try {
+      await supabase
+        .from("source_products")
+        .update({ excluded: false, excluded_reason: null, excluded_at: null } as never)
+        .eq("id", data.productId)
+        .eq("excluded_reason", "auto_no_sources");
+    } catch { /* non-fatal */ }
+
     // Upsert enrichment row if missing, then union picked_urls and record
     // manual breakdown entries.
     const { data: enRow } = await supabase

@@ -2245,6 +2245,18 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const nazwa = (product.nazwa ?? "").trim();
   if (!nazwa) throw new Error("Produkt nie ma nazwy");
 
+  // Any explicit re-run clears an auto-exclusion so counters and stage
+  // cards start including this product again. Manual exclusion is never
+  // cleared here — it is only lifted via the "Przywróć do przetwarzania"
+  // action.
+  try {
+    await supabaseAdmin
+      .from("source_products")
+      .update({ excluded: false, excluded_reason: null, excluded_at: null } as never)
+      .eq("id", product.id)
+      .eq("excluded_reason", "auto_no_sources");
+  } catch { /* non-fatal */ }
+
   const { data: project } = await supabaseAdmin
     .from("projects")
     .select("blacklist, strategy, settings")
@@ -2849,6 +2861,42 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   });
   if (scraped > 0) {
     await advancePipelineStatus(supabaseAdmin as never, product.id, "SOURCES_FOUND");
+  } else if (goodHits === 0) {
+    // No contributing sources at all — flag the product as excluded so it
+    // stops blocking pipeline stage progression and the "next step" hint.
+    // We only auto-exclude products still at IMPORTED — anything further
+    // along the pipeline already has usable data.
+    try {
+      const { data: cur } = await supabaseAdmin
+        .from("source_products")
+        .select("pipeline_status, excluded")
+        .eq("id", product.id)
+        .maybeSingle();
+      const ps = ((cur as { pipeline_status?: string | null } | null)?.pipeline_status ?? "IMPORTED") as string;
+      const already = !!(cur as { excluded?: boolean } | null)?.excluded;
+      if (!already && ps === "IMPORTED") {
+        await supabaseAdmin
+          .from("source_products")
+          .update({
+            excluded: true,
+            excluded_reason: "auto_no_sources",
+            excluded_at: new Date().toISOString(),
+          } as never)
+          .eq("id", product.id);
+        await emit(ctx, {
+          level: "warn",
+          message: `⏭ ${nazwa} — brak źródeł, produkt wyłączony z procesu`,
+        });
+        await logProductEvent(supabaseAdmin, {
+          projectId: product.project_id,
+          productId: product.id,
+          kind: "discovery_scrape",
+          message:
+            "Nie znaleziono źródeł — produkt wyłączony z procesu (możesz dodać źródło ręcznie lub ponowić wyszukiwanie)",
+          meta: { reason: "auto_no_sources" },
+        });
+      }
+    } catch { /* non-fatal */ }
   }
 }
 

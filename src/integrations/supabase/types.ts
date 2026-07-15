@@ -708,6 +708,9 @@ export type Database = {
           category: string | null
           created_at: string
           ean: string | null
+          excluded: boolean
+          excluded_at: string | null
+          excluded_reason: string | null
           ext_id: string | null
           id: string
           kod: string | null
@@ -726,6 +729,9 @@ export type Database = {
           category?: string | null
           created_at?: string
           ean?: string | null
+          excluded?: boolean
+          excluded_at?: string | null
+          excluded_reason?: string | null
           ext_id?: string | null
           id?: string
           kod?: string | null
@@ -744,6 +750,9 @@ export type Database = {
           category?: string | null
           created_at?: string
           ean?: string | null
+          excluded?: boolean
+          excluded_at?: string | null
+          excluded_reason?: string | null
           ext_id?: string | null
           id?: string
           kod?: string | null

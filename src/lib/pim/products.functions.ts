@@ -92,3 +92,35 @@ export const updateClientGuidelines = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true, hasGuidelines: Boolean(value) };
   });
+
+// Mass-toggle exclusion for a set of products. Reason is 'manual' when
+// excluding via this action so re-runs of discovery do not auto-clear it.
+export const setProductsExcluded = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        productIds: z.array(z.string().uuid()).min(1).max(2000),
+        excluded: z.boolean(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }): Promise<{ updated: number }> => {
+    const { supabase } = context;
+    const patch = data.excluded
+      ? {
+          excluded: true,
+          excluded_reason: "manual",
+          excluded_at: new Date().toISOString(),
+        }
+      : { excluded: false, excluded_reason: null, excluded_at: null };
+    const { data: rows, error } = await supabase
+      .from("source_products")
+      .update(patch as never)
+      .eq("project_id", data.projectId)
+      .in("id", data.productIds)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return { updated: (rows ?? []).length };
+  });

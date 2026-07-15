@@ -39,7 +39,7 @@ import {
   resetProductSources,
 } from "@/lib/pim/firecrawl.functions";
 import { testApifySerp } from "@/lib/pim/apify.functions";
-import { deleteProducts } from "@/lib/pim/products.functions";
+import { deleteProducts, setProductsExcluded } from "@/lib/pim/products.functions";
 import { BulkJobLog } from "@/components/pim/BulkJobLog";
 import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillMissingImagesDialog";
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
@@ -153,6 +153,7 @@ const searchSchema = z.object({
       "PIPE_VISUALS_READY",
       "REVIEW",
       "LOCKED",
+      "EXCLUDED",
     ])
     .catch("ALL"),
   search: z.string().catch(""),
@@ -196,6 +197,7 @@ function ProjectPage() {
   const setModeFn = useServerFn(setMatchingMode);
   const rerunMatchFn = useServerFn(rerunMatchingForProduct);
   const deleteProductsFn = useServerFn(deleteProducts);
+  const setProductsExcludedFn = useServerFn(setProductsExcluded);
   const summaryFn = useServerFn(getPipelineSummary);
   const approveFn = useServerFn(approveProduct);
   const unapproveFn = useServerFn(unapproveProduct);
@@ -380,6 +382,14 @@ function ProjectPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return products.filter((p) => {
+      const isExcluded = !!(p as { excluded?: boolean }).excluded;
+      if (filter === "EXCLUDED") {
+        if (!isExcluded) return false;
+      } else if (isExcluded) {
+        // Excluded rows are hidden from every other view so they don't
+        // muddy stage-based lists or bulk actions.
+        return false;
+      }
       if (filter === "MATCHED" && p.match_type === "NO_MATCH") return false;
       if (filter === "PENDING" && p.status !== "PENDING") return false;
       if (filter === "GENERATED" && p.status !== "GENERATED") return false;
@@ -884,6 +894,9 @@ function ProjectPage() {
             updateSearch({ filter: f, stage: "NONE", page: 1 });
           }}
           onRunAudit={() => void auditAll()}
+          onShowExcluded={() =>
+            updateSearch({ filter: "EXCLUDED", stage: "NONE", page: 1 })
+          }
         />
       )}
 
@@ -1186,6 +1199,7 @@ function ProjectPage() {
                 <SelectItem value="REVIEW">Do przeglądu</SelectItem>
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
                 <SelectItem value="LOCKED">🔒 Zablokowane ręcznie</SelectItem>
+                <SelectItem value="EXCLUDED">🚫 Wykluczone (poza procesem)</SelectItem>
               </SelectContent>
             </Select>
             {categoryOptions.length > 0 && (
@@ -1358,6 +1372,32 @@ function ProjectPage() {
               </Button>
               <Button size="sm" variant="outline" onClick={() => exportFile("xlsx")}>
                 <Download className="h-4 w-4 mr-1" /> XLSX
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const ids = [...selectedIds];
+                  if (!ids.length) return;
+                  const restore = filter === "EXCLUDED";
+                  try {
+                    const res = await setProductsExcludedFn({
+                      data: { projectId: id, productIds: ids, excluded: !restore },
+                    });
+                    toast.success(
+                      restore
+                        ? `Przywrócono do procesu: ${res.updated}`
+                        : `Wykluczono z procesu: ${res.updated}`,
+                    );
+                    clearSelected();
+                    refetchProducts();
+                    qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+                  } catch (e) {
+                    toast.error(friendlyError(e, "Nie udało się zmienić statusu"));
+                  }
+                }}
+              >
+                {filter === "EXCLUDED" ? "↩ Przywróć do przetwarzania" : "🚫 Wyklucz z przetwarzania"}
               </Button>
               <Button
                 size="sm"
