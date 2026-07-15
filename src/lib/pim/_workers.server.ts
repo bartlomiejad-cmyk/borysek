@@ -160,6 +160,7 @@ async function sha256Hex(input: string): Promise<string> {
 export async function analyzeVisualizationSceneForProduct(args: {
   productName: string;
   featuresText: string;
+  category?: string | null;
   imageUrls: string[]; // main first, max 4, must be publicly fetchable
   projectConstraintsPl?: string; // optional PL text; overrides scene choices
   count?: number; // desired variant count (>=1). Result contains variants[].
@@ -213,6 +214,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
   const constraintsBlock = (args.projectConstraintsPl ?? "").trim();
   const userText = [
     `Nazwa produktu: "${args.productName || "(bez nazwy)"}"`,
+    args.category ? `Kategoria produktu: ${args.category}` : "",
     args.featuresText ? `Cechy: ${args.featuresText}` : "",
     constraintsBlock
       ? `OGRANICZENIA PROJEKTU (nadrzędne wobec Twoich pomysłów na scenę):\n${constraintsBlock}`
