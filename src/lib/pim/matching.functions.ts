@@ -218,6 +218,7 @@ async function validateSourcesWithAI(
     mpn?: string | null;
   }>,
   mode: "strict" | "compatible" = "strict",
+  productCategory: string | null = null,
 ): Promise<ValidationResult> {
   if (!sources.length) return { keep: new Set(), clustersByUrl: new Map(), ok: true };
   const blocks = sources
@@ -260,6 +261,7 @@ async function validateSourcesWithAI(
   const user = [
     `PRODUKT: ${productName}`,
     productEan ? `EAN: ${productEan}` : "",
+    productCategory ? `KATEGORIA: ${productCategory}` : "",
     "",
     "ŹRÓDŁA:",
     blocks,
