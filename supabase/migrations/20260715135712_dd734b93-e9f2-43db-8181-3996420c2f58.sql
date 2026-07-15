@@ -1,0 +1,1 @@
+DROP POLICY IF EXISTS "Public read regenerated images" ON storage.objects;
