@@ -223,6 +223,7 @@ function ProjectPage() {
 
   const filter = urlSearch.filter;
   const search = urlSearch.search;
+  const category = urlSearch.category;
   const pageSize = urlSearch.pageSize;
   const page = urlSearch.page;
   const stage = urlSearch.stage;
