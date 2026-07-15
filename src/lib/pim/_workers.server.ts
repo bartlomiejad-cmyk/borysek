@@ -89,6 +89,56 @@ export type WorkerCtx = {
   onEvent?: (e: JobEvent) => void | Promise<void>;
 };
 
+/**
+ * Discovery telemetry counters. Persisted onto bulk_jobs.usage after every
+ * per-product batch so cancelled/timed-out jobs still record what they burned.
+ */
+type DiscoveryUsage = {
+  fc_searches?: number;
+  fc_scrapes?: number;
+  cache_hits_24h?: number;
+  cache_hits_shared?: number;
+  apify_runs?: number;
+  apify_empty?: number;
+  skipped_fc_searches?: number;
+};
+
+async function bumpJobUsage(bulkJobId: string | undefined, patch: DiscoveryUsage): Promise<void> {
+  if (!bulkJobId) return;
+  try {
+    const { data } = await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .select("usage")
+      .eq("id", bulkJobId)
+      .maybeSingle();
+    const current = ((data as { usage?: Record<string, number> | null } | null)?.usage ?? {}) as Record<string, number>;
+    const next: Record<string, number> = { ...current };
+    for (const [k, v] of Object.entries(patch)) {
+      if (typeof v === "number" && v > 0) next[k] = (next[k] ?? 0) + v;
+    }
+    await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .update({ usage: next as never } as never)
+      .eq("id", bulkJobId);
+  } catch {
+    /* best-effort telemetry */
+  }
+}
+
+function normalizeUrlForCache(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    // strip common tracking + fragment
+    const drop = ["gclid", "fbclid", "yclid", "msclkid"];
+    for (const key of drop) u.searchParams.delete(key);
+    for (const k of Array.from(u.searchParams.keys())) if (k.startsWith("utm_")) u.searchParams.delete(k);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 async function emit(ctx: WorkerCtx | undefined, e: JobEvent): Promise<void> {
   if (!ctx?.onEvent) return;
   try {
