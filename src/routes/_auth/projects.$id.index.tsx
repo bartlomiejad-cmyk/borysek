@@ -1187,6 +1187,30 @@ function ProjectPage() {
                 <SelectItem value="LOCKED">🔒 Zablokowane ręcznie</SelectItem>
               </SelectContent>
             </Select>
+            {categoryOptions.length > 0 && (
+              <Select
+                value={category || "__ALL__"}
+                onValueChange={(v) => updateSearch({ category: v === "__ALL__" ? "" : v })}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Kategoria" />
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  <SelectItem value="__ALL__">Wszystkie kategorie</SelectItem>
+                  {categoryOptions.map((c) => {
+                    const depth = c.split(" > ").length - 1;
+                    const leaf = c.split(" > ").pop() ?? c;
+                    return (
+                      <SelectItem key={c} value={c}>
+                        <span style={{ paddingLeft: `${depth * 10}px` }} className="text-sm">
+                          {leaf}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </CardHeader>
         <CardContent>
