@@ -1003,6 +1003,57 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
+// Cheap liveness probe over EVERY visible image URL of a product, unbounded
+// by the AI-scoring cap. Persists `dead:true` markers so `getVisibleGallery`
+// hides them from the "Wybrane zdjęcia" grid on the next read. Used by the
+// "Zweryfikuj zdjęcia ponownie" button BEFORE it triggers identity re-scoring.
+// ---------------------------------------------------------------------------
+export const probeVisibleImagesAlive = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z.object({
+      productId: z.string().uuid(),
+      /** When true, re-probe URLs already cached as dead. */
+      revalidate: z.boolean().optional(),
+    }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: enrichment, error: eErr } = await supabase
+      .from("enrichments")
+      .select("id, picked_urls, image_scores, hidden_images")
+      .eq("source_product_id", data.productId)
+      .maybeSingle();
+    if (eErr) throw new Error(eErr.message);
+    if (!enrichment) return { alive: [] as string[], dead: [] as string[], probed: 0 };
+    const en = enrichment as unknown as {
+      id: string;
+      picked_urls?: string[] | null;
+      image_scores?: Record<string, ImageScore> | null;
+      hidden_images?: string[] | null;
+    };
+    const picked = (en.picked_urls ?? []) as string[];
+    if (!picked.length) return { alive: [] as string[], dead: [] as string[], probed: 0 };
+    const { data: sources } = await supabase
+      .from("product_sources")
+      .select("url, images, extra_images")
+      .in("url", picked);
+    const hidden = new Set((en.hidden_images ?? []) as string[]);
+    const seen = new Set<string>();
+    const all: string[] = [];
+    for (const s of (sources ?? []) as Array<{ images: string[] | null; extra_images: string[] | null }>) {
+      for (const u of s.images ?? []) if (typeof u === "string" && u && !hidden.has(u) && !seen.has(u)) { seen.add(u); all.push(u); }
+      for (const u of s.extra_images ?? []) if (typeof u === "string" && u && !hidden.has(u) && !seen.has(u)) { seen.add(u); all.push(u); }
+    }
+    if (!all.length) return { alive: [] as string[], dead: [] as string[], probed: 0 };
+    const existing = (en.image_scores ?? {}) as Record<string, ImageScore>;
+    const { alive, dead } = await filterAliveImages(supabase, en.id, all, existing, {
+      revalidate: data.revalidate === true,
+    });
+    return { alive, dead, probed: all.length };
+  });
+
+// ---------------------------------------------------------------------------
 // Visualization field suggestions (Styl / Wymagania) based on project name.
 // ---------------------------------------------------------------------------
 
