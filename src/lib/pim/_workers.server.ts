@@ -2730,52 +2730,93 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: cachedRows } = await supabaseAdmin
     .from("product_sources")
-    .select("url, created_at")
+    .select("url, description, images, created_at")
     .eq("project_id", product.project_id)
     .in("url", filtered)
     .gte("created_at", dayAgo);
-  const cachedUrls = new Set((cachedRows ?? []).map((r) => (r as { url: string }).url));
+  // 24h same-project cache hit — only counts as a "contributing hit" when
+  // the cached row itself contributed (>=1 image OR desc >= 200 chars).
+  const cached24h = new Map<string, { contributed: boolean }>();
+  for (const r of cachedRows ?? []) {
+    const rr = r as { url: string; description: string | null; images: unknown };
+    const imgs = Array.isArray(rr.images) ? (rr.images as string[]).length : 0;
+    const descLen = (rr.description ?? "").length;
+    cached24h.set(rr.url, { contributed: imgs > 0 || descLen >= 200 });
+  }
 
   // 4) Scrape each and upsert into product_sources.
+  // goodHits increments only for CONTRIBUTING sources (>=1 accepted image
+  // OR >=2 features OR desc >=200 chars with page_matches_product !== false).
+  // Loop stops at 3 contributing sources or scrapeCap, whichever first.
   let scraped = 0;
   let cacheHits = 0;
   let totalImages = 0;
   let goodHits = 0;
+  let attempts = 0;
   const scrapedNorm = new Set<string>();
   for (const url of filtered) {
     if (goodHits >= 3) {
       await emit(ctx, {
         level: "info",
-        message: `   ⏩ ${nazwa} — early-exit po 3 dobrych trafieniach (pomijam pozostałe ${filtered.length - scraped - cacheHits} URL-i)`,
+        message: `   ⏩ ${nazwa} — early-exit po 3 wnoszących źródłach`,
       });
       break;
     }
-    if (cachedUrls.has(url)) {
+    if (attempts >= scrapeCap) {
+      await emit(ctx, {
+        level: "info",
+        message: `   ⏹ ${nazwa} — osiągnięto limit scrape (${scrapeCap})`,
+      });
+      break;
+    }
+    if (cached24h.has(url)) {
+      const hit = cached24h.get(url)!;
       cacheHits++;
-      goodHits++;
+      usage.cache_hits_24h = (usage.cache_hits_24h ?? 0) + 1;
+      if (hit.contributed) goodHits++;
       scrapedNorm.add(normalizeUrlForDedup(url));
       const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
       await emit(ctx, {
         level: "info",
-        message: `   ♻️ ${host} — cache hit (<24h), pomijam scrape`,
+        message: `   ♻️ ${host} — cache hit (<24h)${hit.contributed ? "" : " (bez wkładu)"}`,
         details: { url },
       });
       continue;
     }
+    attempts++;
     const res = await scrapeAndStoreSource(
       firecrawl,
       aiKey,
       { id: product.id, project_id: product.project_id, nazwa: product.nazwa ?? null, kod: product.kod ?? null, ean: product.ean ?? null },
       url,
       ctx,
+      { userId: userId ?? undefined },
     );
     if (res.ok) {
       scraped++;
       totalImages += res.imageCount;
       scrapedNorm.add(normalizeUrlForDedup(url));
-      if (res.imageCount > 0) goodHits++;
+      if (res.fromCache === "shared") {
+        usage.cache_hits_shared = (usage.cache_hits_shared ?? 0) + 1;
+      } else {
+        usage.fc_scrapes = (usage.fc_scrapes ?? 0) + 1;
+      }
+      const contributed =
+        (res.imageCount > 0) ||
+        ((res.featuresCount ?? 0) >= 2) ||
+        ((res.descLength ?? 0) >= 200 && res.pageMatchesProduct !== false);
+      if (contributed) {
+        goodHits++;
+      } else {
+        await emit(ctx, { level: "info", message: `   ✓ (bez wkładu) ${url}` });
+      }
+    } else {
+      // failed real scrape still counts a Firecrawl call
+      if (res.fromCache !== "shared") usage.fc_scrapes = (usage.fc_scrapes ?? 0) + 1;
     }
   }
+  // Flush usage counters onto bulk_jobs.usage (per-job aggregate).
+  await bumpJobUsage(ctx?.bulkJobId, usage);
   // Persist scraped flags back onto the query_variants JSON for UI transparency.
   if (scrapedNorm.size) {
     for (const b of perVariant) {
@@ -2791,8 +2832,8 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   }
   await emit(ctx, {
     level: scraped ? "success" : "warn",
-    message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
-    details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
+    message: `✅ ${nazwa} — ${scraped} scrape (${totalImages} zdjęć), cache 24h: ${usage.cache_hits_24h ?? 0}, cache shared: ${usage.cache_hits_shared ?? 0}, FC searches: ${usage.fc_searches ?? 0}, pominięte: ${usage.skipped_fc_searches ?? 0}`,
+    details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits, usage },
   });
   await logProductEvent(supabaseAdmin, {
     projectId: product.project_id,
