@@ -3761,6 +3761,13 @@ export async function runPimVisualization(
   const combinedRequirementsPl = `${perProductPl}${constraintsSuffix}`.trim();
 
   if (!lifePrompt) {
+    // Resume from viz_run when the job payload was cleared but viz_run still
+    // holds the built prompt.
+    if (vizRun?.prompt && vizRun.source_urls_hash === sourceUrlsHash && vizRun.constraints_hash === constraintsHash) {
+      lifePrompt = vizRun.prompt;
+    }
+  }
+  if (!lifePrompt) {
     try {
       await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
       const built = await buildFalPromptsFromPolish({
@@ -3784,6 +3791,7 @@ export async function runPimVisualization(
       lifePrompt = fb.lifestyle_prompt;
     }
     await saveProgress(slotState);
+    await persistVizRun({ phase: "prompt_ready", prompt: lifePrompt, reference_urls: referenceUrlsForFal });
     if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
       await emit(ctx, { level: "info", message: `   • prompt gotowy — render wystartuje w następnym przebiegu` });
       return { complete: false };
