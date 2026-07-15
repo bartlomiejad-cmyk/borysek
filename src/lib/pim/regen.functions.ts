@@ -349,13 +349,29 @@ export const saveVizAnalysisOverride = createServerFn({ method: "POST" })
     z
       .object({
         productId: z.string().uuid(),
-        style: z.string().max(600),
-        requirements: z.string().max(800),
+        style: z.string().max(600).optional(),
+        requirements: z.string().max(800).optional(),
         manual: z.boolean().default(true),
         viz_type: z.enum(["lifestyle", "in_use", "feature_explainer"]).optional(),
         overlay_motif: z.string().max(160).optional(),
         host_device_name: z.string().max(160).optional(),
         host_device_url: z.string().url().max(2000).optional().or(z.literal("").optional()),
+        hide_product_text: z.boolean().optional(),
+        // Per-index variant edits. Any variant with manual=true is preserved
+        // across re-analysis. Sparse arrays allowed (undefined = leave slot
+        // to whatever the AI plan produces).
+        variants: z
+          .array(
+            z.object({
+              style: z.string().max(600),
+              requirements: z.string().max(800),
+              viz_type: z.enum(["lifestyle", "in_use", "feature_explainer"]).default("lifestyle"),
+              overlay_motif: z.string().max(160).default(""),
+              manual: z.boolean().default(true),
+            }),
+          )
+          .max(8)
+          .optional(),
       })
       .parse(i),
   )
@@ -370,17 +386,30 @@ export const saveVizAnalysisOverride = createServerFn({ method: "POST" })
     const prev = (meta.viz_analysis as Record<string, unknown> | undefined) ?? {};
     const nextViz: Record<string, unknown> = {
       ...prev,
-      style: data.style.trim(),
-      requirements: data.requirements.trim(),
       manual: data.manual,
       at: new Date().toISOString(),
     };
+    if (typeof data.style === "string") nextViz.style = data.style.trim();
+    if (typeof data.requirements === "string") nextViz.requirements = data.requirements.trim();
     if (data.viz_type) nextViz.viz_type = data.viz_type;
     if (typeof data.overlay_motif === "string") nextViz.overlay_motif = data.overlay_motif.trim();
     if (typeof data.host_device_name === "string") {
       nextViz.host_device = data.host_device_name.trim()
         ? { name: data.host_device_name.trim() }
         : null;
+    }
+    if (typeof data.hide_product_text === "boolean") {
+      nextViz.hide_product_text = data.hide_product_text;
+    }
+    if (Array.isArray(data.variants)) {
+      nextViz.variants = data.variants.map((v) => ({
+        style: v.style.trim(),
+        requirements: v.requirements.trim(),
+        viz_type: v.viz_type,
+        overlay_motif: v.overlay_motif.trim(),
+        manual: v.manual,
+      }));
+      nextViz.count = data.variants.length;
     }
     const nextMeta: Record<string, unknown> = {
       ...meta,
