@@ -89,6 +89,56 @@ export type WorkerCtx = {
   onEvent?: (e: JobEvent) => void | Promise<void>;
 };
 
+/**
+ * Discovery telemetry counters. Persisted onto bulk_jobs.usage after every
+ * per-product batch so cancelled/timed-out jobs still record what they burned.
+ */
+type DiscoveryUsage = {
+  fc_searches?: number;
+  fc_scrapes?: number;
+  cache_hits_24h?: number;
+  cache_hits_shared?: number;
+  apify_runs?: number;
+  apify_empty?: number;
+  skipped_fc_searches?: number;
+};
+
+async function bumpJobUsage(bulkJobId: string | undefined, patch: DiscoveryUsage): Promise<void> {
+  if (!bulkJobId) return;
+  try {
+    const { data } = await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .select("usage")
+      .eq("id", bulkJobId)
+      .maybeSingle();
+    const current = ((data as { usage?: Record<string, number> | null } | null)?.usage ?? {}) as Record<string, number>;
+    const next: Record<string, number> = { ...current };
+    for (const [k, v] of Object.entries(patch)) {
+      if (typeof v === "number" && v > 0) next[k] = (next[k] ?? 0) + v;
+    }
+    await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .update({ usage: next as never } as never)
+      .eq("id", bulkJobId);
+  } catch {
+    /* best-effort telemetry */
+  }
+}
+
+function normalizeUrlForCache(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    // strip common tracking + fragment
+    const drop = ["gclid", "fbclid", "yclid", "msclkid"];
+    for (const key of drop) u.searchParams.delete(key);
+    for (const k of Array.from(u.searchParams.keys())) if (k.startsWith("utm_")) u.searchParams.delete(k);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 async function emit(ctx: WorkerCtx | undefined, e: JobEvent): Promise<void> {
   if (!ctx?.onEvent) return;
   try {
@@ -2290,6 +2340,32 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const useApify = searchProvider === "apify" || searchProvider === "both";
   const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
 
+  // Scrape cap (max scrapes per product). Range 1..12, default 6.
+  const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 6);
+  const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 6));
+
+  // Owner userId for cross-project scrape_cache scoping.
+  let userId: string | null = null;
+  if (ctx?.bulkJobId) {
+    const { data: jobRow } = await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .select("user_id")
+      .eq("id", ctx.bulkJobId)
+      .maybeSingle();
+    userId = ((jobRow as { user_id?: string } | null)?.user_id ?? null);
+  }
+
+  // Per-product usage accumulator; flushed to bulk_jobs.usage at end.
+  const usage: DiscoveryUsage = {
+    fc_searches: 0,
+    fc_scrapes: 0,
+    cache_hits_24h: 0,
+    cache_hits_shared: 0,
+    apify_runs: 0,
+    apify_empty: 0,
+    skipped_fc_searches: 0,
+  };
+
   // Load URLs the user has explicitly removed for this product — we still
   // fetch them via search (for audit / debug in query_variants) but never
   // rescrape them, and matching filters them out at pick-time.
@@ -2304,68 +2380,13 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     ),
   );
 
-  // ---- Firecrawl branch ----
-  if (useFirecrawl) {
-    for (let vi = 0; vi < variants.length; vi++) {
-      const v = variants[vi];
-      perVariant[vi].providers.firecrawl = 0;
-      let hits: FirecrawlSearchHit[] = [];
-      try {
-        const sr = (await firecrawl.search(v.query, {
-          limit: 10,
-          sources: ["web"],
-          location: "Poland",
-          lang: "pl",
-          country: "pl",
-        } as never)) as unknown;
-        const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
-        hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
-        continue;
-      }
-      // Firecrawl's index is noisy for bare-numeric queries; for the EAN
-      // variant (kind "A") keep ONLY hits whose title or snippet contains
-      // the exact EAN. Apify/Google is trusted for the same query.
-      const isEanVariant = v.kind === "A";
-      const eanDigits = isEanVariant ? v.query.replace(/\D/g, "") : "";
-      let droppedByEanFilter = 0;
-      let n = 0;
-      for (const h of hits) {
-        const url = (h.url ?? "").trim();
-        if (!url) continue;
-        if (isEanVariant && eanDigits) {
-          const title = (h as { title?: string }).title ?? "";
-          const snip =
-            (h as { description?: string; snippet?: string }).description ??
-            (h as { snippet?: string }).snippet ??
-            "";
-          const hay = `${title} ${snip}`.replace(/\D/g, "");
-          if (!hay.includes(eanDigits)) {
-            droppedByEanFilter++;
-            continue;
-          }
-        }
-        upsertResult(vi, url, "firecrawl", {
-          title: (h as { title?: string }).title,
-          snippet: (h as { description?: string; snippet?: string }).description
-            ?? (h as { snippet?: string }).snippet,
-          domain: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return undefined; } })(),
-        });
-        n++;
-      }
-      perVariant[vi].providers.firecrawl = n;
-      if (droppedByEanFilter > 0) {
-        await emit(ctx, {
-          level: "info",
-          message: `   ${nazwa} — Firecrawl [A] "${v.query}": odrzucono ${droppedByEanFilter} wyników bez EAN w tytule/snippet`,
-        });
-      }
-    }
-  }
+  // Provider order rule (combined mode): run Apify FIRST, then Firecrawl only
+  // as fallback for variants Apify couldn't serve. In "firecrawl"-only mode
+  // Firecrawl runs unconditionally. The EAN variant (kind "A") is NEVER
+  // sent to Firecrawl in combined mode (its index is noisy for bare
+  // numeric queries and Apify covers it well).
 
-  // ---- Apify branch ----
+  // ---- Apify branch (first in combined mode) ----
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
   const apifyVariantMeta: SerpMeta[] = [];
   if (useApify) {
@@ -2421,6 +2442,8 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         n++;
       }
       perVariant[vi].providers.apify = n;
+      usage.apify_runs = (usage.apify_runs ?? 0) + 1;
+      if (n === 0) usage.apify_empty = (usage.apify_empty ?? 0) + 1;
     }
 
     if (flat.length) {
@@ -2489,6 +2512,78 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         level: "info",
         message: `🎯 ${nazwa} — Apify SERP: ${flat.length} wyników, AI wybrała ${picks.length}${aiPreselectMeta.error ? " (fallback)" : ""}`,
       });
+    }
+  }
+
+  // ---- Firecrawl branch (per-variant, conditional in combined mode) ----
+  if (useFirecrawl) {
+    for (let vi = 0; vi < variants.length; vi++) {
+      const v = variants[vi];
+      perVariant[vi].providers.firecrawl = 0;
+      const apifyCount = perVariant[vi].providers.apify ?? 0;
+      // Combined mode: skip Firecrawl search for the EAN variant (always),
+      // and skip when Apify returned >=1 result for the variant.
+      if (searchProvider === "both") {
+        if (v.kind === "A" || apifyCount > 0) {
+          usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
+          await emit(ctx, {
+            level: "info",
+            message: `   ⏭ ${nazwa} — Firecrawl search [${v.kind}] pominięty (Apify: ${apifyCount} wyników${v.kind === "A" ? ", wariant EAN" : ""})`,
+          });
+          continue;
+        }
+      }
+      let hits: FirecrawlSearchHit[] = [];
+      try {
+        const sr = (await firecrawl.search(v.query, {
+          limit: 10,
+          sources: ["web"],
+          location: "Poland",
+          lang: "pl",
+          country: "pl",
+        } as never)) as unknown;
+        const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
+        hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
+        usage.fc_searches = (usage.fc_searches ?? 0) + 1;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
+        continue;
+      }
+      const isEanVariant = v.kind === "A";
+      const eanDigits = isEanVariant ? v.query.replace(/\D/g, "") : "";
+      let droppedByEanFilter = 0;
+      let n = 0;
+      for (const h of hits) {
+        const url = (h.url ?? "").trim();
+        if (!url) continue;
+        if (isEanVariant && eanDigits) {
+          const title = (h as { title?: string }).title ?? "";
+          const snip =
+            (h as { description?: string; snippet?: string }).description ??
+            (h as { snippet?: string }).snippet ??
+            "";
+          const hay = `${title} ${snip}`.replace(/\D/g, "");
+          if (!hay.includes(eanDigits)) {
+            droppedByEanFilter++;
+            continue;
+          }
+        }
+        upsertResult(vi, url, "firecrawl", {
+          title: (h as { title?: string }).title,
+          snippet: (h as { description?: string; snippet?: string }).description
+            ?? (h as { snippet?: string }).snippet,
+          domain: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return undefined; } })(),
+        });
+        n++;
+      }
+      perVariant[vi].providers.firecrawl = n;
+      if (droppedByEanFilter > 0) {
+        await emit(ctx, {
+          level: "info",
+          message: `   ${nazwa} — Firecrawl [A] "${v.query}": odrzucono ${droppedByEanFilter} wyników bez EAN w tytule/snippet`,
+        });
+      }
     }
   }
 
@@ -2635,52 +2730,93 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: cachedRows } = await supabaseAdmin
     .from("product_sources")
-    .select("url, created_at")
+    .select("url, description, images, created_at")
     .eq("project_id", product.project_id)
     .in("url", filtered)
     .gte("created_at", dayAgo);
-  const cachedUrls = new Set((cachedRows ?? []).map((r) => (r as { url: string }).url));
+  // 24h same-project cache hit — only counts as a "contributing hit" when
+  // the cached row itself contributed (>=1 image OR desc >= 200 chars).
+  const cached24h = new Map<string, { contributed: boolean }>();
+  for (const r of cachedRows ?? []) {
+    const rr = r as { url: string; description: string | null; images: unknown };
+    const imgs = Array.isArray(rr.images) ? (rr.images as string[]).length : 0;
+    const descLen = (rr.description ?? "").length;
+    cached24h.set(rr.url, { contributed: imgs > 0 || descLen >= 200 });
+  }
 
   // 4) Scrape each and upsert into product_sources.
+  // goodHits increments only for CONTRIBUTING sources (>=1 accepted image
+  // OR >=2 features OR desc >=200 chars with page_matches_product !== false).
+  // Loop stops at 3 contributing sources or scrapeCap, whichever first.
   let scraped = 0;
   let cacheHits = 0;
   let totalImages = 0;
   let goodHits = 0;
+  let attempts = 0;
   const scrapedNorm = new Set<string>();
   for (const url of filtered) {
     if (goodHits >= 3) {
       await emit(ctx, {
         level: "info",
-        message: `   ⏩ ${nazwa} — early-exit po 3 dobrych trafieniach (pomijam pozostałe ${filtered.length - scraped - cacheHits} URL-i)`,
+        message: `   ⏩ ${nazwa} — early-exit po 3 wnoszących źródłach`,
       });
       break;
     }
-    if (cachedUrls.has(url)) {
+    if (attempts >= scrapeCap) {
+      await emit(ctx, {
+        level: "info",
+        message: `   ⏹ ${nazwa} — osiągnięto limit scrape (${scrapeCap})`,
+      });
+      break;
+    }
+    if (cached24h.has(url)) {
+      const hit = cached24h.get(url)!;
       cacheHits++;
-      goodHits++;
+      usage.cache_hits_24h = (usage.cache_hits_24h ?? 0) + 1;
+      if (hit.contributed) goodHits++;
       scrapedNorm.add(normalizeUrlForDedup(url));
       const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
       await emit(ctx, {
         level: "info",
-        message: `   ♻️ ${host} — cache hit (<24h), pomijam scrape`,
+        message: `   ♻️ ${host} — cache hit (<24h)${hit.contributed ? "" : " (bez wkładu)"}`,
         details: { url },
       });
       continue;
     }
+    attempts++;
     const res = await scrapeAndStoreSource(
       firecrawl,
       aiKey,
       { id: product.id, project_id: product.project_id, nazwa: product.nazwa ?? null, kod: product.kod ?? null, ean: product.ean ?? null },
       url,
       ctx,
+      { userId: userId ?? undefined },
     );
     if (res.ok) {
       scraped++;
       totalImages += res.imageCount;
       scrapedNorm.add(normalizeUrlForDedup(url));
-      if (res.imageCount > 0) goodHits++;
+      if (res.fromCache === "shared") {
+        usage.cache_hits_shared = (usage.cache_hits_shared ?? 0) + 1;
+      } else {
+        usage.fc_scrapes = (usage.fc_scrapes ?? 0) + 1;
+      }
+      const contributed =
+        (res.imageCount > 0) ||
+        ((res.featuresCount ?? 0) >= 2) ||
+        ((res.descLength ?? 0) >= 200 && res.pageMatchesProduct !== false);
+      if (contributed) {
+        goodHits++;
+      } else {
+        await emit(ctx, { level: "info", message: `   ✓ (bez wkładu) ${url}` });
+      }
+    } else {
+      // failed real scrape still counts a Firecrawl call
+      if (res.fromCache !== "shared") usage.fc_scrapes = (usage.fc_scrapes ?? 0) + 1;
     }
   }
+  // Flush usage counters onto bulk_jobs.usage (per-job aggregate).
+  await bumpJobUsage(ctx?.bulkJobId, usage);
   // Persist scraped flags back onto the query_variants JSON for UI transparency.
   if (scrapedNorm.size) {
     for (const b of perVariant) {
@@ -2696,8 +2832,8 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   }
   await emit(ctx, {
     level: scraped ? "success" : "warn",
-    message: `✅ ${nazwa} — zescrape'owano ${scraped}/${filtered.length} (${totalImages} zdjęć, ${cacheHits} z cache)`,
-    details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits },
+    message: `✅ ${nazwa} — ${scraped} scrape (${totalImages} zdjęć), cache 24h: ${usage.cache_hits_24h ?? 0}, cache shared: ${usage.cache_hits_shared ?? 0}, FC searches: ${usage.fc_searches ?? 0}, pominięte: ${usage.skipped_fc_searches ?? 0}`,
+    details: { scraped, total: filtered.length, images: totalImages, cache_hits: cacheHits, usage },
   });
   await logProductEvent(supabaseAdmin, {
     projectId: product.project_id,
@@ -2726,13 +2862,53 @@ export async function scrapeAndStoreSource(
   product: { id: string; project_id: string; nazwa: string | null; kod: string | null; ean: string | null },
   url: string,
   ctx: WorkerCtx | undefined,
-): Promise<{ ok: boolean; imageCount: number }> {
+  opts?: { userId?: string },
+): Promise<{
+  ok: boolean;
+  imageCount: number;
+  featuresCount?: number;
+  descLength?: number;
+  pageMatchesProduct?: boolean;
+  fromCache?: "none" | "shared";
+}> {
   const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
   try {
-    const scrape = (await firecrawl.scrape(url, {
-      formats: ["markdown", "rawHtml"],
-      onlyMainContent: true,
-    } as never)) as Record<string, unknown>;
+    // Cross-project shared cache lookup (14 days). Requires ownership scope.
+    const cacheHash = opts?.userId
+      ? await sha256Hex(`${opts.userId}|${normalizeUrlForCache(url)}`)
+      : null;
+    const cacheCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    let fromCache: "none" | "shared" = "none";
+    let scrape: Record<string, unknown> | null = null;
+    type CachedScrapeRow = { title: string | null; markdown: string | null; images: unknown; status: string };
+    let cachedRow: CachedScrapeRow | null = null;
+    if (cacheHash) {
+      const { data: c } = await supabaseAdmin
+        .from("scrape_cache" as never)
+        .select("title, markdown, images, status, scraped_at")
+        .eq("url_hash", cacheHash)
+        .gte("scraped_at", cacheCutoff)
+        .maybeSingle();
+      if (c) {
+        cachedRow = c as unknown as CachedScrapeRow;
+      }
+    }
+    if (cachedRow && cachedRow.status === "ok" && typeof cachedRow.markdown === "string") {
+      fromCache = "shared";
+      const imgs = Array.isArray(cachedRow.images) ? (cachedRow.images as string[]) : [];
+      scrape = {
+        markdown: cachedRow.markdown,
+        metadata: { title: cachedRow.title ?? null },
+        // pickImagesFromScrape reads several shapes; give it the raw urls array
+        images: imgs,
+      } as Record<string, unknown>;
+      await emit(ctx, { level: "info", message: `   ♻️ ${host} — shared cache hit (<14d)`, details: { url } });
+    } else {
+      scrape = (await firecrawl.scrape(url, {
+        formats: ["markdown", "rawHtml"],
+        onlyMainContent: true,
+      } as never)) as Record<string, unknown>;
+    }
     const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
     const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
     const rawMarkdown = typeof scrape.markdown === "string" ? scrape.markdown : "";
@@ -2761,7 +2937,7 @@ export async function scrapeAndStoreSource(
         message: `   ⚠️ ${host} — strona nie dotyczy produktu, pominięto${filteredData.rejectedReason ? ` (${filteredData.rejectedReason})` : ""}`,
         details: { url, reason: filteredData.rejectedReason },
       });
-      return { ok: false, imageCount: 0 };
+      return { ok: false, imageCount: 0, pageMatchesProduct: false, fromCache };
     }
 
     const rejectedImages = candidateImages.filter((u) => !filteredData.imageUrls.includes(u));
@@ -2802,12 +2978,44 @@ export async function scrapeAndStoreSource(
         ai: filteredData.usedAi,
       },
     });
-    return { ok: true, imageCount: filteredData.imageUrls.length };
+
+    // Write-through into shared cache after a fresh Firecrawl scrape.
+    if (fromCache === "none" && cacheHash && opts?.userId) {
+      try {
+        const oversize = rawMarkdown.length > 1_000_000;
+        await supabaseAdmin
+          .from("scrape_cache" as never)
+          .upsert(
+            {
+              url_hash: cacheHash,
+              url: normalizeUrlForCache(url),
+              user_id: opts.userId,
+              title,
+              markdown: oversize ? null : rawMarkdown,
+              images: candidateImages as never,
+              status: oversize ? "partial" : "ok",
+              scraped_at: new Date().toISOString(),
+            } as never,
+            { onConflict: "url_hash" },
+          );
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return {
+      ok: true,
+      imageCount: filteredData.imageUrls.length,
+      featuresCount: filteredData.features.length,
+      descLength: (filteredData.description ?? "").length,
+      pageMatchesProduct: filteredData.is_product_page,
+      fromCache,
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("firecrawl scrape failed", url, e);
     await emit(ctx, { level: "warn", message: `   ⚠️ ${url} — ${msg}`, details: { url, error: msg } });
-    return { ok: false, imageCount: 0 };
+    return { ok: false, imageCount: 0, fromCache: "none" };
   }
 }
 

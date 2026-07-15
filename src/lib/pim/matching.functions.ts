@@ -813,6 +813,17 @@ export const runMatching = createServerFn({ method: "POST" })
     // ---------------------------------------------------------------------
     try {
       const productIdsToRescrape: string[] = [];
+      // Honor per-project "Automatyczne doscrapowanie" toggle (default ON).
+      const { data: projSettingsRow } = await supabase
+        .from("projects")
+        .select("settings")
+        .eq("id", data.projectId)
+        .maybeSingle();
+      const projSettings = ((projSettingsRow as { settings?: Record<string, unknown> | null } | null)?.settings ?? {}) as Record<string, unknown>;
+      const autoRescrape = projSettings.auto_rescrape !== false;
+      if (!autoRescrape) {
+        return { matched, total: products.length };
+      }
       const { data: existingEnrich } = await supabase
         .from("enrichments")
         .select("source_product_id, rescrape_rounds")
@@ -826,6 +837,42 @@ export const runMatching = createServerFn({ method: "POST" })
         const rr = r as { source_product_id: string; rescrape_rounds: number | null };
         roundsById.set(rr.source_product_id, rr.rescrape_rounds ?? 0);
       }
+      // Gate: enqueue rescrape ONLY when there are AI-picked unscraped URLs
+      // still in the search pool for this product. Otherwise we would just
+      // burn Firecrawl credits on the generic remainder (marketplace mirrors
+      // etc.) which are unlikely to help matching.
+      const productIds = updates.map((u) => u.source_product_id);
+      const { data: searchRows } = await supabase
+        .from("search_results")
+        .select("term, query_variants")
+        .eq("project_id", data.projectId);
+      const { data: existingSources } = await supabase
+        .from("product_sources")
+        .select("url")
+        .eq("project_id", data.projectId);
+      const scrapedUrls = new Set(
+        ((existingSources ?? []) as Array<{ url: string }>).map((r) => r.url),
+      );
+      // Any AI-picked URL not yet scraped means the search pool still has value.
+      let hasFreshAiPicks = false;
+      for (const r of searchRows ?? []) {
+        const qv = (r as { query_variants?: unknown }).query_variants;
+        if (!Array.isArray(qv)) continue;
+        for (const b of qv as Array<{ results?: Array<{ url?: string; ai_pick?: boolean; scraped?: boolean }> }>) {
+          for (const item of b?.results ?? []) {
+            if (item?.ai_pick && item.url && !scrapedUrls.has(item.url) && !item.scraped) {
+              hasFreshAiPicks = true;
+              break;
+            }
+          }
+          if (hasFreshAiPicks) break;
+        }
+        if (hasFreshAiPicks) break;
+      }
+      if (!hasFreshAiPicks) {
+        return { matched, total: products.length };
+      }
+      void productIds;
       for (const u of updates) {
         const strong = (u.score_breakdown ?? []).filter(
           (s) => s.total >= SOURCE_SCORE_THRESHOLD,

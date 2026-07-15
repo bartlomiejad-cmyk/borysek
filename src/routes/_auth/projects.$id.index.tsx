@@ -19,6 +19,7 @@ import { generateGoldenRecord, verifySources } from "@/lib/pim/ai.functions";
 import { exportProject } from "@/lib/pim/export.functions";
 import { parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
+import { supabase } from "@/integrations/supabase/client";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
 import { regenerateMainImage } from "@/lib/pim/regen.functions";
 import {
@@ -2044,6 +2045,24 @@ function SettingsCard({
     return "both";
   })();
   const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify" | "both">(initialSearchProvider);
+  const initialScrapeCap: number = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = Number((s as Record<string, unknown>).scrape_cap);
+      if (Number.isFinite(v)) return Math.max(1, Math.min(12, Math.floor(v)));
+    }
+    return 6;
+  })();
+  const [scrapeCap, setScrapeCap] = useState<number>(initialScrapeCap);
+  const initialAutoRescrape: boolean = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).auto_rescrape;
+      if (typeof v === "boolean") return v;
+    }
+    return true;
+  })();
+  const [autoRescrape, setAutoRescrape] = useState<boolean>(initialAutoRescrape);
   const [apifyTest, setApifyTest] = useState<{
     state: "idle" | "loading" | "ok" | "err";
     msg?: string;
@@ -2185,6 +2204,8 @@ function SettingsCard({
                   .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
                   .filter(Boolean),
                 search_provider: searchProvider,
+                scrape_cap: scrapeCap,
+                auto_rescrape: autoRescrape,
               },
             })
           }
@@ -2271,6 +2292,38 @@ function SettingsCard({
             </div>
           ) : null}
         </div>
+        <div className="pt-4 border-t space-y-3">
+          <Label className="text-sm font-medium">Budżet scrape'ów</Label>
+          <div className="grid sm:grid-cols-2 gap-3 items-end">
+            <div>
+              <Label className="text-xs">Limit scrape na produkt</Label>
+              <Input
+                type="number"
+                min={1}
+                max={12}
+                value={scrapeCap}
+                onChange={(e) => {
+                  const v = Math.max(1, Math.min(12, Math.floor(Number(e.target.value) || 6)));
+                  setScrapeCap(v);
+                }}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Twarda granica prób scrape na produkt (1–12). Pętla kończy się wcześniej po 3 wnoszących źródłach.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="auto-rescrape"
+                checked={autoRescrape}
+                onCheckedChange={setAutoRescrape}
+              />
+              <Label htmlFor="auto-rescrape" className="cursor-pointer text-sm">
+                Automatyczne doscrapowanie (rescrape po dopasowaniu)
+              </Label>
+            </div>
+          </div>
+        </div>
+        <ProjectUsagePanel />
         <div className="pt-4 border-t space-y-3">
           <div className="flex items-center gap-3">
             <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
@@ -2394,6 +2447,56 @@ function downloadBlob(blob: Blob, name: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function ProjectUsagePanel() {
+  const { id } = Route.useParams();
+  const [totals, setTotals] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data } = await supabase
+        .from("bulk_jobs" as never)
+        .select("usage, created_at")
+        .eq("project_id", id)
+        .eq("kind", "FIRECRAWL_DISCOVERY")
+        .gte("created_at", since);
+      if (cancelled) return;
+      const sum: Record<string, number> = {};
+      for (const r of (data ?? []) as Array<{ usage?: Record<string, number> | null }>) {
+        const u = r.usage ?? {};
+        for (const [k, v] of Object.entries(u)) {
+          if (typeof v === "number") sum[k] = (sum[k] ?? 0) + v;
+        }
+      }
+      setTotals(sum);
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+  if (!totals) return null;
+  const rows: Array<{ k: string; label: string }> = [
+    { k: "fc_scrapes", label: "FC scrape" },
+    { k: "fc_searches", label: "FC search" },
+    { k: "skipped_fc_searches", label: "FC search pominięte" },
+    { k: "apify_runs", label: "Apify SERP" },
+    { k: "apify_empty", label: "Apify puste" },
+    { k: "cache_hits_24h", label: "Cache 24h" },
+    { k: "cache_hits_shared", label: "Cache shared 14d" },
+  ];
+  return (
+    <div className="pt-4 border-t space-y-2">
+      <Label className="text-sm font-medium">Zużycie (30 dni)</Label>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        {rows.map((r) => (
+          <div key={r.k} className="rounded border px-2 py-1 flex items-center justify-between">
+            <span className="text-muted-foreground">{r.label}</span>
+            <span className="font-mono">{totals[r.k] ?? 0}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ProductThumbs({
