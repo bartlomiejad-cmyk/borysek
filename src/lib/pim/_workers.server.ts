@@ -3586,7 +3586,17 @@ export async function runPimVisualization(
   type VizRunRec = {
     phase: "analyzed" | "prompt_ready" | "rendering" | "done" | "failed";
     analysis_attempts?: number;
-    scene?: { style: string; requirements: string; source?: VizAnalysisRec["source"]; has_text?: boolean; color_anchor_en?: string };
+    scene?: {
+      style: string;
+      requirements: string;
+      source?: VizAnalysisRec["source"];
+      has_text?: boolean;
+      color_anchor_en?: string;
+      viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+      overlay_motif?: string;
+      on_product_text?: string[];
+      host_device?: { name: string } | null;
+    };
     prompt?: string;
     reference_urls?: string[];
     updated_at: string;
