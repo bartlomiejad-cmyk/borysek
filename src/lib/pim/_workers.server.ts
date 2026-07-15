@@ -3672,6 +3672,10 @@ export async function runPimVisualization(
     hasText = vizRun.scene.has_text ?? true;
     colorAnchorEn = vizRun.scene.color_anchor_en ?? "";
     cachedReferenceUrls = vizRun.reference_urls && vizRun.reference_urls.length ? vizRun.reference_urls : null;
+    vizType = vizRun.scene.viz_type ?? "lifestyle";
+    overlayMotif = vizRun.scene.overlay_motif ?? "";
+    onProductText = vizRun.scene.on_product_text ?? [];
+    hostDeviceName = vizRun.scene.host_device?.name ?? "";
     await emit(ctx, { level: "info", message: `   • wznawiam z zapisu (viz_run.${vizRun.phase})` });
   } else if (
     !forceReanalyze &&
@@ -3745,6 +3749,10 @@ export async function runPimVisualization(
           source: "vision",
           has_text: hasText,
           color_anchor_en: colorAnchorEn,
+          viz_type: vizType,
+          overlay_motif: overlayMotif,
+          on_product_text: onProductText,
+          host_device: hostDeviceName ? { name: hostDeviceName } : null,
         } : vizRun?.scene,
       });
     }
