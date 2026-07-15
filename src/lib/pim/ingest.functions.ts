@@ -7,6 +7,7 @@ const sourceProductSchema = z.object({
   nazwa: z.string().nullable(),
   kod: z.string().nullable(),
   ean: z.string().nullable(),
+  category: z.string().nullable().optional(),
   has_images: z.boolean().optional(),
   main_image_url: z.string().nullable().optional(),
   gallery_urls: z.array(z.string()).optional(),
@@ -44,8 +45,8 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const payload = data.rows.map((r) => {
-      const { has_images: _hi, main_image_url: _mi, gallery_urls: _gu, ...rest } = r;
-      return { ...rest, project_id: data.projectId };
+      const { has_images: _hi, main_image_url: _mi, gallery_urls: _gu, category, ...rest } = r;
+      return { ...rest, category: category ?? null, project_id: data.projectId };
     });
     const { error } = await supabase.from("source_products").insert(payload as never);
     if (error) throw new Error(error.message);
@@ -197,9 +198,10 @@ const remapRowSchema = z.object({
   nazwa: z.string().nullable().optional(),
   kod: z.string().nullable().optional(),
   ean: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
 });
 
-type RemapField = "ext_id" | "nazwa" | "kod" | "ean";
+type RemapField = "ext_id" | "nazwa" | "kod" | "ean" | "category";
 
 const normalizeKey = (field: RemapField, v: string | null | undefined) => {
   if (v === null || v === undefined) return "";
@@ -223,14 +225,14 @@ export const updateSourceProductsFromCsv = createServerFn({ method: "POST" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean")
+      .select("id, ext_id, nazwa, kod, ean, category")
       .eq("project_id", data.projectId)
       .limit(50000);
     if (error) throw new Error(error.message);
 
-    const byKey = new Map<string, { id: string; ext_id: string | null; nazwa: string | null; kod: string | null; ean: string | null }>();
+    const byKey = new Map<string, { id: string; ext_id: string | null; nazwa: string | null; kod: string | null; ean: string | null; category: string | null }>();
     for (const p of products ?? []) {
-      const k = normalizeKey(data.keyField, (p as Record<string, string | null>)[data.keyField]);
+      const k = normalizeKey(data.keyField as RemapField, (p as Record<string, string | null>)[data.keyField]);
       if (k && !byKey.has(k)) byKey.set(k, p);
     }
 
@@ -239,7 +241,7 @@ export const updateSourceProductsFromCsv = createServerFn({ method: "POST" })
     let updated = 0;
     let skipped = 0;
 
-    const fields: RemapField[] = ["ext_id", "nazwa", "kod", "ean"];
+    const fields: RemapField[] = ["ext_id", "nazwa", "kod", "ean", "category"];
 
     for (const r of data.rows) {
       const k = normalizeKey(data.keyField, r.key);
