@@ -152,7 +152,7 @@ export const exportProject = createServerFn({ method: "GET" })
       if (Array.isArray(g) && g.length > maxGallery) maxGallery = g.length;
     }
 
-    const rows: Array<Record<string, unknown>> = [];
+    const rows: Array<Record<string, string | number>> = [];
     for (const p of products ?? []) {
       const e = map.get(p.id);
       const urls = (e?.picked_urls as string[] | undefined) ?? [];
