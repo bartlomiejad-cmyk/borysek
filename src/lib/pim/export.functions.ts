@@ -80,6 +80,58 @@ export const exportProject = createServerFn({ method: "GET" })
 
     const map = new Map((ens ?? []).map((e) => [e.source_product_id, e]));
 
+    // --- Durable image hosting (delivery mode) --------------------------
+    const HOSTED_BUCKET = "regenerated-images";
+    const MAX_BYTES = 8 * 1024 * 1024;
+    const isHostedUrl = (u: string) =>
+      /\/storage\/v1\/object\/public\//i.test(u) || u.includes(HOSTED_BUCKET);
+    const extFromContentType = (ct: string): string => {
+      const c = ct.toLowerCase();
+      if (c.includes("png")) return "png";
+      if (c.includes("webp")) return "webp";
+      if (c.includes("gif")) return "gif";
+      if (c.includes("avif")) return "avif";
+      return "jpg";
+    };
+    async function sha1Hex(input: string): Promise<string> {
+      const bytes = new TextEncoder().encode(input);
+      const digest = await crypto.subtle.digest("SHA-1", bytes);
+      return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    const admin = hostImages
+      ? (await import("@/integrations/supabase/client.server")).supabaseAdmin
+      : null;
+    async function hostOne(url: string, projectId: string, productId: string): Promise<string | null> {
+      if (!admin) return url;
+      if (isHostedUrl(url)) return url;
+      try {
+        const res = await fetch(url, {
+          redirect: "follow",
+          headers: {
+            Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (compatible; LovableProductImageBot/1.0)",
+          },
+        });
+        if (!res.ok) { console.warn(`[export.host] skip ${url} status=${res.status}`); return null; }
+        const ct = res.headers.get("content-type") ?? "image/jpeg";
+        if (!ct.startsWith("image/")) { console.warn(`[export.host] skip ${url} non-image ct=${ct}`); return null; }
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength > MAX_BYTES) { console.warn(`[export.host] skip ${url} size=${buf.byteLength}`); return null; }
+        const ext = extFromContentType(ct);
+        const hash = (await sha1Hex(url)).slice(0, 20);
+        const path = `exports/${projectId}/${productId}/${hash}.${ext}`;
+        const { error: upErr } = await admin.storage
+          .from(HOSTED_BUCKET)
+          .upload(path, new Uint8Array(buf), { contentType: ct, upsert: true });
+        if (upErr) { console.warn(`[export.host] upload failed ${url}: ${upErr.message}`); return null; }
+        const { data: pub } = admin.storage.from(HOSTED_BUCKET).getPublicUrl(path);
+        return pub.publicUrl;
+      } catch (err) {
+        console.warn(`[export.host] fetch failed ${url}:`, (err as Error).message);
+        return null;
+      }
+    }
+
     // Pass 1: zbierz unikalny zbiór kluczy cech w całym projekcie (stabilna kolejność kolumn).
     const normalizeKey = (k: string) =>
       k.trim().replace(/[\s;]+/g, "_").replace(/_{2,}/g, "_");
