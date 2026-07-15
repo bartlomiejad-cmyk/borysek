@@ -18,6 +18,27 @@ import {
 // sequentially and stop early if we'd risk timing out.
 const BUDGET_MS = 25_000;
 
+// Kinds where a single item may exceed the Worker's hard limit and the
+// hook can be killed mid-item. For these we shift the item off the queue
+// only AFTER a successful processItem, so a hard-timeout kill leaves the
+// item at the head of the queue for the next tick to retry — instead of
+// silently dropping it (see FIRECRAWL_DISCOVERY dropping ~50/74 items).
+// PIM_VISUALIZATIONS has its own resume story (viz_run phases) and stays
+// on this list under a separate branch below.
+const POST_SHIFT_KINDS = new Set<JobKind>([
+  "FIRECRAWL_DISCOVERY",
+  "PIM_RESCRAPE",
+  "PIM_AUDIT",
+  "PIM_ALLEGRO_DESCRIPTION",
+  "PIM_IMAGE_VERIFY",
+  "GENERATE_GOLDEN",
+  "REGENERATE_MEDIA",
+]);
+
+// Guard against a truly broken item stalling the whole queue: after this
+// many timeout-induced retries we drop the item and count it as failed.
+const MAX_ITEM_ATTEMPTS = 3;
+
 type JobKind =
   | "GENERATE_GOLDEN"
   | "REGENERATE_MEDIA"
@@ -148,6 +169,14 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
   let lastError: string | null = null;
   let cancelled = false;
 
+  // Attempts-per-item counter is stored on job.payload.attempts so it
+  // survives across tick invocations without a schema change.
+  const payload: Record<string, unknown> = { ...(job.payload ?? {}) };
+  const attempts: Record<string, number> =
+    (payload.attempts && typeof payload.attempts === "object"
+      ? (payload.attempts as Record<string, number>)
+      : {}) as Record<string, number>;
+
   // Mark job as PROCESSING + started_at on first pickup.
   if (job.status !== "PROCESSING") {
     await supabaseAdmin
@@ -171,7 +200,9 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
     }
 
     const pid = remaining[0]!;
-    const shiftBeforeProcessing = job.kind !== "PIM_VISUALIZATIONS";
+    const postShift =
+      POST_SHIFT_KINDS.has(job.kind) || job.kind === "PIM_VISUALIZATIONS";
+    const shiftBeforeProcessing = !postShift;
     if (shiftBeforeProcessing) {
       remaining.shift();
     }
@@ -188,6 +219,48 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
         .from("bulk_jobs" as never)
         .update({ items: remaining as never } as never)
         .eq("id", job.id);
+    }
+
+    // Post-shift kinds: bump the attempts counter BEFORE running so a hard
+    // timeout still leaves a paper trail. After too many retries, drop the
+    // item so it can't stall the whole queue.
+    if (postShift && job.kind !== "PIM_VISUALIZATIONS") {
+      const next = (attempts[pid] ?? 0) + 1;
+      attempts[pid] = next;
+      payload.attempts = attempts;
+      await supabaseAdmin
+        .from("bulk_jobs" as never)
+        .update({ payload: payload as never } as never)
+        .eq("id", job.id);
+      if (next > MAX_ITEM_ATTEMPTS) {
+        remaining.shift();
+        delete attempts[pid];
+        payload.attempts = attempts;
+        failed++;
+        lastError = `Przekroczono limit prób (${MAX_ITEM_ATTEMPTS}) — prawdopodobny timeout na tym produkcie`;
+        try {
+          await supabaseAdmin.from("bulk_job_events" as never).insert({
+            job_id: job.id,
+            project_id: job.project_id,
+            source_product_id: pid,
+            level: "error",
+            message: `❌ Pomijam po ${MAX_ITEM_ATTEMPTS} nieudanych próbach (timeout Workera)`,
+            details: {} as never,
+          } as never);
+        } catch {
+          /* logging must never break the worker */
+        }
+        await supabaseAdmin
+          .from("bulk_jobs" as never)
+          .update({
+            items: remaining as never,
+            payload: payload as never,
+            failed_count: job.failed_count + failed,
+            last_error: lastError,
+          } as never)
+          .eq("id", job.id);
+        continue;
+      }
     }
     const ctx: WorkerCtx = {
       deadline,
@@ -212,12 +285,24 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
       const itemResult = await processItem(job.kind, pid, ctx, job.payload);
       if (itemResult.complete) {
         if (!shiftBeforeProcessing) remaining.shift();
+        if (postShift && job.kind !== "PIM_VISUALIZATIONS") {
+          // Success: forget the attempts counter for this pid.
+          delete attempts[pid];
+          payload.attempts = attempts;
+        }
         processed++;
       } else {
         break;
       }
     } catch (e) {
       if (!shiftBeforeProcessing) remaining.shift();
+      if (postShift && job.kind !== "PIM_VISUALIZATIONS") {
+        // Item threw (not a hard timeout) — do not retry, it will fail
+        // the same way. Clear the counter so it isn't held against a
+        // future re-queue of the same product.
+        delete attempts[pid];
+        payload.attempts = attempts;
+      }
       failed++;
       lastError = e instanceof Error ? e.message : String(e);
       await ctx.onEvent?.({ level: "error", message: `❌ ${lastError}` });
@@ -232,6 +317,7 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
         processed_count: job.processed_count + processed,
         failed_count: job.failed_count + failed,
         last_error: lastError,
+        payload: payload as never,
       } as never)
       .eq("id", job.id);
   }
