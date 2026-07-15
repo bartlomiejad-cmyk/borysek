@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { setManualLockOnProduct } from "./pipeline-status";
+import { advancePipelineStatus, setManualLockOnProduct } from "./pipeline-status";
 
 async function logManualEdit(
   supabase: { from: (t: string) => any },
@@ -125,11 +125,29 @@ export const updateFeatures = createServerFn({ method: "POST" })
     try {
       const { data: en } = await (supabase as any)
         .from("enrichments")
-        .select("source_product_id")
+        .select("source_product_id, golden_name, golden_description, golden_slug, golden_meta_description, golden_features")
         .eq("id", data.enrichmentId)
         .maybeSingle();
-      const pid = (en as { source_product_id?: string } | null)?.source_product_id;
-      if (pid) await logManualEdit(supabase as never, pid, "Edytowano cechy produktu", { action: "edit_features", count: data.features.length });
+      const row = en as {
+        source_product_id?: string;
+        golden_name?: string | null;
+        golden_description?: string | null;
+        golden_slug?: string | null;
+        golden_meta_description?: string | null;
+        golden_features?: unknown;
+      } | null;
+      const pid = row?.source_product_id;
+      if (pid) {
+        await logManualEdit(supabase as never, pid, "Edytowano cechy produktu", { action: "edit_features", count: data.features.length });
+        const features = Array.isArray(row?.golden_features) ? row.golden_features : [];
+        const goldenComplete =
+          !!row?.golden_name?.trim() &&
+          !!row?.golden_description?.trim() &&
+          !!row?.golden_slug?.trim() &&
+          !!row?.golden_meta_description?.trim() &&
+          features.length >= 3;
+        if (goldenComplete) await advancePipelineStatus(supabase as never, pid, "GOLDEN_READY");
+      }
     } catch { /* best-effort */ }
     return { ok: true };
   });

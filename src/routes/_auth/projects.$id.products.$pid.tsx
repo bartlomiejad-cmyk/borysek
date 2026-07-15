@@ -184,6 +184,8 @@ function ProductDetail() {
   const [manualBusy, setManualBusy] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
   const [removingSource, setRemovingSource] = useState<string | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditTouched, setAuditTouched] = useState(false);
 
   const onRemoveSource = async (url: string) => {
     if (removingSource) return;
@@ -418,9 +420,14 @@ function ProductDetail() {
 
   const audit = useMutation({
     mutationFn: () => auditFn({ data: { productId: pid } }),
-    onSuccess: () => {
+    onSuccess: async () => {
+      setAuditTouched(true);
+      setAuditOpen(true);
       toast.success("Audyt AI zakończony");
-      invalidate();
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["product", id, pid] }),
+        qc.invalidateQueries({ queryKey: ["project", id, "products"] }),
+      ]);
     },
     onError: (e) => toast.error(friendlyError(e, "Audyt AI nie powiódł się")),
   });
@@ -1529,7 +1536,13 @@ function ProductDetail() {
               const failed = auditData?.checks.filter((c) => !c.ok) ?? [];
               return (
                 <div className="pt-4 border-t mt-4 space-y-2">
-                  <Collapsible defaultOpen={!!verdict && verdict !== "pass"}>
+                  <Collapsible
+                    open={auditTouched ? auditOpen : !!verdict && verdict !== "pass"}
+                    onOpenChange={(open) => {
+                      setAuditTouched(true);
+                      setAuditOpen(open);
+                    }}
+                  >
                     <div className="flex items-center justify-between">
                       <CollapsibleTrigger className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground">
                         <ChevronDown className="h-3 w-3" />

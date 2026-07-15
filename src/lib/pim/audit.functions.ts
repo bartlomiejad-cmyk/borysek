@@ -22,6 +22,9 @@ export const runAuditForProduct = createServerFn({ method: "POST" })
     if (!row) throw new Error("Produkt nie istnieje lub brak dostępu");
 
     const { runPimAudit } = await import("./_workers.server");
-    await runPimAudit(data.productId);
-    return { ok: true };
+    const result = await runPimAudit(data.productId);
+    if (result.status === "skipped") {
+      throw new Error(result.reason);
+    }
+    return { ok: true, audit: result.audit };
   });

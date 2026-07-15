@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { sanitizeGoldenDescriptionHtml } from "./seo";
 import { type ImageMeta, pickThumbsForList } from "./images";
 import { getVisibleGallery, type GalleryImageScore } from "./gallery";
-import { setManualLockOnProduct } from "./pipeline-status";
+import { advancePipelineStatus, setManualLockOnProduct } from "./pipeline-status";
 
 export type PipelineSummary = {
   total: number;
@@ -424,11 +424,29 @@ export const updateGoldenRecord = createServerFn({ method: "POST" })
       .from("enrichments")
       .update(patch as never)
       .eq("id", data.enrichmentId)
-      .select("source_product_id")
+      .select("source_product_id, golden_name, golden_description, golden_slug, golden_meta_description, golden_features")
       .maybeSingle();
     if (error) throw new Error(error.message);
-    const pid = (enRow as { source_product_id?: string } | null)?.source_product_id;
-    if (pid) await setManualLockOnProduct(supabase as never, pid, true);
+    const updated = enRow as {
+      source_product_id?: string;
+      golden_name?: string | null;
+      golden_description?: string | null;
+      golden_slug?: string | null;
+      golden_meta_description?: string | null;
+      golden_features?: unknown;
+    } | null;
+    const pid = updated?.source_product_id;
+    if (pid) {
+      await setManualLockOnProduct(supabase as never, pid, true);
+      const features = Array.isArray(updated?.golden_features) ? updated.golden_features : [];
+      const goldenComplete =
+        !!updated?.golden_name?.trim() &&
+        !!updated?.golden_description?.trim() &&
+        !!updated?.golden_slug?.trim() &&
+        !!updated?.golden_meta_description?.trim() &&
+        features.length >= 3;
+      if (goldenComplete) await advancePipelineStatus(supabase as never, pid, "GOLDEN_READY");
+    }
     return { ok: true };
   });
 

@@ -47,6 +47,7 @@ import {
   type VisualizationQcPersisted,
 } from "./thumbnail-qc";
 import {
+  type AuditCheck,
   auditChecks,
   AUDIT_SYSTEM_PROMPT,
   buildAuditUserPrompt,
@@ -56,6 +57,10 @@ import {
   type AuditLlmResult,
   type AuditResult,
 } from "./audit";
+
+export type PimAuditRunResult =
+  | { status: "completed"; audit: AuditResult }
+  | { status: "skipped"; reason: string; checks?: AuditCheck[] };
 
 const GOLDEN_MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -4435,11 +4440,12 @@ export async function runPimImageVerify(
 
 // ---------------------------------------------------------------------------
 // runPimAudit — deterministic checks + LLM cross-check for a single product.
-// Eligible when pipeline_status is GOLDEN_READY or VISUALS_READY. Skips
-// products still in earlier stages. Runs on manually locked products too —
-// it never modifies golden data, only enrichments.audit and review_status.
+// Eligible when pipeline_status is GOLDEN_READY or VISUALS_READY. If a
+// product has a complete golden record but stale status, it advances the
+// status before auditing. Runs on manually locked products too — it never
+// modifies golden data, only bookkeeping, enrichments.audit and review_status.
 // ---------------------------------------------------------------------------
-export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<void> {
+export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<PimAuditRunResult> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
@@ -4450,13 +4456,6 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
   const ps = (product as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED";
-  if (ps !== "GOLDEN_READY" && ps !== "VISUALS_READY") {
-    await emit(ctx, {
-      level: "warn",
-      message: `⏭ Pominięte (etap ${ps}): ${product.nazwa ?? productId} — audyt wymaga złotego rekordu`,
-    });
-    return;
-  }
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
@@ -4466,11 +4465,12 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     .eq("source_product_id", product.id)
     .maybeSingle();
   if (!enrichment) {
+    const reason = `Brak rekordu enrichment dla produktu ${product.nazwa ?? productId}`;
     await emit(ctx, {
       level: "warn",
       message: `⏭ Pominięte (brak enrichment): ${product.nazwa ?? productId}`,
     });
-    return;
+    return { status: "skipped", reason };
   }
 
   const en = enrichment as typeof enrichment & {
@@ -4489,11 +4489,6 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     quality?: { watermark_urls?: string[]; name_mismatch?: boolean } | null;
     image_meta?: Record<string, unknown> | null;
   };
-
-  await emit(ctx, {
-    level: "info",
-    message: `🔎 Audyt AI: „${en.golden_name ?? product.nazwa ?? productId}"…`,
-  });
 
   // Phase 1 — deterministic checks.
   const checks = auditChecks({
@@ -4525,6 +4520,28 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
   });
 
   const goldenComplete = checks.find((c) => c.check === "golden_complete")?.ok === true;
+
+  if (ps !== "GOLDEN_READY" && ps !== "VISUALS_READY") {
+    if (!goldenComplete) {
+      const missing = checks.find((c) => c.check === "golden_complete")?.detail ?? "złoty rekord niekompletny";
+      const reason = `Audyt wymaga kompletnego złotego rekordu (${missing}). Obecny etap: ${ps}.`;
+      await emit(ctx, {
+        level: "warn",
+        message: `⏭ Pominięte (etap ${ps}): ${product.nazwa ?? productId} — ${missing}`,
+      });
+      return { status: "skipped", reason, checks };
+    }
+    await advancePipelineStatus(supabaseAdmin as never, product.id, "GOLDEN_READY");
+    await emit(ctx, {
+      level: "info",
+      message: `🔧 Naprawiono etap ${ps} → GOLDEN_READY przed audytem: ${product.nazwa ?? productId}`,
+    });
+  }
+
+  await emit(ctx, {
+    level: "info",
+    message: `🔎 Audyt AI: „${en.golden_name ?? product.nazwa ?? productId}"…`,
+  });
 
   // Phase 2 — LLM cross-check, only when Phase 1 passed golden_complete.
   let llm: AuditLlmResult | null = null;
@@ -4662,4 +4679,5 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<v
     message: `Audyt AI: ${verdict}${failedNames ? ` · ${failedNames}` : ""}`,
     meta: { verdict, issues: checks.filter((c) => !c.ok).map((c) => c.check) },
   });
+  return { status: "completed", audit: result };
 }
