@@ -21,6 +21,7 @@ import {
   resolvePresetById,
   type ScenePreset,
 } from "./scene-presets";
+import { advancePipelineStatus } from "./pipeline-status";
 
 const MODEL = "google/gemini-3-flash-preview";
 const VISION_MODEL = "google/gemini-2.5-flash";
@@ -317,6 +318,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         .update(updatePayload as never)
         .eq("id", enrichment.id);
       if (error) throw new Error(error.message);
+      await advancePipelineStatus(supabase as never, product.id, "GOLDEN_READY");
       return {
         ok: true,
         name,
@@ -364,7 +366,7 @@ export const generateFeatures = createServerFn({ method: "POST" })
 
     const { data: enrichment } = await supabase
       .from("enrichments")
-      .select("id, picked_urls")
+      .select("id, picked_urls, golden_name, golden_description, golden_slug, golden_meta_description")
       .eq("source_product_id", product.id)
       .maybeSingle();
     if (!enrichment) throw new Error("No enrichment record. Run matching first.");
@@ -433,6 +435,13 @@ export const generateFeatures = createServerFn({ method: "POST" })
       .update({ golden_features: features } as never)
       .eq("id", enrichment.id);
     if (error) throw new Error(error.message);
+    const goldenComplete =
+      !!(enrichment as { golden_name?: string | null }).golden_name?.trim() &&
+      !!(enrichment as { golden_description?: string | null }).golden_description?.trim() &&
+      !!(enrichment as { golden_slug?: string | null }).golden_slug?.trim() &&
+      !!(enrichment as { golden_meta_description?: string | null }).golden_meta_description?.trim() &&
+      features.length >= 3;
+    if (goldenComplete) await advancePipelineStatus(supabase as never, product.id, "GOLDEN_READY");
     return { features };
   });
 
