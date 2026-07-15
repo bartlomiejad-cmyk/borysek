@@ -1,0 +1,279 @@
+{
+  "version": 1,
+  "sdk_version": "0.22.0",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://dzmexgqkqtskuunonyws.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "borysek-pim",
+      "version": "0.1.0",
+      "title": "Borysek PIM"
+    },
+    "tools": [
+      {
+        "name": "list_projects",
+        "title": "Lista projektów",
+        "description": "Zwraca projekty PIM należące do zalogowanego użytkownika (RLS). Każdy projekt zawiera id, nazwę i strategię matchingu.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maks. liczba zwróconych projektów."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_project",
+        "title": "Szczegóły projektu",
+        "description": "Zwraca metadane projektu oraz podsumowanie licznikami produktów wg pipeline_status (IMPORTED, MATCHED, GOLDEN_READY, itd.).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Identyfikator projektu."
+            }
+          },
+          "required": [
+            "projectId"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_products",
+        "title": "Lista produktów w projekcie",
+        "description": "Zwraca produkty źródłowe (source_products) dla projektu. Możesz filtrować po pipeline_status i review_status oraz limitować liczbę wyników. Do wyszukania konkretnego produktu użyj `query` (dopasowanie w nazwie/kodzie/EAN).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "pipelineStatus": {
+              "type": "string",
+              "enum": [
+                "IMPORTED",
+                "MATCHED",
+                "GOLDEN_READY",
+                "MEDIA_READY",
+                "AUDITED",
+                "APPROVED"
+              ],
+              "description": "Filtr etapu pipeline'u."
+            },
+            "reviewStatus": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "REJECTED"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Dopasowanie tekstowe (nazwa/kod/EAN)."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          "required": [
+            "projectId"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_product",
+        "title": "Szczegóły produktu",
+        "description": "Zwraca produkt źródłowy, jego źródła (product_sources) i aktualny enrichment (golden name/description/features, picked_urls, status audytu).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "productId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "productId"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "start_discovery",
+        "title": "Uruchom wyszukiwanie źródeł",
+        "description": "Startuje bulk-job FIRECRAWL_DISCOVERY dla projektu. Domyślnie obejmuje wszystkie produkty na etapie IMPORTED (bez źródeł). Możesz podać konkretne productIds, żeby ponowić wyszukiwanie dla wskazanych pozycji.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "productIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 20000,
+              "description": "Opcjonalna jawna lista produktów do przetworzenia."
+            }
+          },
+          "required": [
+            "projectId"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_job_status",
+        "title": "Status zadania w tle",
+        "description": "Zwraca aktualny status najnowszego bulk-jobu danego typu w projekcie (lub konkretnego jobId). Użyj do sprawdzenia postępu discovery / audit / eksportu.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "FIRECRAWL_DISCOVERY",
+                "GENERATE_GOLDEN",
+                "PIM_AUDIT",
+                "PIM_VISUALIZATIONS",
+                "PIM_RESCRAPE",
+                "PIM_IMAGE_VERIFY"
+              ]
+            },
+            "jobId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "run_audit",
+        "title": "Uruchom audyt AI dla produktu",
+        "description": "Wykonuje deterministyczny audyt + LLM cross-check dla pojedynczego produktu (jak przycisk 'Uruchom ponownie audyt' w edytorze). Zwraca werdykt i listę problemów.",
+        "annotations": {
+          "readOnlyHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "productId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "productId"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "export_project",
+        "title": "Eksport danych produktowych projektu",
+        "description": "Zwraca kompaktowy JSON produktów projektu z golden name/description/features/slug/meta oraz picked_urls. Domyślnie tylko produkty APPROVED. Bez galerii i obrazków – do peł­nego eksportu z obrazkami użyj UI (Dostawa).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "approvedOnly": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "projectId"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
