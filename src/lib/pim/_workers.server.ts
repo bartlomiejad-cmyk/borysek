@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { probeManySizes } from "./image-size.server";
 import { isMarketplaceUrl } from "./firecrawl.functions";
 import { extractDescriptionSection, filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
+import { getVisibleGallery } from "./gallery";
 import {
   slugifyPl as slugifyPlShared,
   clampName as clampNameShared,
