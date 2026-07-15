@@ -11,15 +11,24 @@ export async function probeImageSize(url: string, timeoutMs = 8000): Promise<Dim
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     let res: Response;
+    const uaHeaders = {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Accept: "image/*,*/*;q=0.8",
+    };
     try {
-      res = await fetch(url, { headers: { Range: "bytes=0-65535" }, signal: ctrl.signal });
+      res = await fetch(url, { headers: { ...uaHeaders, Range: "bytes=0-65535" }, signal: ctrl.signal });
       if (!res.ok && res.status !== 206) {
-        res = await fetch(url, { signal: ctrl.signal });
+        res = await fetch(url, { headers: uaHeaders, signal: ctrl.signal });
       }
     } finally {
       clearTimeout(t);
     }
     if (!res.ok && res.status !== 206) return null;
+    // Hotlink-protected shops often return HTML with 200; reject non-image
+    // content-types so the caller can mark the URL dead.
+    const ct = res.headers.get("content-type");
+    if (ct && !ct.toLowerCase().startsWith("image/")) return null;
     const buf = new Uint8Array(await res.arrayBuffer());
     return parse(buf);
   } catch {

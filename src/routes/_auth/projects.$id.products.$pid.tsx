@@ -286,6 +286,20 @@ function ProductDetail() {
       for (const u of s.extra_images) if (!allVisible.includes(u)) allVisible.push(u);
     }
   }
+  // Dead URLs and (in compatible mode) images from non-primary equivalent
+  // sources never appear in the "Wybrane zdjęcia" grid — they get their own
+  // collapsed sections below.
+  const deadImageSet = new Set(
+    (((data as { dead_images?: string[] } | undefined)?.dead_images) ?? []) as string[],
+  );
+  const otherEquivImageSet = new Set(
+    (((data as { other_equivalent_images?: string[] } | undefined)?.other_equivalent_images) ?? []) as string[],
+  );
+  {
+    const filtered = allVisible.filter((u) => !deadImageSet.has(u) && !otherEquivImageSet.has(u));
+    allVisible.length = 0;
+    allVisible.push(...filtered);
+  }
   const top4 = [...allVisible]
     .sort((a, b) => {
       const am = imageMeta[a]; const bm = imageMeta[b];
@@ -1081,6 +1095,67 @@ function ProductDetail() {
                               <Trash2 className="h-3 w-3" />
                             </button>
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })()}
+              {(() => {
+                const deadList = Array.from(deadImageSet);
+                if (!deadList.length) return null;
+                return (
+                  <details className="pt-1">
+                    <summary className="text-[11px] text-rose-700 dark:text-rose-400 cursor-pointer hover:text-foreground">
+                      Niedostępne ({deadList.length})
+                    </summary>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Te zdjęcia nie odpowiadają (404, hotlink, niepoprawny format) — zostały pominięte we wszystkich widokach. „Zweryfikuj zdjęcia ponownie" spróbuje je pobrać jeszcze raz.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 opacity-60">
+                      {deadList.map((u) => (
+                        <div key={u} className="relative group rounded border border-rose-400/40 p-0.5">
+                          <img src={u} alt="" className="h-24 w-24 rounded object-cover grayscale" />
+                          <div className="absolute inset-x-0 top-0 flex justify-center text-[9px] text-rose-700 bg-rose-50/90 dark:bg-rose-950/70 dark:text-rose-300 py-0.5">
+                            niedostępne
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })()}
+              {(() => {
+                if (productMatchingMode !== "compatible") return null;
+                const others = Array.from(otherEquivImageSet);
+                if (!others.length) return null;
+                return (
+                  <details className="pt-1">
+                    <summary className="text-[11px] text-indigo-700 dark:text-indigo-400 cursor-pointer hover:text-foreground">
+                      Z innych zamienników ({others.length})
+                    </summary>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      W trybie „zamienniki" główna galeria zawiera zdjęcia tylko z najlepszego źródła. Poniżej zdjęcia z pozostałych równoważnych produktów — kliknij, aby dodać wybrane do galerii.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                      {others.map((u) => (
+                        <div key={u} className="relative group rounded border border-indigo-400/40 p-0.5">
+                          <img src={u} alt="" className="h-24 w-24 rounded object-cover" />
+                          <button
+                            onClick={async () => {
+                              try {
+                                await restoreIdentityFn({ data: { productId: pid, url: u, keep: true } });
+                                toast.success("Dodano zdjęcie do galerii");
+                                invalidate();
+                              } catch (e) {
+                                toast.error(friendlyError(e, "Nie udało się dodać zdjęcia"));
+                              }
+                            }}
+                            className="absolute top-0 right-0 bg-emerald-600 text-white rounded p-0.5 opacity-0 group-hover:opacity-100 transition"
+                            title="Dodaj do galerii (manual_keep)"
+                          >
+                            <ShieldCheck className="h-3 w-3" />
+                          </button>
                         </div>
                       ))}
                     </div>
