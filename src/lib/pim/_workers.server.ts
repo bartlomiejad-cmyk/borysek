@@ -3492,7 +3492,7 @@ export async function runPimVisualization(
     projectId: (product as { project_id: string }).project_id,
     enrichmentId: e.id,
     candidates: preFiltered,
-    imageScores: e.image_scores ?? {},
+    imageScores: (e.image_scores ?? {}) as never,
   })).slice(0, 4);
   const sourceUrlsHash = analysisUrls.length ? await sha256Hex(analysisUrls.join("|")) : "";
 
