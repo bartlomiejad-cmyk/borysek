@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { kickBulkWorker } from "./worker-kick.server";
 
 export type BulkJobKind =
   | "GENERATE_GOLDEN"
@@ -120,6 +119,7 @@ export const createBulkJob = createServerFn({ method: "POST" })
     // Kick the worker immediately so the user does not wait for the next
     // cron tick. Failure here is non-fatal — the cron will pick the job up.
     try {
+      const { kickBulkWorker } = await import("./worker-kick.server");
       kickBulkWorker();
     } catch {
       // ignore — cron will catch up

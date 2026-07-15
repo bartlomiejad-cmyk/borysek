@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
-import { kickBulkWorker } from "./worker-kick.server";
 
 /**
  * Marketplace / aggregator domains we never want as scraped sources.
@@ -154,6 +153,7 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
 
     // Kick the worker immediately; cron picks up otherwise.
     try {
+      const { kickBulkWorker } = await import("./worker-kick.server");
       kickBulkWorker();
     } catch {
       // ignore

@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { kickBulkWorker } from "@/lib/pim/worker-kick.server";
 
 export type PhotoProject = {
   id: string;
@@ -219,6 +218,7 @@ export const editPhotoImage = createServerFn({ method: "POST" })
 
     // Kick the worker immediately so the user doesn't wait for the next cron tick.
     try {
+      const { kickBulkWorker } = await import("@/lib/pim/worker-kick.server");
       kickBulkWorker();
     } catch {
       // ignore — cron will pick it up

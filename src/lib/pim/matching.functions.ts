@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { kickBulkWorker } from "./worker-kick.server";
 import {
   sanitizeProductDescription,
   filterImageUrls,
@@ -852,6 +851,7 @@ export const runMatching = createServerFn({ method: "POST" })
         } else {
           // Fire-and-forget kick to worker (same pattern as bulk-jobs.functions.ts).
           try {
+            const { kickBulkWorker } = await import("./worker-kick.server");
             kickBulkWorker();
           } catch {
             /* cron will catch up */
