@@ -2068,9 +2068,15 @@ function SettingsCard({
     msg?: string;
     locale?: { gl: string; hl: string };
     results?: Array<{ title: string; url: string; domain: string; snippet: string }>;
+    count?: number;
+    keyword?: string;
+    isNumeric?: boolean;
+    rawSample?: string;
+    inputJson?: string;
   }>({
     state: "idle",
   });
+  const [apifyTestQuery, setApifyTestQuery] = useState<string>("filtry do rekuperatora Wanas 350");
   const testApify = useServerFn(testApifySerp);
   const settingsLocale = (() => {
     const s = project?.settings;
@@ -2089,19 +2095,41 @@ function SettingsCard({
   const runApifyTest = async () => {
     setApifyTest({ state: "loading" });
     try {
-      const r = await testApify({ data: { query: "filtry do rekuperatora Wanas 350", gl: settingsLocale.gl, hl: settingsLocale.hl } });
+      const q = apifyTestQuery.trim() || "filtry do rekuperatora Wanas 350";
+      const r = (await testApify({ data: { query: q, gl: settingsLocale.gl, hl: settingsLocale.hl } })) as {
+        ok: boolean;
+        count: number;
+        results: Array<{ title: string; url: string; domain: string; snippet: string }>;
+        gl: string;
+        hl: string;
+        error?: string;
+        keyword: string;
+        isNumeric: boolean;
+        rawSample?: string;
+        inputJson?: string;
+      };
       if (r.ok) {
         setApifyTest({
           state: "ok",
           msg: `OK — ${r.count} wyników (gl=${r.gl}, hl=${r.hl})`,
           locale: { gl: r.gl, hl: r.hl },
           results: r.results.map((x) => ({ title: x.title, url: x.url, domain: x.domain, snippet: x.snippet })),
+          count: r.count,
+          keyword: r.keyword,
+          isNumeric: r.isNumeric,
+          rawSample: r.rawSample,
+          inputJson: r.inputJson,
         });
       } else {
         setApifyTest({
           state: "err",
           msg: `${r.error ?? "Actor nie zwrócił wyników"} (gl=${r.gl}, hl=${r.hl})`,
           locale: { gl: r.gl, hl: r.hl },
+          count: r.count,
+          keyword: r.keyword,
+          isNumeric: r.isNumeric,
+          rawSample: r.rawSample,
+          inputJson: r.inputJson,
         });
       }
     } catch (e) {
