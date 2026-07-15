@@ -2044,6 +2044,24 @@ function SettingsCard({
     return "both";
   })();
   const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify" | "both">(initialSearchProvider);
+  const initialScrapeCap: number = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = Number((s as Record<string, unknown>).scrape_cap);
+      if (Number.isFinite(v)) return Math.max(1, Math.min(12, Math.floor(v)));
+    }
+    return 6;
+  })();
+  const [scrapeCap, setScrapeCap] = useState<number>(initialScrapeCap);
+  const initialAutoRescrape: boolean = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).auto_rescrape;
+      if (typeof v === "boolean") return v;
+    }
+    return true;
+  })();
+  const [autoRescrape, setAutoRescrape] = useState<boolean>(initialAutoRescrape);
   const [apifyTest, setApifyTest] = useState<{
     state: "idle" | "loading" | "ok" | "err";
     msg?: string;
@@ -2185,6 +2203,8 @@ function SettingsCard({
                   .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
                   .filter(Boolean),
                 search_provider: searchProvider,
+                scrape_cap: scrapeCap,
+                auto_rescrape: autoRescrape,
               },
             })
           }
