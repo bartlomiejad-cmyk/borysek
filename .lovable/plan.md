@@ -1,29 +1,29 @@
-# Fix: martwe zdjęcia nie znikają po ponownej weryfikacji
+## Problem
 
-## Diagnoza
+Generowanie „Złotego Rekordu" pada z Zod: `features[*] Expected object, received string`. Model (Gemini) zwrócił `features` jako tablicę stringów (np. `"Kaliber: G4"`) zamiast `{key, value}`, więc `schema.parse` w `callGateway` (src/lib/pim/ai.functions.ts, linie 79–92) rzuca i przerywa cały flow.
 
-`revalidateImages` w `src/routes/_auth/projects.$id.products.$pid.tsx` wywołuje `analyzeProductImages` z `urls: allVisible.slice(0, 8)` (a server-fn dodatkowo ma walidator `.max(8)`). W widoku produktu jest 16 zdjęć — te uszkodzone są dalej w liście (pozycje 9–16), więc `filterAliveImages` nigdy ich nie probuje i nie ustawia `dead:true`. W efekcie po kliknięciu przycisku:
-- top 8 zdjęć: identity re-scoring działa, ale one nie były martwe,
-- dalsze 8 (te faktycznie zbite): nie są sondowane wcale → nadal widoczne z pustą miniaturką.
+To samo dotyczy `regenerateFeatures` (linia 296) — ten sam kształt schematu, ten sam problem, gdy model odpowie stringami.
 
-Dodatkowo `runPimImageVerify` (używany w Weryfikacji zbiorczej) filtruje `toScore` przez `needsCheck` (`identity_v` cache), więc dla obrazów już zescore'owanych też pomija HEAD-probe — ten sam problem w drugim wariancie.
+## Fix
 
-## Zmiany
+1) W `src/lib/pim/ai.functions.ts` dodać helper `coerceFeatures(input: unknown): Array<{key,value}>`:
+   - Jeżeli element jest obiektem z `key`+`value` → zostaw.
+   - Jeżeli string zawiera `":"` → split na pierwszym `":"`, trim → `{key, value}`.
+   - Jeżeli string bez `":"` → `{key: "Cecha", value: trim}` (lub odrzuć jeśli pusty).
+   - Nie-tekst/nie-obiekt → odrzuć.
+   - Ograniczyć długości do limitów schematu (200 / 2000), max 60.
 
-1. **Rozbić re-weryfikację na dwa kroki po stronie serwera.**  
-   W `src/lib/pim/ai.functions.ts` dodać osobną, tanią server-fn `probeVisibleImagesAlive({ productId })`:
-   - Pobiera enrichment + wszystkie `product_sources.images / extra_images` dla `picked_urls`.
-   - Wyklucza `hidden_images` i (w compatible mode) obrazy z nie-primary źródeł.
-   - Wywołuje `filterAliveImages` na CAŁYM zbiorze URL-i (bez limitu 8), z `revalidate` semantyką: URL-e oznaczone wcześniej `dead:true` są ponownie sondowane; `manual_keep` nietykalne.
-   - Zwraca `{ alive, dead }` i zapisuje merged `image_scores` (już to robi `filterAliveImages`).
-   - Server-fn autoryzowana przez `requireSupabaseAuth`.
+2) W `callGateway` (linia 79) przed `schema.parse` znormalizować: `parsed.features = coerceFeatures(parsed.features)`. Schemat pozostaje strict (waliduje po koercji) — brak regresji dla poprawnych odpowiedzi.
 
-2. **Front-end: `revalidateImages`** wywołuje najpierw `probeVisibleImagesAlive({ productId: pid })`, a dopiero potem `analyzeProductImages` na `alive.slice(0, 8)` (identity re-scoring pozostaje z limitem 8, bo używa Vision — to droga część). Po obu krokach `invalidate()`.
+3) W `regenerateFeatures` (linia ~354) analogicznie znormalizować `out.features` przed użyciem (albo przed parsem, jeśli używa tego samego schematu).
 
-3. **`runPimImageVerify` (bulk „Zweryfikuj zdjęcia")** — przenieść `filterAliveImages` PRZED filtrem `needsCheck`, żeby HEAD-probe zawsze objął pełen `uniq`. `needsCheck` decyduje tylko o AI identity, nie o probingu.
+4) Wzmocnić prompt: w `GOLDEN_SEO_SYSTEM_PROMPT` (src/lib/pim/seo.ts, sekcja FEATURES ok. linii 169) dopisać jedno krótkie zdanie: „features MUSI być tablicą OBIEKTÓW `{\"key\": string, \"value\": string}` — NIE stringów typu 'Klucz: wartość'." (miękka bariera; twarda to koercja).
 
-4. **UI**: bez zmian wizualnych. Toast pokazuje `Zweryfikowano N zdjęć · X martwych` gdy `dead.length > 0`, żeby użytkownik widział że sekcja „Niedostępne" powinna urosnąć.
+5) Log: jeśli po koercji którykolwiek element został odrzucony/naprawiony, `console.warn("[golden] features coerced", { before, after })` — bez błędu użytkownikowi.
 
-## Weryfikacja
+Brak zmian bazy, brak zmian UI. Ryzyko regresji minimalne — koercja tylko rozszerza akceptowany input.
 
-Na tym produkcie: klik „Zweryfikuj zdjęcia ponownie" → 8 pustych kafelków przechodzi do sekcji „Niedostępne", licznik „widocznych" spada, żywe zdjęcia zostają. Powtórny klik nie zmienia stanu (dead cache).
+## Walidacja
+
+- Ponownie wygenerować Złoty Rekord dla produktu z zrzutu — powinno przejść bez błędu Zod, a `golden_features` mieć poprawne pary klucz/wartość.
+- Typecheck czysty.
