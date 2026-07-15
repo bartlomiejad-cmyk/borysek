@@ -352,6 +352,10 @@ export const saveVizAnalysisOverride = createServerFn({ method: "POST" })
         style: z.string().max(600),
         requirements: z.string().max(800),
         manual: z.boolean().default(true),
+        viz_type: z.enum(["lifestyle", "in_use", "feature_explainer"]).optional(),
+        overlay_motif: z.string().max(160).optional(),
+        host_device_name: z.string().max(160).optional(),
+        host_device_url: z.string().url().max(2000).optional().or(z.literal("").optional()),
       })
       .parse(i),
   )
@@ -364,16 +368,29 @@ export const saveVizAnalysisOverride = createServerFn({ method: "POST" })
     if (!enr) throw new Error("Brak enrichment dla produktu");
     const meta = ((enr as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
     const prev = (meta.viz_analysis as Record<string, unknown> | undefined) ?? {};
-    const nextMeta = {
-      ...meta,
-      viz_analysis: {
-        ...prev,
-        style: data.style.trim(),
-        requirements: data.requirements.trim(),
-        manual: data.manual,
-        at: new Date().toISOString(),
-      },
+    const nextViz: Record<string, unknown> = {
+      ...prev,
+      style: data.style.trim(),
+      requirements: data.requirements.trim(),
+      manual: data.manual,
+      at: new Date().toISOString(),
     };
+    if (data.viz_type) nextViz.viz_type = data.viz_type;
+    if (typeof data.overlay_motif === "string") nextViz.overlay_motif = data.overlay_motif.trim();
+    if (typeof data.host_device_name === "string") {
+      nextViz.host_device = data.host_device_name.trim()
+        ? { name: data.host_device_name.trim() }
+        : null;
+    }
+    const nextMeta: Record<string, unknown> = {
+      ...meta,
+      viz_analysis: nextViz,
+    };
+    if (typeof data.host_device_url === "string") {
+      const u = data.host_device_url.trim();
+      if (u) nextMeta.host_device_url = u;
+      else delete (nextMeta as Record<string, unknown>).host_device_url;
+    }
     const { error } = await context.supabase
       .from("enrichments")
       .update({ image_meta: nextMeta as never } as never)
