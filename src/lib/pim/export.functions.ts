@@ -40,7 +40,7 @@ export const exportProject = createServerFn({ method: "GET" })
 
     let prodQ = supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, review_status, pipeline_status, approved_at, manual_lock")
+      .select("id, ext_id, nazwa, kod, ean, category, review_status, pipeline_status, approved_at, manual_lock")
       .eq("project_id", data.projectId)
       ;
     if (data.approvedOnly) prodQ = prodQ.eq("review_status", "APPROVED");
@@ -235,6 +235,7 @@ export const exportProject = createServerFn({ method: "GET" })
         const visuals = gallery;
         rows.push({
           ...idCols,
+          kategoria: (p as { category?: string | null }).category ?? "",
           golden_name: e?.golden_name ?? "",
           golden_slug: ((e as { golden_slug?: string | null } | undefined)?.golden_slug) ?? "",
           golden_meta_description: ((e as { golden_meta_description?: string | null } | undefined)?.golden_meta_description) ?? "",
@@ -258,6 +259,7 @@ export const exportProject = createServerFn({ method: "GET" })
         nazwa: p.nazwa ?? "",
         kod: p.kod ?? "",
         ean: p.ean ?? "",
+        kategoria: (p as { category?: string | null }).category ?? "",
         status: e?.status ?? "PENDING",
         match_type: e?.match_type ?? "NO_MATCH",
         matched_term: e?.matched_term ?? "",

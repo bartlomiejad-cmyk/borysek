@@ -669,6 +669,7 @@ export type Database = {
         Row: {
           approved_at: string | null
           approved_by: string | null
+          category: string | null
           created_at: string
           ean: string | null
           ext_id: string | null
@@ -686,6 +687,7 @@ export type Database = {
         Insert: {
           approved_at?: string | null
           approved_by?: string | null
+          category?: string | null
           created_at?: string
           ean?: string | null
           ext_id?: string | null
@@ -703,6 +705,7 @@ export type Database = {
         Update: {
           approved_at?: string | null
           approved_by?: string | null
+          category?: string | null
           created_at?: string
           ean?: string | null
           ext_id?: string | null

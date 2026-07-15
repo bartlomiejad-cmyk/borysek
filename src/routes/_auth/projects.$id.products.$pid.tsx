@@ -663,6 +663,11 @@ function ProductDetail() {
           <p className="text-sm text-muted-foreground">
             EAN: {product.ean ?? "—"} · Kod: {product.kod ?? "—"} · ID: {product.ext_id ?? "—"}
           </p>
+          {((product as { category?: string | null }).category ?? "").trim() && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Kategoria: <span className="font-medium text-foreground">{(product as { category?: string | null }).category}</span>
+            </p>
+          )}
           {enrichment && (
             <div className="mt-2 flex gap-2">
               <Badge variant="outline">{enrichment.match_type}</Badge>

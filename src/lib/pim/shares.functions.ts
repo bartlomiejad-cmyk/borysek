@@ -28,6 +28,7 @@ export type SharePublicProduct = {
   nazwa: string | null;
   kod: string | null;
   ean: string | null;
+  category: string | null;
   enrichment: SharePublicEnrichment | null;
   feedback: { comments: number; fixes: number };
 };
@@ -322,6 +323,7 @@ export const listShareProducts = createServerFn({ method: "POST" })
         nazwa,
         kod,
         ean,
+        category,
         enrichment:enrichments (
           golden_name,
           golden_description,
@@ -364,6 +366,7 @@ export const listShareProducts = createServerFn({ method: "POST" })
         nazwa: string | null;
         kod: string | null;
         ean: string | null;
+        category: string | null;
         enrichment: RawEnrichmentRow | RawEnrichmentRow[] | null;
       };
       const enRaw = Array.isArray(row.enrichment) ? row.enrichment[0] ?? null : row.enrichment;
@@ -373,6 +376,7 @@ export const listShareProducts = createServerFn({ method: "POST" })
         nazwa: row.nazwa,
         kod: row.kod,
         ean: row.ean,
+        category: row.category,
         enrichment: toPublicEnrichment(enRaw ?? null),
         feedback: fbc,
       };
@@ -481,6 +485,7 @@ export const getShareProduct = createServerFn({ method: "POST" })
         nazwa,
         kod,
         ean,
+        category,
         enrichment:enrichments (
           golden_name,
           golden_description,
@@ -506,6 +511,7 @@ export const getShareProduct = createServerFn({ method: "POST" })
       nazwa: string | null;
       kod: string | null;
       ean: string | null;
+      category: string | null;
       enrichment: RawEnrichmentRow | RawEnrichmentRow[] | null;
     };
     const enRaw = Array.isArray(row.enrichment) ? row.enrichment[0] ?? null : row.enrichment;
@@ -514,6 +520,7 @@ export const getShareProduct = createServerFn({ method: "POST" })
       nazwa: row.nazwa,
       kod: row.kod,
       ean: row.ean,
+      category: row.category,
       enrichment: toPublicEnrichment(enRaw ?? null),
       feedback: { comments: 0, fixes: 0 },
     };

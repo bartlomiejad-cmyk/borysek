@@ -90,7 +90,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, pipeline_status, review_status, manual_lock, matching_mode")
+      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);

@@ -155,6 +155,7 @@ const searchSchema = z.object({
     ])
     .catch("ALL"),
   search: z.string().catch(""),
+  category: z.string().catch(""),
   stage: z
     .enum(["NONE", "IMPORT", "SOURCES", "MATCH", "CONTENT", "MEDIA", "REVIEW"])
     .catch("NONE"),
@@ -222,6 +223,7 @@ function ProjectPage() {
 
   const filter = urlSearch.filter;
   const search = urlSearch.search;
+  const category = urlSearch.category;
   const pageSize = urlSearch.pageSize;
   const page = urlSearch.page;
   const stage = urlSearch.stage;
@@ -408,9 +410,26 @@ function ProjectPage() {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
       }
+      if (category) {
+        const pc = ((p as { category?: string | null }).category ?? "").trim();
+        if (!pc) return false;
+        // Match exact path OR any parent that starts-with category + " > ".
+        if (pc !== category && !pc.startsWith(`${category} > `)) return false;
+      }
       return true;
     });
-  }, [products, filter, search]);
+  }, [products, filter, search, category]);
+
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      const c = ((p as { category?: string | null }).category ?? "").trim();
+      if (!c) continue;
+      const parts = c.split(" > ");
+      for (let i = 1; i <= parts.length; i++) set.add(parts.slice(0, i).join(" > "));
+    }
+    return Array.from(set).sort();
+  }, [products]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -422,7 +441,7 @@ function ProjectPage() {
   // Reset page when filter/search/pageSize changes
   useEffect(() => {
     if (page !== 1) updateSearch({ page: 1 });
-  }, [filter, search, pageSize]);
+  }, [filter, search, pageSize, category]);
 
   const handleStageClick = (s: Exclude<StageKey, "NONE">) => {
     if (stage === s) {
@@ -1168,6 +1187,30 @@ function ProjectPage() {
                 <SelectItem value="LOCKED">🔒 Zablokowane ręcznie</SelectItem>
               </SelectContent>
             </Select>
+            {categoryOptions.length > 0 && (
+              <Select
+                value={category || "__ALL__"}
+                onValueChange={(v) => updateSearch({ category: v === "__ALL__" ? "" : v })}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Kategoria" />
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  <SelectItem value="__ALL__">Wszystkie kategorie</SelectItem>
+                  {categoryOptions.map((c) => {
+                    const depth = c.split(" > ").length - 1;
+                    const leaf = c.split(" > ").pop() ?? c;
+                    return (
+                      <SelectItem key={c} value={c}>
+                        <span style={{ paddingLeft: `${depth * 10}px` }} className="text-sm">
+                          {leaf}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -1462,6 +1505,15 @@ function ProjectPage() {
                         <div className="text-xs text-muted-foreground line-clamp-1">{p.nazwa}</div>
                       )}
                       <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {((p as { category?: string | null }).category ?? "").trim() && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 text-muted-foreground"
+                            title={(p as { category?: string | null }).category ?? ""}
+                          >
+                            {(((p as { category?: string | null }).category ?? "").split(" > ").pop() ?? "").trim()}
+                          </Badge>
+                        )}
                         <Badge
                           variant="outline"
                           className="text-[10px] px-1.5 py-0 border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-300"

@@ -273,6 +273,7 @@ export const AUDIT_SYSTEM_PROMPT = [
   "Jesteś audytorem jakości katalogu produktów. Porównaj ZŁOTY REKORD ze ŹRÓDŁAMI i WYTYCZNYMI KLIENTA.",
   'Zwróć JSON: {"factual_issues": string[], "guideline_violations": string[], "style_issues": string[], "verdict": "pass"|"warn"|"fail"}.',
   "factual_issues: twierdzenia bez pokrycia w źródłach lub sprzeczne z nimi.",
+  "factual_issues: dodatkowo — jeśli podano KATEGORIA, zgłoś rażące niezgodności między złotym rekordem a kategorią (np. artykuł spożywczy w kategorii elektronarzędzi).",
   "guideline_violations: konkretne naruszenia wytycznych (pusta lista gdy brak wytycznych).",
   "style_issues: ogólniki marketingowe, powtórzenia, błędy językowe — NIGDY nie obniżają werdyktu poniżej warn.",
   "verdict fail wyłącznie przy błędach faktycznych lub złamaniu wytycznych.",
@@ -285,9 +286,12 @@ export function buildAuditUserPrompt(args: {
   features: Array<{ key: string; value: string }>;
   topSources: Array<{ url?: string; description?: string | null; title?: string | null }>;
   clientGuidelines: string;
+  category?: string | null;
 }): string {
   const parts: string[] = [];
   parts.push(`NAZWA: ${args.goldenName}`);
+  const cat = (args.category ?? "").trim();
+  if (cat) parts.push(`KATEGORIA: ${cat}`);
   parts.push("");
   parts.push("OPIS ZŁOTEGO REKORDU (tekst widoczny):");
   parts.push(args.goldenDescriptionVisible.slice(0, 3000) || "(brak)");

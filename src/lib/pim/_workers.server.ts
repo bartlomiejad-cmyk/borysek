@@ -160,6 +160,7 @@ async function sha256Hex(input: string): Promise<string> {
 export async function analyzeVisualizationSceneForProduct(args: {
   productName: string;
   featuresText: string;
+  category?: string | null;
   imageUrls: string[]; // main first, max 4, must be publicly fetchable
   projectConstraintsPl?: string; // optional PL text; overrides scene choices
   count?: number; // desired variant count (>=1). Result contains variants[].
@@ -213,6 +214,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
   const constraintsBlock = (args.projectConstraintsPl ?? "").trim();
   const userText = [
     `Nazwa produktu: "${args.productName || "(bez nazwy)"}"`,
+    args.category ? `Kategoria produktu: ${args.category}` : "",
     args.featuresText ? `Cechy: ${args.featuresText}` : "",
     constraintsBlock
       ? `OGRANICZENIA PROJEKTU (nadrzędne wobec Twoich pomysłów na scenę):\n${constraintsBlock}`
@@ -3418,11 +3420,12 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw, product_notes, manual_lock, matching_mode")
+    .select("id, project_id, nazwa, category, raw, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
   const productName = ((product as { nazwa?: string | null }).nazwa ?? "").trim();
+  const productCategory = ((product as { category?: string | null }).category ?? "").trim();
   const productDesc = (((product as { raw?: { opis?: string | null; description?: string | null } | null }).raw?.opis
     ?? (product as { raw?: { description?: string | null } | null }).raw?.description
     ?? "") as string).trim();
@@ -3781,6 +3784,7 @@ export async function runPimVisualization(
         const out = await analyzeVisualizationSceneForProduct({
           productName: nameForPrompt,
           featuresText,
+          category: productCategory,
           imageUrls: analysisUrls,
           projectConstraintsPl,
           count,
@@ -4987,7 +4991,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<P
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, ean, pipeline_status, review_status")
+    .select("id, project_id, nazwa, ean, category, pipeline_status, review_status")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -5115,6 +5119,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<P
         description: string | null;
       }>,
       clientGuidelines,
+      category: ((product as { category?: string | null }).category ?? "").trim(),
     });
 
     try {

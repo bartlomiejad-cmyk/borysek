@@ -37,6 +37,7 @@ type Field =
   | "name_column"
   | "code_column"
   | "ean_column"
+  | "category_column"
   | "main_image_column"
   | "gallery_column";
 const FIELDS: Array<{ value: Field; label: string }> = [
@@ -44,6 +45,7 @@ const FIELDS: Array<{ value: Field; label: string }> = [
   { value: "name_column", label: "Nazwa" },
   { value: "code_column", label: "Kod / symbol" },
   { value: "ean_column", label: "EAN" },
+  { value: "category_column", label: "Kategoria" },
   { value: "main_image_column", label: "Zdjęcie główne (URL)" },
   { value: "gallery_column", label: "Wszystkie zdjęcia (URL-e)" },
 ];
@@ -65,6 +67,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
     name_column: SKIP,
     code_column: SKIP,
     ean_column: SKIP,
+    category_column: SKIP,
     main_image_column: SKIP,
     gallery_column: SKIP,
   });
@@ -95,6 +98,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
       name_column: SKIP,
       code_column: SKIP,
       ean_column: SKIP,
+      category_column: SKIP,
       main_image_column: SKIP,
       gallery_column: SKIP,
     });
@@ -111,17 +115,29 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         return;
       }
       setCsv(raw);
-      const find = (name?: string | null) => {
-        if (!name) return SKIP;
-        const lk = name.trim().toLowerCase();
-        const hit = raw.headers.find((h) => h.toLowerCase() === lk);
-        return hit ?? SKIP;
+      const find = (name?: string | null, aliases: string[] = []) => {
+        const names = [name, ...aliases].filter(Boolean) as string[];
+        for (const n of names) {
+          const lk = n.trim().toLowerCase();
+          const hit = raw.headers.find((h) => h.toLowerCase() === lk);
+          if (hit) return hit;
+        }
+        return SKIP;
       };
       setMapping({
         id_column: find(defaults?.id_column),
         name_column: find(defaults?.name_column),
         code_column: find(defaults?.code_column),
         ean_column: find(defaults?.ean_column),
+        category_column: find(defaults?.category_column, [
+          "kategoria",
+          "kategoria_pelna",
+          "kategoria_glowna",
+          "kategorie",
+          "category",
+          "categories",
+          "category_path",
+        ]),
         main_image_column: find(defaults?.main_image_column),
         gallery_column: find(defaults?.gallery_column),
       });
@@ -146,6 +162,8 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         name_column: mapping.name_column !== SKIP ? mapping.name_column : null,
         code_column: mapping.code_column !== SKIP ? mapping.code_column : null,
         ean_column: mapping.ean_column !== SKIP ? mapping.ean_column : null,
+        category_column:
+          mapping.category_column !== SKIP ? mapping.category_column : null,
         main_image_column:
           mapping.main_image_column !== SKIP ? mapping.main_image_column : null,
         gallery_column:

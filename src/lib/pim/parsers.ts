@@ -5,6 +5,7 @@ export type CsvRow = {
   nazwa: string | null;
   kod: string | null;
   ean: string | null;
+  category: string | null;
   has_images?: boolean;
   main_image_url?: string | null;
   gallery_urls?: string[];
@@ -30,6 +31,31 @@ export type CsvMapping = {
   name_column?: string;
   code_column?: string;
   ean_column?: string;
+  category_column?: string;
+};
+
+/**
+ * Normalize a hierarchical category string. Accepts common separators
+ * (`>>`, `>`, `/`, `|`, `\`) and returns a canonical path like
+ * `"Supermarket > Worki na śmieci"`. Returns null when empty.
+ */
+export const normalizeCategoryPath = (raw: string | null | undefined): string | null => {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const parts = s
+    .split(/\s*(?:>>+|>|\/|\||\\)\s*/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!parts.length) return null;
+  return parts.join(" > ");
+};
+
+/** Extract the last segment of a normalized path — used as a compact chip label. */
+export const categoryLeaf = (path: string | null | undefined): string | null => {
+  if (!path) return null;
+  const parts = path.split(">").map((p) => p.trim()).filter(Boolean);
+  return parts[parts.length - 1] ?? null;
 };
 
 export const parseCsv = (file: File, mapping?: CsvMapping): Promise<CsvRow[]> =>
@@ -55,6 +81,23 @@ export const parseCsv = (file: File, mapping?: CsvMapping): Promise<CsvRow[]> =>
           nazwa: lookup(r, m.name_column, ["nazwa", "name", "title", "product_name"]),
           kod: lookup(r, m.code_column, ["kod", "code", "sku"]),
           ean: lookup(r, m.ean_column, ["ean", "gtin", "barcode"]),
+          category: normalizeCategoryPath(
+            lookup(r, m.category_column, [
+              "kategoria",
+              "kategoria_pelna",
+              "kategoria_glowna",
+              "kategorie",
+              "category",
+              "categories",
+              "category_path",
+              "categorypath",
+              "grupa",
+              "group",
+              "groups",
+              "dzial",
+              "section",
+            ]),
+          ),
           raw: r,
         }));
         resolve(rows.filter((r) => r.nazwa || r.ean || r.kod || r.ext_id));
@@ -73,6 +116,7 @@ export type ExplicitCsvMapping = {
   name_column?: string | null;
   code_column?: string | null;
   ean_column?: string | null;
+  category_column?: string | null;
   main_image_column?: string | null;
   gallery_column?: string | null;
 };
@@ -124,6 +168,7 @@ export const buildCsvRowsFromMapping = (
       nazwa: get(r, mapping.name_column),
       kod: get(r, mapping.code_column),
       ean: get(r, mapping.ean_column),
+      category: normalizeCategoryPath(get(r, mapping.category_column)),
       has_images: !!imgs.main || imgs.gallery.length > 0,
       main_image_url: imgs.main,
       gallery_urls: imgs.gallery,
