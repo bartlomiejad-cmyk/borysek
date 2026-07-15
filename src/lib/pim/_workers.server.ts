@@ -14,6 +14,7 @@ import { probeManySizes } from "./image-size.server";
 import { isMarketplaceUrl } from "./firecrawl.functions";
 import { extractDescriptionSection, filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
 import { getVisibleGallery } from "./gallery";
+import { sanitizeImageInputs, dropDeadUrls, isNotAnImageError, extractOffendingUrl } from "./viz-image-guard.server";
 import {
   slugifyPl as slugifyPlShared,
   clampName as clampNameShared,
