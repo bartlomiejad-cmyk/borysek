@@ -42,6 +42,7 @@ type BulkJobRow = {
   status: string;
   last_error: string | null;
   payload: Record<string, unknown> | null;
+  lock_token?: string | null;
 };
 
 async function processItem(
@@ -109,7 +110,22 @@ async function processItem(
 }
 
 async function pickNextJob(): Promise<BulkJobRow | null> {
-  const { data } = await supabaseAdmin
+  // Atomic FOR UPDATE SKIP LOCKED claim via SQL function. Two concurrent
+  // hook ticks can never receive the same job; stale locks (>3 min) are
+  // reclaimable. Falls back to the old query if the RPC is unavailable
+  // (e.g. pre-migration environments) so the worker keeps running.
+  const { data, error } = await supabaseAdmin.rpc("claim_next_bulk_job" as never, {
+    p_stale_seconds: 180,
+  } as never);
+  if (!error && Array.isArray(data) && data.length) {
+    return (data[0] as unknown) as BulkJobRow;
+  }
+  if (error) {
+    // Log once and continue with a non-locking read so we don't stall the
+    // queue if the function is missing during a rolling deploy.
+    console.warn("[bulk-jobs] claim_next_bulk_job unavailable:", error.message);
+  }
+  const { data: fallback } = await supabaseAdmin
     .from("bulk_jobs" as never)
     .select("id, project_id, kind, items, total, processed_count, failed_count, cancel_requested, status, last_error, payload")
     .in("status", ["PENDING", "PROCESSING"])
@@ -117,7 +133,7 @@ async function pickNextJob(): Promise<BulkJobRow | null> {
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  return (data as unknown as BulkJobRow) ?? null;
+  return (fallback as unknown as BulkJobRow) ?? null;
 }
 
 async function processJob(job: BulkJobRow, deadline: number): Promise<{
