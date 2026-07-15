@@ -690,7 +690,11 @@ export async function filterAliveImages(
   const toProbe: string[] = [];
   for (const u of urls) {
     const prev = currentScores[u];
-    if (prev?.dead === true && prev.manual_keep !== true && !opts?.revalidate) {
+    if (prev?.manual_keep === true) {
+      // Manual overrides never re-probed automatically.
+      continue;
+    }
+    if (prev?.dead === true && !opts?.revalidate) {
       cachedDead.push(u);
     } else {
       toProbe.push(u);
