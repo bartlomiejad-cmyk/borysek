@@ -168,6 +168,11 @@ export async function analyzeVisualizationSceneForProduct(args: {
   used: number;
   has_text: boolean;
   color_anchor_en: string;
+  viz_type: "lifestyle" | "in_use" | "feature_explainer";
+  type_reason: string;
+  overlay_motif: string;
+  on_product_text: string[];
+  host_device: { name: string } | null;
 }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
@@ -178,11 +183,16 @@ export async function analyzeVisualizationSceneForProduct(args: {
     "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
     "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
     "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
-    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"..."}.',
+    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"...", "viz_type":"lifestyle|in_use|feature_explainer", "type_reason":"...", "overlay_motif":"...", "on_product_text":["..."], "host_device": {"name":"..."} | null }.',
     "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
     "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
     '- has_text: true jeśli na produkcie widać czytelne napisy/logo/etykiety, false gdy produkt jest "gładki" (np. jednokolorowa taśma, folia, karton bez druku).',
     '- color_anchor_en (60–180 znaków, PO ANGIELSKU): konkretne, nazwane kolory najważniejszych powierzchni produktu i wnętrza/rdzenia (np. "outer wound surface uniformly bright green, side face green, core light beige/white"). Kluczowe zwłaszcza dla produktów bez tekstu — zastępuje ogólne "preserve colours".',
+    "- viz_type: 'lifestyle' dla produktów konsumenckich/dekoracyjnych (mieszkanie, kuchnia, ogród, ubranie); 'in_use' dla części/akcesoriów/eksploatacji, które działają wewnątrz/na urządzeniu-goście (filtry, wkłady, końcówki, ostrza, worki); 'feature_explainer' dla urządzeń technicznych z jedną wyraźną funkcją (zasięg, pole działania, przepływ, kierunek pracy).",
+    "- type_reason (≤120 znaków, PL): krótkie uzasadnienie wyboru viz_type.",
+    '- overlay_motif (≤80 znaków, PL): TYLKO gdy viz_type=feature_explainer. Jeden motyw grafiki nakładkowej ilustrującej funkcję (np. "półprzezroczysty stożek zasięgu 120°", "świecąca linia pola działania", "strzałka przepływu powietrza w jednym akcencie kolorystycznym"). Dla innych viz_type: pusty string.',
+    "- on_product_text: dokładnie te napisy/kody/marki widoczne fizycznie na produkcie na obrazie 1 (referencji głównej), każdy jako osobny string z cudzysłowem („PRODUCT NAME”). Pusta tablica gdy produkt jest bez napisów.",
+    '- host_device: gdy nazwa produktu lub cechy wskazują urządzenie-gościa (np. "do rekuperatora Wanas", "pasuje do Bosch MUM"), zwróć { "name": "<pełna nazwa urządzenia>" }. W innym wypadku null.',
     "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
   ].join("\n");
 
@@ -210,14 +220,41 @@ export async function analyzeVisualizationSceneForProduct(args: {
     requirements?: unknown;
     has_text?: unknown;
     color_anchor_en?: unknown;
+    viz_type?: unknown;
+    type_reason?: unknown;
+    overlay_motif?: unknown;
+    on_product_text?: unknown;
+    host_device?: unknown;
   };
   const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
   const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
   const has_text = typeof parsed.has_text === "boolean" ? parsed.has_text : true;
   const color_anchor_en =
     typeof parsed.color_anchor_en === "string" ? parsed.color_anchor_en.trim() : "";
+  const vt = typeof parsed.viz_type === "string" ? parsed.viz_type.trim().toLowerCase() : "";
+  const viz_type: "lifestyle" | "in_use" | "feature_explainer" =
+    vt === "in_use" || vt === "feature_explainer" ? vt : "lifestyle";
+  const type_reason = typeof parsed.type_reason === "string" ? parsed.type_reason.trim() : "";
+  const overlay_motif =
+    typeof parsed.overlay_motif === "string" ? parsed.overlay_motif.trim() : "";
+  const on_product_text: string[] = Array.isArray(parsed.on_product_text)
+    ? (parsed.on_product_text as unknown[])
+        .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+        .map((s) => s.trim())
+        .slice(0, 12)
+    : [];
+  let host_device: { name: string } | null = null;
+  if (parsed.host_device && typeof parsed.host_device === "object") {
+    const hd = parsed.host_device as { name?: unknown };
+    if (typeof hd.name === "string" && hd.name.trim().length > 0) {
+      host_device = { name: hd.name.trim() };
+    }
+  }
   if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
-  return { style, requirements, used: urls.length, has_text, color_anchor_en };
+  return {
+    style, requirements, used: urls.length, has_text, color_anchor_en,
+    viz_type, type_reason, overlay_motif, on_product_text, host_device,
+  };
 }
 
 // Deterministic fallback used when the AI gateway call fails — mirrors the
@@ -3333,7 +3370,7 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw, product_notes, manual_lock")
+    .select("id, project_id, nazwa, raw, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
@@ -3350,15 +3387,19 @@ export async function runPimVisualization(
     .single();
   const clientGuidelines =
     ((projRow?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "").trim();
+  const projectHostDeviceUrl = (
+    (projRow?.settings as { host_device_url?: string } | null)?.host_device_url ?? ""
+  ).trim();
   const constraintsHash = await sha256Hex(JSON.stringify({
     style: projectStylePl,
     requirements: projectRequirementsPl,
     client_guidelines: clientGuidelines,
+    host_device_url: projectHostDeviceUrl,
   }));
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta, hidden_images, image_scores")
+    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta, hidden_images, image_scores, score_breakdown")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enrichment) throw new Error("Brak enrichment");
@@ -3374,7 +3415,18 @@ export async function runPimVisualization(
     image_meta: Record<string, unknown> | null;
     hidden_images: string[] | null;
     image_scores: Record<string, unknown> | null;
+    score_breakdown: Array<{ url: string; total?: number }> | null;
   };
+
+  const matchingMode: "strict" | "compatible" =
+    ((product as { matching_mode?: string | null }).matching_mode === "compatible")
+      ? "compatible"
+      : "strict";
+  // Per-product host-device override: takes precedence over the project default.
+  const productHostDeviceUrl = (
+    ((e.image_meta ?? {}) as { host_device_url?: string }).host_device_url ?? ""
+  ).toString().trim();
+  const hostDeviceUrl = productHostDeviceUrl || projectHostDeviceUrl;
 
   // Pick main source image: pinned → regenerated (skip sentinel) → picked[0].
   const regen = e.regenerated_main_image && e.regenerated_main_image !== "__imported__"
@@ -3478,11 +3530,27 @@ export async function runPimVisualization(
         if (img && !galleryUrls.includes(img)) galleryUrls.push(img);
       }
     }
+    // In compatible mode, restrict accepted images to the single best-ranked
+    // source (plus pinned + manual_keep). Equivalent-source images never enter
+    // FAL as references — that's what causes fabricated branding transfer.
+    const sourceCtx = matchingMode === "compatible"
+      ? (srcRows ?? []).map((r) => {
+          const url = (r as { url?: string }).url ?? "";
+          const main = Array.isArray((r as { images?: unknown }).images)
+            ? ((r as { images: string[] }).images)
+            : [];
+          const extra = includeExtra && Array.isArray((r as { extra_images?: unknown }).extra_images)
+            ? ((r as { extra_images: string[] }).extra_images)
+            : [];
+          const score = (e.score_breakdown ?? []).find((b) => b.url === url)?.total ?? 0;
+          return { url, score, images: [...main, ...extra] };
+        })
+      : undefined;
     const { accepted } = getVisibleGallery(galleryUrls, {
       hidden_images: e.hidden_images ?? [],
       image_scores: (e.image_scores as Record<string, never>) ?? {},
       pinned_main_url: e.pinned_main_url,
-    });
+    }, sourceCtx ? { matchingMode: "compatible", sources: sourceCtx } : undefined);
     for (const u of accepted) analysisCandidates.push(u);
   }
   // Final guard: dedup + only real image URLs + reject known source-page URLs
@@ -3509,11 +3577,26 @@ export async function runPimVisualization(
     color_anchor_en?: string;
     reference_urls?: string[];
     consistency_at?: string;
+    viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+    type_reason?: string;
+    overlay_motif?: string;
+    on_product_text?: string[];
+    host_device?: { name: string } | null;
   };
   type VizRunRec = {
     phase: "analyzed" | "prompt_ready" | "rendering" | "done" | "failed";
     analysis_attempts?: number;
-    scene?: { style: string; requirements: string; source?: VizAnalysisRec["source"]; has_text?: boolean; color_anchor_en?: string };
+    scene?: {
+      style: string;
+      requirements: string;
+      source?: VizAnalysisRec["source"];
+      has_text?: boolean;
+      color_anchor_en?: string;
+      viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+      overlay_motif?: string;
+      on_product_text?: string[];
+      host_device?: { name: string } | null;
+    };
     prompt?: string;
     reference_urls?: string[];
     updated_at: string;
@@ -3565,6 +3648,10 @@ export async function runPimVisualization(
   let hasText = true;
   let colorAnchorEn = "";
   let cachedReferenceUrls: string[] | null = null;
+  let vizType: "lifestyle" | "in_use" | "feature_explainer" = "lifestyle";
+  let overlayMotif = "";
+  let onProductText: string[] = [];
+  let hostDeviceName = "";
 
   // 1) Manual overrides are never touched.
   if (cached?.manual && cached.style && cached.requirements) {
@@ -3572,6 +3659,10 @@ export async function runPimVisualization(
     hasText = cached.has_text ?? true;
     colorAnchorEn = cached.color_anchor_en ?? "";
     cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
+    vizType = cached.viz_type ?? "lifestyle";
+    overlayMotif = cached.overlay_motif ?? "";
+    onProductText = cached.on_product_text ?? [];
+    hostDeviceName = cached.host_device?.name ?? "";
     await emit(ctx, { level: "info", message: `   • używam ręcznej analizy sceny (manual override)` });
   } else if (vizRun && vizRun.scene && (vizRun.phase === "analyzed" || vizRun.phase === "prompt_ready" || vizRun.phase === "rendering")) {
     // Resume: viz_run persisted a scene from a previous tick — never re-run
@@ -3581,6 +3672,10 @@ export async function runPimVisualization(
     hasText = vizRun.scene.has_text ?? true;
     colorAnchorEn = vizRun.scene.color_anchor_en ?? "";
     cachedReferenceUrls = vizRun.reference_urls && vizRun.reference_urls.length ? vizRun.reference_urls : null;
+    vizType = vizRun.scene.viz_type ?? "lifestyle";
+    overlayMotif = vizRun.scene.overlay_motif ?? "";
+    onProductText = vizRun.scene.on_product_text ?? [];
+    hostDeviceName = vizRun.scene.host_device?.name ?? "";
     await emit(ctx, { level: "info", message: `   • wznawiam z zapisu (viz_run.${vizRun.phase})` });
   } else if (
     !forceReanalyze &&
@@ -3596,6 +3691,10 @@ export async function runPimVisualization(
     hasText = cached.has_text ?? true;
     colorAnchorEn = cached.color_anchor_en ?? "";
     cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
+    vizType = cached.viz_type ?? "lifestyle";
+    overlayMotif = cached.overlay_motif ?? "";
+    onProductText = cached.on_product_text ?? [];
+    hostDeviceName = cached.host_device?.name ?? "";
     await emit(ctx, { level: "info", message: `   • używam zapisanej analizy sceny (cache)` });
   } else if (analysisUrls.length) {
     // 3) Fresh vision analysis — max 2 attempts. On "URL did not return an
@@ -3618,6 +3717,10 @@ export async function runPimVisualization(
         analysisPl = { style: out.style, requirements: out.requirements };
         hasText = out.has_text;
         colorAnchorEn = out.color_anchor_en;
+        vizType = out.viz_type;
+        overlayMotif = out.overlay_motif;
+        onProductText = out.on_product_text;
+        hostDeviceName = out.host_device?.name ?? "";
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         // "URL did not return an image" → identify offender, mark dead,
@@ -3646,6 +3749,10 @@ export async function runPimVisualization(
           source: "vision",
           has_text: hasText,
           color_anchor_en: colorAnchorEn,
+          viz_type: vizType,
+          overlay_motif: overlayMotif,
+          on_product_text: onProductText,
+          host_device: hostDeviceName ? { name: hostDeviceName } : null,
         } : vizRun?.scene,
       });
     }
@@ -3739,6 +3846,10 @@ export async function runPimVisualization(
         color_anchor_en: colorAnchorEn,
         reference_urls: referenceUrlsForFal,
         consistency_at: new Date().toISOString(),
+        viz_type: vizType,
+        overlay_motif: overlayMotif,
+        on_product_text: onProductText,
+        host_device: hostDeviceName ? { name: hostDeviceName } : null,
       } satisfies VizAnalysisRec,
     };
     await supabaseAdmin
@@ -3758,7 +3869,41 @@ export async function runPimVisualization(
   const constraintsSuffix = analysisSource === "fallback_project" || !projectConstraintsPl
     ? ""
     : `\n\nOGRANICZENIA PROJEKTU (nadrzędne wobec sceny powyżej):\n${projectConstraintsPl}`;
-  const combinedRequirementsPl = `${perProductPl}${constraintsSuffix}`.trim();
+  // Extra rules block, always appended: viz_type semantics, on-product text
+  // policy (only what's on reference #1), host-device handling, and the
+  // feature-explainer overlay motif spec.
+  const typeRulesPl = (() => {
+    if (vizType === "feature_explainer") {
+      return [
+        "TYP WIZUALIZACJI: feature_explainer — produkt w działaniu z JEDNYM motywem grafiki nakładkowej (półprzezroczysty stożek/pole/linia/glow) w jednym kolorze akcentu.",
+        overlayMotif ? `Motyw overlayu: ${overlayMotif}.` : "",
+        "Overlay nie może zasłaniać produktu; maksymalnie JEDNA strzałka; tekst na overlayu tylko jedna krótka etykieta (max 5 znaków, np. „360°”) albo brak. Bez badge’y, bez znaków wodnych.",
+      ].filter(Boolean).join(" ");
+    }
+    if (vizType === "in_use") {
+      return "TYP WIZUALIZACJI: in_use — produkt jest bohaterem sceny w jego naturalnym kontekście użycia (instalacja / eksploatacja / montaż), nie sam packshot.";
+    }
+    return "TYP WIZUALIZACJI: lifestyle — realistyczna scena użytkowa z produktem jako bohaterem, naturalne rekwizyty i światło.";
+  })();
+
+  const onTextRulesPl = onProductText.length
+    ? `NAPISY NA PRODUKCIE: odwzoruj DOKŁADNIE i wyłącznie te napisy widoczne na referencji nr 1: ${onProductText.map((s) => `"${s}"`).join(", ")}. Nie wolno dodać żadnego innego tekstu, kodu, marki ani logo — nawet jeśli pojawia się na innych zdjęciach referencyjnych.`
+    : `NAPISY NA PRODUKCIE: referencja nr 1 nie zawiera żadnych napisów na produkcie — powierzchnia produktu musi pozostać BEZ TEKSTU. Nie dodawaj kodów, nazw marki, numerów modeli ani logo — nawet gdy pojawiają się na innych zdjęciach.`;
+
+  const hostRulesPl = (() => {
+    if (!hostDeviceName && !hostDeviceUrl) return "";
+    if (hostDeviceUrl) {
+      return `URZĄDZENIE DOCELOWE: pokaż produkt w kontekście urządzenia-gościa widocznego na dodatkowej referencji „environment reference” (ostatnie zdjęcie na wejściu). Urządzenie musi wyglądać dokładnie tak jak na tej referencji — BEZ wymyślania modelu, kolorów ani logo.${hostDeviceName ? ` Nazwa: „${hostDeviceName}”.` : ""} PRODUKT (referencja nr 1) jest głównym bohaterem kadru; urządzenie stanowi tylko tło/kontekst.`;
+    }
+    // No image supplied — keep host generic to avoid confabulation.
+    return `URZĄDZENIE DOCELOWE: produkt jest akcesorium do „${hostDeviceName}”, ale użytkownik nie dostarczył zdjęcia urządzenia. NIE wymyślaj realnego modelu — pokaż urządzenie GENERYCZNIE, częściowo poza kadrem, w miękkim rozmyciu (płytka głębia ostrości), tak aby nigdy nie sugerować konkretnej marki/modelu. Produkt (referencja nr 1) musi być ostry i pierwszoplanowy.`;
+  })();
+
+  const extraRulesPl = [typeRulesPl, onTextRulesPl, hostRulesPl].filter(Boolean).join("\n\n");
+  const combinedRequirementsPl = [
+    `${perProductPl}${constraintsSuffix}`.trim(),
+    extraRulesPl,
+  ].filter(Boolean).join("\n\n").trim();
 
   if (!lifePrompt) {
     // Resume from viz_run when the job payload was cleared but viz_run still
@@ -3802,8 +3947,13 @@ export async function runPimVisualization(
   // e.g. no analysisUrls at all — keeps behaviour parity with the old code).
   const fallbackSingleRef = mainUrl;
   // Effective references for FAL image_urls (top reference first).
-  const effectiveRefUrls: string[] =
-    referenceUrlsForFal.length ? referenceUrlsForFal : [fallbackSingleRef];
+  const baseRefs = referenceUrlsForFal.length ? referenceUrlsForFal : [fallbackSingleRef];
+  // Host device reference (project default or per-product override) becomes
+  // the LAST reference — the extraRulesPl block above tells the model this is
+  // the environment reference, not the product.
+  const effectiveRefUrls: string[] = hostDeviceUrl && /^https?:\/\//i.test(hostDeviceUrl)
+    ? [...baseRefs, hostDeviceUrl]
+    : baseRefs;
 
   // Upload a FAL result to our bucket so we can persist it and run QC.
   const uploadGalleryCandidate = async (url: string, slot: number, attempt: number): Promise<string> => {
@@ -4078,7 +4228,7 @@ export async function runPimVisualization(
         } catch (qcErr) {
           const msg = qcErr instanceof Error ? qcErr.message : String(qcErr);
           await emit(ctx, { level: "warn", message: `   ⚠ viz QC skipped (${msg.slice(0, 160)})` });
-          qc = { product_intact: true, product_visible: true, issues: [] };
+          qc = { product_intact: true, product_visible: true, fabricated_text: false, issues: [] };
         }
         const score = visualizationQcScore(qc);
         const passed = visualizationQcPassed(qc);
