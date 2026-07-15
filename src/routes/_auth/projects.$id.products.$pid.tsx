@@ -2073,6 +2073,15 @@ function VizAnalysisPanel({
     overlay_motif?: string;
     host_device?: { name?: string } | null;
     host_device_url?: string;
+    hide_product_text?: boolean;
+    count?: number;
+    variants?: Array<{
+      style: string;
+      requirements: string;
+      viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+      overlay_motif?: string;
+      manual?: boolean;
+    }>;
   };
   onSave: (patch: {
     style: string;
@@ -2081,6 +2090,14 @@ function VizAnalysisPanel({
     overlay_motif: string;
     host_device_name: string;
     host_device_url: string;
+    hide_product_text: boolean;
+    variants?: Array<{
+      style: string;
+      requirements: string;
+      viz_type: "lifestyle" | "in_use" | "feature_explainer";
+      overlay_motif: string;
+      manual: boolean;
+    }>;
   }) => Promise<void>;
 }) {
   const [style, setStyle] = useState((viz.style ?? "").trim());
@@ -2091,6 +2108,22 @@ function VizAnalysisPanel({
   const [overlayMotif, setOverlayMotif] = useState((viz.overlay_motif ?? "").trim());
   const [hostDeviceName, setHostDeviceName] = useState((viz.host_device?.name ?? "").trim());
   const [hostDeviceUrl, setHostDeviceUrl] = useState((viz.host_device_url ?? "").trim());
+  const [hideProductText, setHideProductText] = useState<boolean>(viz.hide_product_text === true);
+  type VariantDraft = {
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+    manual: boolean;
+  };
+  const initialVariants: VariantDraft[] = (viz.variants ?? []).map((v) => ({
+    style: (v.style ?? "").trim(),
+    requirements: (v.requirements ?? "").trim(),
+    viz_type: v.viz_type ?? "lifestyle",
+    overlay_motif: (v.overlay_motif ?? "").trim(),
+    manual: v.manual === true,
+  }));
+  const [variants, setVariants] = useState<VariantDraft[]>(initialVariants);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -2100,14 +2133,24 @@ function VizAnalysisPanel({
     setOverlayMotif((viz.overlay_motif ?? "").trim());
     setHostDeviceName((viz.host_device?.name ?? "").trim());
     setHostDeviceUrl((viz.host_device_url ?? "").trim());
-  }, [viz.style, viz.requirements, viz.viz_type, viz.overlay_motif, viz.host_device?.name, viz.host_device_url]);
+    setHideProductText(viz.hide_product_text === true);
+    setVariants((viz.variants ?? []).map((v) => ({
+      style: (v.style ?? "").trim(),
+      requirements: (v.requirements ?? "").trim(),
+      viz_type: v.viz_type ?? "lifestyle",
+      overlay_motif: (v.overlay_motif ?? "").trim(),
+      manual: v.manual === true,
+    })));
+  }, [viz.style, viz.requirements, viz.viz_type, viz.overlay_motif, viz.host_device?.name, viz.host_device_url, viz.hide_product_text, viz.variants]);
   const dirty =
     style.trim() !== (viz.style ?? "").trim() ||
     requirements.trim() !== (viz.requirements ?? "").trim() ||
     vizType !== (viz.viz_type ?? "lifestyle") ||
     overlayMotif.trim() !== (viz.overlay_motif ?? "").trim() ||
     hostDeviceName.trim() !== (viz.host_device?.name ?? "").trim() ||
-    hostDeviceUrl.trim() !== (viz.host_device_url ?? "").trim();
+    hostDeviceUrl.trim() !== (viz.host_device_url ?? "").trim() ||
+    hideProductText !== (viz.hide_product_text === true) ||
+    JSON.stringify(variants) !== JSON.stringify(initialVariants);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className="rounded border bg-muted/20 p-3 space-y-2">
@@ -2116,6 +2159,9 @@ function VizAnalysisPanel({
             <Sparkles className="h-4 w-4" /> Scena AI dla tego produktu
             {viz.manual && (
               <Badge variant="outline" className="text-[10px]">Manual</Badge>
+            )}
+            {viz.count && viz.count > 1 && (
+              <Badge variant="secondary" className="text-[10px]">{viz.count} wariantów</Badge>
             )}
           </p>
           <CollapsibleTrigger asChild>
@@ -2129,9 +2175,24 @@ function VizAnalysisPanel({
           <div className="text-[11px] text-muted-foreground space-y-0.5">
             <div className="line-clamp-2"><b>Scena:</b> {viz.style || "—"}</div>
             <div className="line-clamp-2"><b>Wymagania:</b> {viz.requirements || "—"}</div>
+            {hideProductText && <div className="text-amber-700"><b>Tryb bez napisów</b> (klient sprzedaje wersję bez brandingu)</div>}
           </div>
         )}
         <CollapsibleContent className="space-y-2">
+          <label className="flex items-start gap-2 rounded border bg-background/60 p-2 text-xs">
+            <input
+              type="checkbox"
+              checked={hideProductText}
+              onChange={(e) => setHideProductText(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div>
+              <div className="font-medium">Ukryj nadruki na produkcie</div>
+              <div className="text-muted-foreground">
+                Włącz gdy klient sprzedaje wersję bez brandingu — powierzchnia produktu na wizualizacji będzie bez napisów/logo, niezależnie od referencji.
+              </div>
+            </div>
+          </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="text-[11px] font-medium text-muted-foreground">Typ wizualizacji</label>
@@ -2181,6 +2242,67 @@ function VizAnalysisPanel({
             <label className="text-[11px] font-medium text-muted-foreground">Wymagania techniczne</label>
             <Textarea rows={3} value={requirements} onChange={(e) => setRequirements(e.target.value)} />
           </div>
+          {variants.length > 1 && (
+            <div className="space-y-2 border-t pt-2">
+              <p className="text-[11px] font-medium text-muted-foreground">Warianty scen (używane przy generowaniu wielu wizualizacji)</p>
+              {variants.map((v, i) => (
+                <div key={i} className="rounded border bg-background/40 p-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium">Wariant {i + 1}</span>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1 text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={v.manual === true}
+                          onChange={(e) => {
+                            setVariants((prev) => prev.map((x, k) => k === i ? { ...x, manual: e.target.checked } : x));
+                          }}
+                        />
+                        {v.manual ? "Manual" : "Auto"}
+                      </label>
+                      <select
+                        value={v.viz_type}
+                        onChange={(e) => {
+                          const nv = e.target.value as VariantDraft["viz_type"];
+                          setVariants((prev) => prev.map((x, k) => k === i ? { ...x, viz_type: nv } : x));
+                        }}
+                        className="h-7 rounded-md border bg-background px-1.5 text-[11px]"
+                      >
+                        <option value="lifestyle">lifestyle</option>
+                        <option value="in_use">in_use</option>
+                        <option value="feature_explainer">feature_explainer</option>
+                      </select>
+                    </div>
+                  </div>
+                  <Textarea
+                    rows={2}
+                    value={v.style}
+                    onChange={(e) => setVariants((prev) => prev.map((x, k) => k === i ? { ...x, style: e.target.value } : x))}
+                    placeholder="Scena"
+                    className="text-xs"
+                  />
+                  <Textarea
+                    rows={3}
+                    value={v.requirements}
+                    onChange={(e) => setVariants((prev) => prev.map((x, k) => k === i ? { ...x, requirements: e.target.value } : x))}
+                    placeholder="Wymagania"
+                    className="text-xs"
+                  />
+                  {v.viz_type === "feature_explainer" && (
+                    <Input
+                      value={v.overlay_motif}
+                      onChange={(e) => setVariants((prev) => prev.map((x, k) => k === i ? { ...x, overlay_motif: e.target.value } : x))}
+                      placeholder="Motyw overlayu"
+                      className="h-7 text-xs"
+                    />
+                  )}
+                </div>
+              ))}
+              <p className="text-[10px] text-muted-foreground">
+                Warianty z zaznaczonym „Manual" nie zostaną nadpisane przy ponownej analizie sceny.
+              </p>
+            </div>
+          )}
           <div className="flex justify-end">
             <Button
               size="sm"
@@ -2195,6 +2317,14 @@ function VizAnalysisPanel({
                     overlay_motif: overlayMotif.trim(),
                     host_device_name: hostDeviceName.trim(),
                     host_device_url: hostDeviceUrl.trim(),
+                    hide_product_text: hideProductText,
+                    variants: variants.length ? variants.map((v) => ({
+                      style: v.style.trim(),
+                      requirements: v.requirements.trim(),
+                      viz_type: v.viz_type,
+                      overlay_motif: v.overlay_motif.trim(),
+                      manual: v.manual,
+                    })) : undefined,
                   });
                 } catch (e) {
                   toast.error(friendlyError(e, "Nie udało się zapisać"));
