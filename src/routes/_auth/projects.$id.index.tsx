@@ -2292,7 +2292,13 @@ function SettingsCard({
           </div>
           {searchProvider === "apify" || searchProvider === "both" ? (
             <div className="space-y-2 pt-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  className="h-8 max-w-xs"
+                  value={apifyTestQuery}
+                  onChange={(e) => setApifyTestQuery(e.target.value)}
+                  placeholder="np. 5904905976918 lub nazwa produktu"
+                />
                 <Button size="sm" variant="secondary" onClick={runApifyTest} disabled={apifyTest.state === "loading"}>
                   {apifyTest.state === "loading" ? "Testuję…" : "Test połączenia Apify"}
                 </Button>
@@ -2301,9 +2307,32 @@ function SettingsCard({
                 ) : apifyTest.state === "err" ? (
                   <span className="text-xs text-destructive">Błąd: {apifyTest.msg}</span>
                 ) : (
-                  <span className="text-xs text-muted-foreground">Uruchamia realne zapytanie do actor-a i pokazuje 5 pierwszych wyników.</span>
+                  <span className="text-xs text-muted-foreground">Uruchamia realne zapytanie do actor-a. Dozwolone są też zapytania czysto numeryczne (EAN).</span>
                 )}
               </div>
+              {(apifyTest.state === "ok" || apifyTest.state === "err") && apifyTest.keyword ? (
+                <div className="rounded border bg-muted/40 p-2 text-xs space-y-1">
+                  <div>
+                    Zapytanie: <code className="font-mono">{apifyTest.keyword}</code>
+                    {apifyTest.isNumeric ? <span className="ml-1 text-amber-600">[numeryczne]</span> : null}
+                  </div>
+                  <div>Organic count: <span className="font-mono">{apifyTest.count ?? 0}</span></div>
+                  {apifyTest.inputJson ? (
+                    <div>
+                      Input:{" "}
+                      <code className="font-mono break-all">{apifyTest.inputJson}</code>
+                    </div>
+                  ) : null}
+                  {apifyTest.rawSample ? (
+                    <details>
+                      <summary className="cursor-pointer text-muted-foreground">Surowa odpowiedź actor-a (pusty numeric — do 4 KB)</summary>
+                      <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[10px] font-mono">
+                        {apifyTest.rawSample}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
               {apifyTest.state === "ok" && apifyTest.results && apifyTest.results.length > 0 ? (
                 <ol className="list-decimal pl-5 space-y-1 text-xs">
                   {apifyTest.results.map((r, i) => (
