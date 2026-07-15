@@ -154,11 +154,21 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       // First filter by AI verdicts (accepted only), then apply size/pinned
       // ordering identical to the editor. Rejected/unsure never appear in
       // the list thumbnails or their overflow counter.
+      const matchingMode = ((((p as { matching_mode?: string | null }).matching_mode) ?? "strict") as "strict" | "compatible");
+      const scoreBreakdown = (((e as { score_breakdown?: unknown } | undefined)?.score_breakdown) ?? []) as Array<{
+        url: string; total?: number;
+      }>;
+      const scoreByUrl = new Map(scoreBreakdown.map((b) => [b.url, b.total ?? 0]));
+      const compatSources = picked.map((u) => ({
+        url: u,
+        score: scoreByUrl.get(u) ?? 0,
+        images: imgMap.get(u) ?? [],
+      }));
       const { accepted, unsure, rejected } = getVisibleGallery(allFromSources, {
         hidden_images: Array.from(hidden),
         image_scores: scores,
         pinned_main_url: pinned,
-      });
+      }, { matchingMode, sources: compatSources });
       const images = pickThumbsForList(accepted, meta, hidden, pinned, 12);
       const acceptedTotal = accepted.length;
       return {
