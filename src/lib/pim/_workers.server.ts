@@ -3443,6 +3443,7 @@ export async function runPimVisualization(
     requirements: projectRequirementsPl,
     client_guidelines: clientGuidelines,
     host_device_url: projectHostDeviceUrl,
+    count,
   }));
 
   const { data: enrichment } = await supabaseAdmin
@@ -3630,6 +3631,15 @@ export async function runPimVisualization(
     overlay_motif?: string;
     on_product_text?: string[];
     host_device?: { name: string } | null;
+    variants?: Array<{
+      style: string;
+      requirements: string;
+      viz_type: "lifestyle" | "in_use" | "feature_explainer";
+      overlay_motif: string;
+      manual?: boolean;
+    }>;
+    count?: number;
+    hide_product_text?: boolean;
   };
   type VizRunRec = {
     phase: "analyzed" | "prompt_ready" | "rendering" | "done" | "failed";
@@ -3651,6 +3661,7 @@ export async function runPimVisualization(
     job_id?: string | null;
     source_urls_hash?: string;
     constraints_hash?: string;
+    variant_prompts?: Array<string | null>;
   };
   const existingMeta = (e.image_meta ?? {}) as Record<string, unknown>;
   const cached = existingMeta.viz_analysis as VizAnalysisRec | undefined;
