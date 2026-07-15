@@ -1192,15 +1192,28 @@ function ProductDetail() {
                 at?: string;
                 manual?: boolean;
                 source?: string;
+                viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+                overlay_motif?: string;
+                host_device?: { name?: string } | null;
               } }).viz_analysis) ?? null;
               if (!viz) return null;
+              const hostDeviceUrl = ((imageMeta as unknown as { host_device_url?: string }).host_device_url ?? "") as string;
               return (
                 <VizAnalysisPanel
                   productId={pid}
-                  viz={viz}
-                  onSave={async (style, requirements) => {
+                  viz={{ ...viz, host_device_url: hostDeviceUrl }}
+                  onSave={async (patch) => {
                     await saveVizFn({
-                      data: { productId: pid, style, requirements, manual: true },
+                      data: {
+                        productId: pid,
+                        style: patch.style,
+                        requirements: patch.requirements,
+                        manual: true,
+                        viz_type: patch.viz_type,
+                        overlay_motif: patch.overlay_motif,
+                        host_device_name: patch.host_device_name,
+                        host_device_url: patch.host_device_url,
+                      },
                     });
                     toast.success("Zapisano manualne nadpisanie sceny");
                     invalidate();
