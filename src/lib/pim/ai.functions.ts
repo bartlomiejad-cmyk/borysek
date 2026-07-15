@@ -46,6 +46,45 @@ const sanitize = (text: string | null, blacklist: string[]): string | null => {
   return out.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 };
 
+/**
+ * Model sometimes returns `features` as an array of strings like "Kolor: biały"
+ * instead of `{key, value}` objects. Normalize before Zod validation.
+ */
+const coerceFeatures = (input: unknown): Array<{ key: string; value: string }> => {
+  if (!Array.isArray(input)) return [];
+  const out: Array<{ key: string; value: string }> = [];
+  let mutated = false;
+  for (const item of input) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const o = item as { key?: unknown; value?: unknown };
+      const k = typeof o.key === "string" ? o.key.trim() : "";
+      const v = typeof o.value === "string" ? o.value.trim() : "";
+      if (k && v) out.push({ key: k.slice(0, 200), value: v.slice(0, 2000) });
+      else mutated = true;
+      continue;
+    }
+    if (typeof item === "string") {
+      mutated = true;
+      const s = item.trim();
+      if (!s) continue;
+      const idx = s.indexOf(":");
+      if (idx > 0) {
+        const k = s.slice(0, idx).trim();
+        const v = s.slice(idx + 1).trim();
+        if (k && v) out.push({ key: k.slice(0, 200), value: v.slice(0, 2000) });
+      } else {
+        out.push({ key: "Cecha", value: s.slice(0, 2000) });
+      }
+      continue;
+    }
+    mutated = true;
+  }
+  if (mutated) {
+    console.warn("[golden] features coerced", { before: input, after: out });
+  }
+  return out.slice(0, 60);
+};
+
 const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: string) => {
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -75,6 +114,11 @@ const callGateway = async (apiKey: string, systemPrompt: string, userPrompt: str
     parsed = JSON.parse(content);
   } catch {
     throw new Error("Model did not return valid JSON");
+  }
+  if (parsed && typeof parsed === "object") {
+    (parsed as { features?: unknown }).features = coerceFeatures(
+      (parsed as { features?: unknown }).features,
+    );
   }
   const schema = z.object({
     name: z.string().min(1).max(500),
@@ -374,6 +418,11 @@ export const generateFeatures = createServerFn({ method: "POST" })
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ]);
+    if (parsed && typeof parsed === "object") {
+      (parsed as { features?: unknown }).features = coerceFeatures(
+        (parsed as { features?: unknown }).features,
+      );
+    }
     const out = FeaturesSchema.parse(parsed);
 
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
