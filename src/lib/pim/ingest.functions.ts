@@ -232,7 +232,7 @@ export const updateSourceProductsFromCsv = createServerFn({ method: "POST" })
 
     const byKey = new Map<string, { id: string; ext_id: string | null; nazwa: string | null; kod: string | null; ean: string | null; category: string | null }>();
     for (const p of products ?? []) {
-      const k = normalizeKey(data.keyField as RemapField, (p as Record<string, string | null>)[data.keyField]);
+      const k = normalizeKey(data.keyField, (p as Record<string, string | null>)[data.keyField]);
       if (k && !byKey.has(k)) byKey.set(k, p);
     }
 
