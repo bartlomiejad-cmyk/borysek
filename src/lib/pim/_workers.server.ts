@@ -4166,10 +4166,12 @@ export async function runPimVisualization(
   // failed_count/last_error reflect reality. Otherwise the user sees a
   // "COMPLETED" job with no visualizations and no explanation.
   if (added === 0) {
+    await persistVizRun({ phase: "failed" });
     throw new Error(
       `FAL nie wygenerował żadnej wizualizacji dla „${label}". ${lastFalErr ? `Ostatni błąd: ${lastFalErr.slice(0, 200)}` : ""}`.trim(),
     );
   }
+  await persistVizRun({ phase: "done" });
   await advancePipelineStatus(supabaseAdmin as never, (product as { id: string }).id, "VISUALS_READY");
   return { complete: true };
 }
