@@ -4385,6 +4385,15 @@ export async function runPimImageVerify(
         // If we didn't get orig dims, at least record the upgraded size as authoritative.
         if (!origDim) { patch.w = bigDim.w; patch.h = bigDim.h; }
       }
+      // Dead-image detection: neither the original nor an upgraded variant
+      // returned parseable image bytes → mark dead (unless manual_keep).
+      const isManual = (cur as { manual_keep?: boolean }).manual_keep === true;
+      if (!origDim && !bigDim && !isManual) {
+        patch.dead = true;
+      } else if (origDim || bigDim) {
+        // If a probe now succeeds, clear a stale dead marker.
+        if ((cur as { dead?: boolean }).dead === true) patch.dead = false;
+      }
       merged[u] = patch;
     }));
   } catch (e) {
