@@ -3420,11 +3420,12 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw, product_notes, manual_lock, matching_mode")
+    .select("id, project_id, nazwa, category, raw, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
   const productName = ((product as { nazwa?: string | null }).nazwa ?? "").trim();
+  const productCategory = ((product as { category?: string | null }).category ?? "").trim();
   const productDesc = (((product as { raw?: { opis?: string | null; description?: string | null } | null }).raw?.opis
     ?? (product as { raw?: { description?: string | null } | null }).raw?.description
     ?? "") as string).trim();
