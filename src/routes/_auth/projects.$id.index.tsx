@@ -2292,6 +2292,37 @@ function SettingsCard({
           ) : null}
         </div>
         <div className="pt-4 border-t space-y-3">
+          <Label className="text-sm font-medium">Budżet scrape'ów</Label>
+          <div className="grid sm:grid-cols-2 gap-3 items-end">
+            <div>
+              <Label className="text-xs">Limit scrape na produkt</Label>
+              <Input
+                type="number"
+                min={1}
+                max={12}
+                value={scrapeCap}
+                onChange={(e) => {
+                  const v = Math.max(1, Math.min(12, Math.floor(Number(e.target.value) || 6)));
+                  setScrapeCap(v);
+                }}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Twarda granica prób scrape na produkt (1–12). Pętla kończy się wcześniej po 3 wnoszących źródłach.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="auto-rescrape"
+                checked={autoRescrape}
+                onCheckedChange={setAutoRescrape}
+              />
+              <Label htmlFor="auto-rescrape" className="cursor-pointer text-sm">
+                Automatyczne doscrapowanie (rescrape po dopasowaniu)
+              </Label>
+            </div>
+          </div>
+        </div>
+        <div className="pt-4 border-t space-y-3">
           <div className="flex items-center gap-3">
             <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
             <Label htmlFor="extra-imgs" className="cursor-pointer">
