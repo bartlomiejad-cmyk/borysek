@@ -927,6 +927,36 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ]);
+    // Model sometimes returns `features` as strings ("Kolor: biały") instead
+    // of {key,value} objects. Coerce before Zod validation so a stylistic
+    // shape mismatch does not fail the whole generation.
+    if (parsed && typeof parsed === "object") {
+      const p = parsed as { features?: unknown };
+      if (Array.isArray(p.features)) {
+        p.features = p.features
+          .map((f: unknown) => {
+            if (f && typeof f === "object" && !Array.isArray(f)) {
+              const o = f as { key?: unknown; value?: unknown };
+              const k = typeof o.key === "string" ? o.key.trim() : "";
+              const v = typeof o.value === "string" ? o.value.trim() : "";
+              return k && v ? { key: k.slice(0, 200), value: v.slice(0, 2000) } : null;
+            }
+            if (typeof f === "string") {
+              const s = f.trim();
+              if (!s) return null;
+              const idx = s.indexOf(":");
+              if (idx > 0) {
+                const k = s.slice(0, idx).trim();
+                const v = s.slice(idx + 1).trim();
+                if (k && v) return { key: k.slice(0, 200), value: v.slice(0, 2000) };
+              }
+              return { key: "Cecha", value: s.slice(0, 2000) };
+            }
+            return null;
+          })
+          .filter((x: unknown) => x !== null);
+      }
+    }
     const out = GoldenSchema.parse(parsed);
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
     const rawName = sanitize(out.name, blacklist) ?? "";
