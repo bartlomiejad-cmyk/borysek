@@ -3557,6 +3557,12 @@ export async function runPimVisualization(
         }
       }
     }
+  } else {
+    await emit(ctx, {
+      level: "warn",
+      message: `   ⚠ brak zdjęć źródłowych do analizy sceny, pomijam Gemini Vision`,
+    });
+    hasText = false;
   }
 
   // 4) Fallbacks when vision analysis failed or no images available.
