@@ -168,6 +168,7 @@ export const GOLDEN_SEO_SYSTEM_PROMPT = [
   "",
   "## FEATURES (features)",
   "- Lista konkretnych cech technicznych (max 60), klucz/wartość. Klucze po polsku, krótkie.",
+  "- features MUSI być tablicą OBIEKTÓW {\"key\": string, \"value\": string} — NIGDY stringów typu \"Klucz: wartość\".",
   "- Preferowane klucze (gdy aplikowalne, dla spójności z schema.org/Product): Marka, Model, Materiał, Kolor, Wymiary, Waga, Pojemność, Moc, Zasilanie, Wydajność, Gwarancja, Kraj produkcji, EAN, Rozmiar, Płeć, Wiek, Przeznaczenie.",
   "- Wartości konkretne, bez przymiotników marketingowych.",
   "- Pomiń cechy nieobecne w źródłach. Pomiń ceny, dostępność, nazwy sklepów. Jeśli brak danych: [].",
