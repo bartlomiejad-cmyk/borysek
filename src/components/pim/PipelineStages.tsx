@@ -117,6 +117,7 @@ export function PipelineStages({
   onPrimaryAction,
   onShowPending,
   onRunAudit,
+  onShowExcluded,
 }: {
   summary: PipelineSummary;
   onPrimaryAction: (stage: Exclude<StageKey, "NONE">) => void;
@@ -127,6 +128,7 @@ export function PipelineStages({
    * Review "next step" strip switches to prompting an audit run first.
    */
   onRunAudit?: () => void;
+  onShowExcluded?: () => void;
 }) {
   // Determine "next step": the earliest stage with pending work. Later stages
   // may have more items, but they depend on earlier blockers being cleared
@@ -152,6 +154,23 @@ export function PipelineStages({
 
   return (
     <section className="mb-6">
+      {(summary.excluded_count ?? 0) > 0 && (
+        <div className="mb-2 text-xs text-muted-foreground">
+          · {summary.excluded_count} poza procesem
+          {onShowExcluded && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="text-primary underline underline-offset-2 hover:no-underline"
+                onClick={() => onShowExcluded()}
+              >
+                pokaż wykluczone
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         {STAGES.map((stg) => {
           const isBest = best?.key === stg.key;

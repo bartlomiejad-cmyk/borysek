@@ -20,6 +20,7 @@ export type PipelineSummary = {
   review_approved: number; // APPROVED
   audit_eligible: number;    // GOLDEN_READY + VISUALS_READY
   audit_completed: number;   // enrichments.audit is not null within eligible set
+  excluded_count: number;    // products flagged out of pipeline (auto or manual)
 };
 
 export const getPipelineSummary = createServerFn({ method: "GET" })
@@ -30,7 +31,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
     const [{ data: sp }, { data: en }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, pipeline_status, review_status")
+        .select("id, pipeline_status, review_status, excluded")
         .eq("project_id", data.projectId)
         .limit(20000),
       supabase
@@ -39,9 +40,9 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
         .eq("project_id", data.projectId)
         .limit(20000),
     ]);
-    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null }>;
+    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null; excluded?: boolean | null }>;
     const s: PipelineSummary = {
-      total: rows.length,
+      total: 0,
       imported: 0,
       sources_found: 0,
       matched: 0,
@@ -54,9 +55,12 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
       review_approved: 0,
       audit_eligible: 0,
       audit_completed: 0,
+      excluded_count: 0,
     };
     const eligibleIds = new Set<string>();
     for (const r of rows) {
+      if (r.excluded) { s.excluded_count++; continue; }
+      s.total++;
       const ps = r.pipeline_status ?? "IMPORTED";
       if (ps === "IMPORTED") s.imported++;
       else if (ps === "SOURCES_FOUND") s.sources_found++;
@@ -90,7 +94,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode")
+      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode, excluded, excluded_reason")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);

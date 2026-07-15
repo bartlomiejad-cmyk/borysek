@@ -213,6 +213,45 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
     const postShift =
       POST_SHIFT_KINDS.has(job.kind) || job.kind === "PIM_VISUALIZATIONS";
     const shiftBeforeProcessing = !postShift;
+
+    // Skip products flagged as excluded from the pipeline for every job
+    // kind EXCEPT discovery (an explicit discovery re-run is how the
+    // exclusion is meant to be cleared). Excluded items are dropped from
+    // the queue and counted as skipped (not failed) so terminal-state
+    // math still balances.
+    if (job.kind !== "FIRECRAWL_DISCOVERY") {
+      const { data: prod } = await supabaseAdmin
+        .from("source_products" as never)
+        .select("excluded")
+        .eq("id", pid)
+        .maybeSingle();
+      if ((prod as { excluded?: boolean } | null)?.excluded) {
+        remaining.shift();
+        completedItems.add(pid); // counts against total so job can complete
+        payload.completed_items = Array.from(completedItems);
+        processed++;
+        try {
+          await supabaseAdmin.from("bulk_job_events" as never).insert({
+            job_id: job.id,
+            project_id: job.project_id,
+            source_product_id: pid,
+            level: "info",
+            message: "⏭ Pominięto — produkt poza procesem (wykluczony)",
+            details: {} as never,
+          } as never);
+        } catch { /* logging must never break the worker */ }
+        await supabaseAdmin
+          .from("bulk_jobs" as never)
+          .update({
+            items: remaining as never,
+            processed_count: job.processed_count + processed,
+            payload: payload as never,
+          } as never)
+          .eq("id", job.id);
+        continue;
+      }
+    }
+
     if (shiftBeforeProcessing) {
       remaining.shift();
     }
