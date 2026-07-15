@@ -86,6 +86,7 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const probeAliveFn = useServerFn(probeVisibleImagesAlive);
   const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const auditFn = useServerFn(runAuditForProduct);
