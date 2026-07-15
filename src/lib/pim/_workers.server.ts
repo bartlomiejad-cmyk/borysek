@@ -4078,7 +4078,7 @@ export async function runPimVisualization(
         } catch (qcErr) {
           const msg = qcErr instanceof Error ? qcErr.message : String(qcErr);
           await emit(ctx, { level: "warn", message: `   ⚠ viz QC skipped (${msg.slice(0, 160)})` });
-          qc = { product_intact: true, product_visible: true, issues: [] };
+          qc = { product_intact: true, product_visible: true, fabricated_text: false, issues: [] };
         }
         const score = visualizationQcScore(qc);
         const passed = visualizationQcPassed(qc);
