@@ -21,13 +21,15 @@ export const exportProject = createServerFn({ method: "GET" })
       .object({
         projectId: z.string().uuid(),
         approvedOnly: z.boolean().optional(),
-        mode: z.enum(["client", "qc"]).optional(),
+        mode: z.enum(["client", "qc", "delivery"]).optional(),
+        hostImages: z.boolean().optional(),
       })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const mode = data.mode ?? "client";
+    const hostImages = mode === "delivery" && (data.hostImages ?? true);
 
     const { data: project } = await supabase
       .from("projects")
