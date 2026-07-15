@@ -418,6 +418,11 @@ export const generateFeatures = createServerFn({ method: "POST" })
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ]);
+    if (parsed && typeof parsed === "object") {
+      (parsed as { features?: unknown }).features = coerceFeatures(
+        (parsed as { features?: unknown }).features,
+      );
+    }
     const out = FeaturesSchema.parse(parsed);
 
     const sanitizeStr = (s: string) => sanitize(s, blacklist) ?? s;
