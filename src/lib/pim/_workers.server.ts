@@ -162,6 +162,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
   featuresText: string;
   imageUrls: string[]; // main first, max 4, must be publicly fetchable
   projectConstraintsPl?: string; // optional PL text; overrides scene choices
+  count?: number; // desired variant count (>=1). Result contains variants[].
 }): Promise<{
   style: string;
   requirements: string;
@@ -173,24 +174,37 @@ export async function analyzeVisualizationSceneForProduct(args: {
   overlay_motif: string;
   on_product_text: string[];
   host_device: { name: string } | null;
+  variants: Array<{
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+  }>;
 }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
   const urls = args.imageUrls.filter(Boolean).slice(0, 4);
   if (!urls.length) throw new Error("Brak zdjęć do analizy");
+  const count = Math.max(1, Math.min(8, Math.floor(args.count ?? 1)));
 
   const system = [
     "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
     "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
     "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
-    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"...", "viz_type":"lifestyle|in_use|feature_explainer", "type_reason":"...", "overlay_motif":"...", "on_product_text":["..."], "host_device": {"name":"..."} | null }.',
-    "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
-    "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    `Zwróć wyłącznie JSON: {"has_text": boolean, "color_anchor_en":"...", "on_product_text":["..."], "host_device": {"name":"..."} | null, "variants": [ { "style":"...", "requirements":"...", "viz_type":"lifestyle|in_use|feature_explainer", "type_reason":"...", "overlay_motif":"..." } ] }.`,
+    `- variants: TABLICA o DOKŁADNIE ${count} pozycji${count === 1 ? "" : ", każdy wpis to inna scena/plan wizualizacji"}.`,
+    ...(count > 1
+      ? [
+          "- REGUŁA RÓŻNORODNOŚCI: Każdy wariant musi różnić się co najmniej DWOMA z: otoczenie/lokalizacja, typ ujęcia (in_use / lifestyle / feature_explainer / detal makro), kąt i odległość kamery, obecność dłoni/osoby, pora dnia i charakter światła. Warianty uporządkuj od najbardziej uniwersalnego do najbardziej kreatywnego. Nie powtarzaj tej samej sceny w innym oświetleniu.",
+        ]
+      : []),
+    "- variants[i].style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
+    "- variants[i].requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    "- variants[i].viz_type: 'lifestyle' dla produktów konsumenckich/dekoracyjnych (mieszkanie, kuchnia, ogród, ubranie); 'in_use' dla części/akcesoriów/eksploatacji, które działają wewnątrz/na urządzeniu-goście (filtry, wkłady, końcówki, ostrza, worki); 'feature_explainer' dla urządzeń technicznych z jedną wyraźną funkcją (zasięg, pole działania, przepływ, kierunek pracy).",
+    "- variants[i].type_reason (≤120 znaków, PL): krótkie uzasadnienie viz_type dla tego wariantu.",
+    "- variants[i].overlay_motif (≤80 znaków, PL): TYLKO gdy viz_type=feature_explainer. Jeden motyw grafiki nakładkowej ilustrującej funkcję. Dla innych viz_type: pusty string.",
     '- has_text: true jeśli na produkcie widać czytelne napisy/logo/etykiety, false gdy produkt jest "gładki" (np. jednokolorowa taśma, folia, karton bez druku).',
     '- color_anchor_en (60–180 znaków, PO ANGIELSKU): konkretne, nazwane kolory najważniejszych powierzchni produktu i wnętrza/rdzenia (np. "outer wound surface uniformly bright green, side face green, core light beige/white"). Kluczowe zwłaszcza dla produktów bez tekstu — zastępuje ogólne "preserve colours".',
-    "- viz_type: 'lifestyle' dla produktów konsumenckich/dekoracyjnych (mieszkanie, kuchnia, ogród, ubranie); 'in_use' dla części/akcesoriów/eksploatacji, które działają wewnątrz/na urządzeniu-goście (filtry, wkłady, końcówki, ostrza, worki); 'feature_explainer' dla urządzeń technicznych z jedną wyraźną funkcją (zasięg, pole działania, przepływ, kierunek pracy).",
-    "- type_reason (≤120 znaków, PL): krótkie uzasadnienie wyboru viz_type.",
-    '- overlay_motif (≤80 znaków, PL): TYLKO gdy viz_type=feature_explainer. Jeden motyw grafiki nakładkowej ilustrującej funkcję (np. "półprzezroczysty stożek zasięgu 120°", "świecąca linia pola działania", "strzałka przepływu powietrza w jednym akcencie kolorystycznym"). Dla innych viz_type: pusty string.',
     "- on_product_text: dokładnie te napisy/kody/marki widoczne fizycznie na produkcie na obrazie 1 (referencji głównej), każdy jako osobny string z cudzysłowem („PRODUCT NAME”). Pusta tablica gdy produkt jest bez napisów.",
     '- host_device: gdy nazwa produktu lub cechy wskazują urządzenie-gościa (np. "do rekuperatora Wanas", "pasuje do Bosch MUM"), zwróć { "name": "<pełna nazwa urządzenia>" }. W innym wypadku null.',
     "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
@@ -203,7 +217,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
     constraintsBlock
       ? `OGRANICZENIA PROJEKTU (nadrzędne wobec Twoich pomysłów na scenę):\n${constraintsBlock}`
       : "",
-    `Przeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON.`,
+    `Przeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON z ${count} wariant${count === 1 ? "em" : "ami"} sceny.`,
   ].filter(Boolean).join("\n");
 
   const content: Array<
@@ -225,18 +239,53 @@ export async function analyzeVisualizationSceneForProduct(args: {
     overlay_motif?: unknown;
     on_product_text?: unknown;
     host_device?: unknown;
+    variants?: unknown;
   };
-  const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
-  const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+  const rawVariants: Array<{
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+  }> = [];
+  if (Array.isArray(parsed.variants)) {
+    for (const v of parsed.variants as unknown[]) {
+      if (!v || typeof v !== "object") continue;
+      const obj = v as { style?: unknown; requirements?: unknown; viz_type?: unknown; overlay_motif?: unknown };
+      const s = typeof obj.style === "string" ? obj.style.trim() : "";
+      const r = typeof obj.requirements === "string" ? obj.requirements.trim() : "";
+      if (!s || !r) continue;
+      const vt0 = typeof obj.viz_type === "string" ? obj.viz_type.trim().toLowerCase() : "";
+      const vt: "lifestyle" | "in_use" | "feature_explainer" =
+        vt0 === "in_use" || vt0 === "feature_explainer" ? vt0 : "lifestyle";
+      const om = typeof obj.overlay_motif === "string" ? obj.overlay_motif.trim() : "";
+      rawVariants.push({ style: s, requirements: r, viz_type: vt, overlay_motif: om });
+    }
+  }
+  // Legacy fallback: model returned flat top-level fields instead of variants[].
+  if (rawVariants.length === 0) {
+    const s = typeof parsed.style === "string" ? parsed.style.trim() : "";
+    const r = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+    const vt0 = typeof parsed.viz_type === "string" ? parsed.viz_type.trim().toLowerCase() : "";
+    const vt: "lifestyle" | "in_use" | "feature_explainer" =
+      vt0 === "in_use" || vt0 === "feature_explainer" ? vt0 : "lifestyle";
+    const om = typeof parsed.overlay_motif === "string" ? parsed.overlay_motif.trim() : "";
+    if (s && r) rawVariants.push({ style: s, requirements: r, viz_type: vt, overlay_motif: om });
+  }
+  if (rawVariants.length === 0) throw new Error("Model nie zwrócił planu sceny");
+  // Pad up to requested count by cloning the last unique variant (model
+  // occasionally returns fewer entries than requested).
+  while (rawVariants.length < count) {
+    rawVariants.push({ ...rawVariants[rawVariants.length - 1]! });
+  }
+  const variants = rawVariants.slice(0, count);
+  const style = variants[0]!.style;
+  const requirements = variants[0]!.requirements;
+  const viz_type = variants[0]!.viz_type;
+  const overlay_motif = variants[0]!.overlay_motif;
+  const type_reason = typeof parsed.type_reason === "string" ? parsed.type_reason.trim() : "";
   const has_text = typeof parsed.has_text === "boolean" ? parsed.has_text : true;
   const color_anchor_en =
     typeof parsed.color_anchor_en === "string" ? parsed.color_anchor_en.trim() : "";
-  const vt = typeof parsed.viz_type === "string" ? parsed.viz_type.trim().toLowerCase() : "";
-  const viz_type: "lifestyle" | "in_use" | "feature_explainer" =
-    vt === "in_use" || vt === "feature_explainer" ? vt : "lifestyle";
-  const type_reason = typeof parsed.type_reason === "string" ? parsed.type_reason.trim() : "";
-  const overlay_motif =
-    typeof parsed.overlay_motif === "string" ? parsed.overlay_motif.trim() : "";
   const on_product_text: string[] = Array.isArray(parsed.on_product_text)
     ? (parsed.on_product_text as unknown[])
         .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
@@ -250,10 +299,9 @@ export async function analyzeVisualizationSceneForProduct(args: {
       host_device = { name: hd.name.trim() };
     }
   }
-  if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
   return {
     style, requirements, used: urls.length, has_text, color_anchor_en,
-    viz_type, type_reason, overlay_motif, on_product_text, host_device,
+    viz_type, type_reason, overlay_motif, on_product_text, host_device, variants,
   };
 }
 
@@ -3395,6 +3443,7 @@ export async function runPimVisualization(
     requirements: projectRequirementsPl,
     client_guidelines: clientGuidelines,
     host_device_url: projectHostDeviceUrl,
+    count,
   }));
 
   const { data: enrichment } = await supabaseAdmin
@@ -3582,6 +3631,15 @@ export async function runPimVisualization(
     overlay_motif?: string;
     on_product_text?: string[];
     host_device?: { name: string } | null;
+    variants?: Array<{
+      style: string;
+      requirements: string;
+      viz_type: "lifestyle" | "in_use" | "feature_explainer";
+      overlay_motif: string;
+      manual?: boolean;
+    }>;
+    count?: number;
+    hide_product_text?: boolean;
   };
   type VizRunRec = {
     phase: "analyzed" | "prompt_ready" | "rendering" | "done" | "failed";
@@ -3603,6 +3661,7 @@ export async function runPimVisualization(
     job_id?: string | null;
     source_urls_hash?: string;
     constraints_hash?: string;
+    variant_prompts?: Array<string | null>;
   };
   const existingMeta = (e.image_meta ?? {}) as Record<string, unknown>;
   const cached = existingMeta.viz_analysis as VizAnalysisRec | undefined;
@@ -3652,6 +3711,17 @@ export async function runPimVisualization(
   let overlayMotif = "";
   let onProductText: string[] = [];
   let hostDeviceName = "";
+  // Fresh variants[] returned by Gemini this run (if we called it this tick).
+  // Empty when we resumed from cache/viz_run/manual override — in that case
+  // we fall back to the cached variants list on the enrichment.
+  type EffVar = {
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+    manual?: boolean;
+  };
+  let freshVariantsFromAnalysis: EffVar[] = [];
 
   // 1) Manual overrides are never touched.
   if (cached?.manual && cached.style && cached.requirements) {
@@ -3713,6 +3783,7 @@ export async function runPimVisualization(
           featuresText,
           imageUrls: analysisUrls,
           projectConstraintsPl,
+          count,
         });
         analysisPl = { style: out.style, requirements: out.requirements };
         hasText = out.has_text;
@@ -3721,6 +3792,12 @@ export async function runPimVisualization(
         overlayMotif = out.overlay_motif;
         onProductText = out.on_product_text;
         hostDeviceName = out.host_device?.name ?? "";
+        freshVariantsFromAnalysis = out.variants.map((v) => ({
+          style: v.style,
+          requirements: v.requirements,
+          viz_type: v.viz_type,
+          overlay_motif: v.overlay_motif,
+        }));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         // "URL did not return an image" → identify offender, mark dead,
@@ -3850,6 +3927,8 @@ export async function runPimVisualization(
         overlay_motif: overlayMotif,
         on_product_text: onProductText,
         host_device: hostDeviceName ? { name: hostDeviceName } : null,
+        // Preserved: prior cached fields (variants/count/hide_product_text)
+        // are merged below after we compute the effective variant plan.
       } satisfies VizAnalysisRec,
     };
     await supabaseAdmin
@@ -3859,36 +3938,107 @@ export async function runPimVisualization(
       .then(() => undefined, () => undefined);
   }
 
+  // ------- Effective variant plan (per-render) -------
+  const cachedVariants: Array<EffVar> = Array.isArray(cached?.variants)
+    ? (cached!.variants as Array<{
+        style: string;
+        requirements: string;
+        viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+        overlay_motif?: string;
+        manual?: boolean;
+      }>).map((v) => ({
+        style: v.style,
+        requirements: v.requirements,
+        viz_type: v.viz_type ?? "lifestyle",
+        overlay_motif: v.overlay_motif ?? "",
+        manual: v.manual === true,
+      }))
+    : [];
+  const hideProductText: boolean = cached?.hide_product_text === true;
+  const variantsAll: EffVar[] = [];
+  for (let i = 0; i < count; i++) {
+    const manualAtI = cachedVariants[i]?.manual === true ? cachedVariants[i] : null;
+    if (manualAtI) {
+      variantsAll.push({ ...manualAtI, manual: true });
+      continue;
+    }
+    if (freshVariantsFromAnalysis[i]) {
+      variantsAll.push({ ...freshVariantsFromAnalysis[i]!, manual: false });
+      continue;
+    }
+    if (cachedVariants[i]) {
+      variantsAll.push({ ...cachedVariants[i]!, manual: false });
+      continue;
+    }
+    if (i === 0) {
+      variantsAll.push({
+        style: analysisPl.style,
+        requirements: analysisPl.requirements,
+        viz_type: vizType,
+        overlay_motif: overlayMotif,
+        manual: false,
+      });
+      continue;
+    }
+    // Pad by cloning the last known variant.
+    variantsAll.push({ ...variantsAll[variantsAll.length - 1]!, manual: false });
+  }
+
+  // Persist the effective variants plan (and count/hide flag) so subsequent
+  // resumes / manual UI edits have a stable base to work from.
+  if (!cached?.manual && analysisSource !== "fallback_generic") {
+    const { data: fresh } = await supabaseAdmin
+      .from("enrichments")
+      .select("image_meta")
+      .eq("id", e.id)
+      .maybeSingle();
+    const cur = ((fresh as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
+    const va = (cur.viz_analysis ?? {}) as Record<string, unknown>;
+    const nextViz = {
+      ...va,
+      variants: variantsAll.map((v) => ({
+        style: v.style,
+        requirements: v.requirements,
+        viz_type: v.viz_type,
+        overlay_motif: v.overlay_motif,
+        manual: v.manual === true,
+      })),
+      count,
+      hide_product_text: hideProductText,
+    };
+    await supabaseAdmin
+      .from("enrichments")
+      .update({ image_meta: { ...cur, viz_analysis: nextViz } as never } as never)
+      .eq("id", e.id)
+      .then(() => undefined, () => undefined);
+  }
+
   // Compose the Polish requirements block for buildFalPromptsFromPolish:
   // vision analysis first (style + requirements), then project constraints
   // as an authoritative override block (unless the analysis IS the project fallback).
-  const perProductPl = [
-    analysisPl.style ? `Scena: ${analysisPl.style}` : "",
-    analysisPl.requirements,
-  ].filter(Boolean).join("\n");
   const constraintsSuffix = analysisSource === "fallback_project" || !projectConstraintsPl
     ? ""
     : `\n\nOGRANICZENIA PROJEKTU (nadrzędne wobec sceny powyżej):\n${projectConstraintsPl}`;
-  // Extra rules block, always appended: viz_type semantics, on-product text
-  // policy (only what's on reference #1), host-device handling, and the
-  // feature-explainer overlay motif spec.
-  const typeRulesPl = (() => {
-    if (vizType === "feature_explainer") {
+  // Per-variant rules helpers. Text policy toggle from the enrichment overrides
+  // the automatic on-reference rule when the user asked for a textless render.
+  const buildTypeRulesPl = (v: EffVar) => {
+    if (v.viz_type === "feature_explainer") {
       return [
         "TYP WIZUALIZACJI: feature_explainer — produkt w działaniu z JEDNYM motywem grafiki nakładkowej (półprzezroczysty stożek/pole/linia/glow) w jednym kolorze akcentu.",
-        overlayMotif ? `Motyw overlayu: ${overlayMotif}.` : "",
+        v.overlay_motif ? `Motyw overlayu: ${v.overlay_motif}.` : "",
         "Overlay nie może zasłaniać produktu; maksymalnie JEDNA strzałka; tekst na overlayu tylko jedna krótka etykieta (max 5 znaków, np. „360°”) albo brak. Bez badge’y, bez znaków wodnych.",
       ].filter(Boolean).join(" ");
     }
-    if (vizType === "in_use") {
+    if (v.viz_type === "in_use") {
       return "TYP WIZUALIZACJI: in_use — produkt jest bohaterem sceny w jego naturalnym kontekście użycia (instalacja / eksploatacja / montaż), nie sam packshot.";
     }
     return "TYP WIZUALIZACJI: lifestyle — realistyczna scena użytkowa z produktem jako bohaterem, naturalne rekwizyty i światło.";
-  })();
-
-  const onTextRulesPl = onProductText.length
-    ? `NAPISY NA PRODUKCIE: odwzoruj DOKŁADNIE i wyłącznie te napisy widoczne na referencji nr 1: ${onProductText.map((s) => `"${s}"`).join(", ")}. Nie wolno dodać żadnego innego tekstu, kodu, marki ani logo — nawet jeśli pojawia się na innych zdjęciach referencyjnych.`
-    : `NAPISY NA PRODUKCIE: referencja nr 1 nie zawiera żadnych napisów na produkcie — powierzchnia produktu musi pozostać BEZ TEKSTU. Nie dodawaj kodów, nazw marki, numerów modeli ani logo — nawet gdy pojawiają się na innych zdjęciach.`;
+  };
+  const onTextRulesPl = hideProductText
+    ? `NAPISY NA PRODUKCIE: klient sprzedaje wersję bez brandingu — powierzchnia produktu MUSI być całkowicie bez tekstu. Nie umieszczaj żadnych napisów, kodów, numerów modeli, logo ani znaków graficznych na produkcie, nawet gdy pojawiają się na referencjach.`
+    : (onProductText.length
+      ? `NAPISY NA PRODUKCIE: odwzoruj DOKŁADNIE i wyłącznie te napisy widoczne na referencji nr 1: ${onProductText.map((s) => `"${s}"`).join(", ")}. Nie wolno dodać żadnego innego tekstu, kodu, marki ani logo — nawet jeśli pojawia się na innych zdjęciach referencyjnych.`
+      : `NAPISY NA PRODUKCIE: referencja nr 1 nie zawiera żadnych napisów na produkcie — powierzchnia produktu musi pozostać BEZ TEKSTU. Nie dodawaj kodów, nazw marki, numerów modeli ani logo — nawet gdy pojawiają się na innych zdjęciach.`);
 
   const hostRulesPl = (() => {
     if (!hostDeviceName && !hostDeviceUrl) return "";
@@ -3899,49 +4049,71 @@ export async function runPimVisualization(
     return `URZĄDZENIE DOCELOWE: produkt jest akcesorium do „${hostDeviceName}”, ale użytkownik nie dostarczył zdjęcia urządzenia. NIE wymyślaj realnego modelu — pokaż urządzenie GENERYCZNIE, częściowo poza kadrem, w miękkim rozmyciu (płytka głębia ostrości), tak aby nigdy nie sugerować konkretnej marki/modelu. Produkt (referencja nr 1) musi być ostry i pierwszoplanowy.`;
   })();
 
-  const extraRulesPl = [typeRulesPl, onTextRulesPl, hostRulesPl].filter(Boolean).join("\n\n");
-  const combinedRequirementsPl = [
-    `${perProductPl}${constraintsSuffix}`.trim(),
-    extraRulesPl,
-  ].filter(Boolean).join("\n\n").trim();
-
-  if (!lifePrompt) {
-    // Resume from viz_run when the job payload was cleared but viz_run still
-    // holds the built prompt.
-    if (vizRun?.prompt && vizRun.source_urls_hash === sourceUrlsHash && vizRun.constraints_hash === constraintsHash) {
-      lifePrompt = vizRun.prompt;
+  // Per-slot lifePrompt cache; seed from any legacy single-prompt viz_run.
+  const variantPromptCache: Array<string | null> = new Array(count).fill(null);
+  if (Array.isArray(vizRun?.variant_prompts)) {
+    for (let i = 0; i < count; i++) {
+      const p = vizRun!.variant_prompts![i];
+      if (typeof p === "string" && p.length > 0) variantPromptCache[i] = p;
     }
   }
-  if (!lifePrompt) {
+  if (
+    !variantPromptCache[0] &&
+    vizRun?.prompt &&
+    vizRun.source_urls_hash === sourceUrlsHash &&
+    vizRun.constraints_hash === constraintsHash
+  ) {
+    variantPromptCache[0] = vizRun.prompt;
+  }
+  if (!variantPromptCache[0] && lifePrompt) {
+    variantPromptCache[0] = lifePrompt;
+  }
+
+  const buildPromptForVariant = async (idx: number): Promise<string> => {
+    const cachedPrompt = variantPromptCache[idx];
+    if (cachedPrompt) return cachedPrompt;
+    const v = variantsAll[idx] ?? variantsAll[0]!;
+    const perProductPl = [
+      v.style ? `Scena: ${v.style}` : "",
+      v.requirements,
+    ].filter(Boolean).join("\n");
+    const extraRulesPl = [buildTypeRulesPl(v), onTextRulesPl, hostRulesPl].filter(Boolean).join("\n\n");
+    const combinedRequirementsPl = [
+      `${perProductPl}${constraintsSuffix}`.trim(),
+      extraRulesPl,
+    ].filter(Boolean).join("\n\n").trim();
+    let built: string;
     try {
-      await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
-      const built = await buildFalPromptsFromPolish({
+      await emit(ctx, { level: "info", message: `   • buduję prompt EN dla wariantu ${idx + 1}/${count} (gemini-3.1-pro)…` });
+      const r = await buildFalPromptsFromPolish({
         productName: nameForPrompt,
         productDesc: descForPrompt,
         requirementsPl: combinedRequirementsPl,
-        projectStyle: "", // integrated into requirementsPl above
+        projectStyle: "",
         clientGuidelines,
         productNotes,
       });
-      lifePrompt = built.lifestyle_prompt;
+      built = r.lifestyle_prompt;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
+      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback (wariant ${idx + 1}): ${msg}` });
       const fb = fallbackPrompts({
         productName: nameForPrompt,
         productDesc: descForPrompt,
         requirementsPl: combinedRequirementsPl,
         projectStyle: projectStylePl,
       });
-      lifePrompt = fb.lifestyle_prompt;
+      built = fb.lifestyle_prompt;
     }
-    await saveProgress(slotState);
-    await persistVizRun({ phase: "prompt_ready", prompt: lifePrompt, reference_urls: referenceUrlsForFal });
-    if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
-      await emit(ctx, { level: "info", message: `   • prompt gotowy — render wystartuje w następnym przebiegu` });
-      return { complete: false };
-    }
-  }
+    variantPromptCache[idx] = built;
+    await persistVizRun({
+      phase: "prompt_ready",
+      prompt: idx === 0 ? built : (vizRun?.prompt ?? built),
+      reference_urls: referenceUrlsForFal,
+      variant_prompts: [...variantPromptCache],
+    });
+    return built;
+  };
 
   // Fallback single ref (used only if multi-ref list is empty for some reason,
   // e.g. no analysisUrls at all — keeps behaviour parity with the old code).
@@ -3969,7 +4141,7 @@ export async function runPimVisualization(
   };
 
   // Commit a picked URL + its viz_qc metadata to the enrichment row.
-  const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number) => {
+  const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number, variantIndex: number) => {
     const { data: fresh, error: readErr } = await supabaseAdmin
       .from("enrichments")
       .select("ai_gallery_urls, image_meta")
@@ -3993,7 +4165,8 @@ export async function runPimVisualization(
       attempts,
       at: new Date().toISOString(),
       reference_url: effectiveRefUrls[0] ?? null,
-    };
+    } as VisualizationQcPersisted & { variant_index?: number };
+    (vizQcMap[publicUrl] as unknown as { variant_index?: number }).variant_index = variantIndex;
     const nextMeta: Record<string, unknown> = { ...meta, viz_qc: vizQcMap };
     const updatePayload: Record<string, unknown> = {
       ai_gallery_urls: merged,
@@ -4124,9 +4297,17 @@ export async function runPimVisualization(
 
       const slot = slotState.slot;
       const attempt = slotState.attempts ?? 0;
+      // Compute the prompt for THIS variant slot (cached across attempts and
+      // across worker resumes via viz_run.variant_prompts).
+      lifePrompt = await buildPromptForVariant(slot);
+      if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
+        await emit(ctx, { level: "info", message: `   • prompt gotowy (wariant ${slot + 1}/${count}) — render wystartuje w następnym przebiegu` });
+        await saveProgress(slotState);
+        return { complete: false };
+      }
       await emit(ctx, {
         level: "info",
-        message: `   • wizualizacja ${slot + 1}/${count} (próba ${attempt + 1}/3)…`,
+        message: `   • wizualizacja ${slot + 1}/${count} · wariant ${slot + 1} (próba ${attempt + 1}/3)…`,
       });
       if (!slotState.mode) slotState = { ...slotState, mode: "edit" };
 
@@ -4225,6 +4406,15 @@ export async function runPimVisualization(
         try {
           const apiKey2 = process.env.LOVABLE_API_KEY!;
           qc = await runVisualizationQc(apiKey2, effectiveRefUrls[0], publicUrl);
+          if (hideProductText) {
+            // User asked for a textless product — any legible text on the
+            // rendered product is a fabrication regardless of what reference
+            // #1 shows. runVisualizationQc's default rule falls back to the
+            // reference; overlay that with our stricter rule here.
+            if (!qc.fabricated_text && (qc.issues.some((s) => /napis|text|logo|kod|nadruk/i.test(s)))) {
+              qc = { ...qc, fabricated_text: true };
+            }
+          }
         } catch (qcErr) {
           const msg = qcErr instanceof Error ? qcErr.message : String(qcErr);
           await emit(ctx, { level: "warn", message: `   ⚠ viz QC skipped (${msg.slice(0, 160)})` });
@@ -4259,7 +4449,7 @@ export async function runPimVisualization(
           continue;
         }
         // Commit the best candidate we have.
-        await commitVisualization(bestUrl, bestQc, attemptsSoFar, slot);
+        await commitVisualization(bestUrl, bestQc, attemptsSoFar, slot, slot);
         await cleanupSource(slotState);
         slotState = { slot: slot + 1 };
         await saveProgress(slotState.slot < count ? slotState : null);
@@ -4295,6 +4485,39 @@ export async function runPimVisualization(
   }
 
   await saveProgress(null);
+
+  // Diversity guard: if the batch produced ≥2 variant prompts and any pair is
+  // ≥90% Jaccard-similar on style+requirements tokens, log a warn so prompt
+  // calibration is visible in the job log.
+  if (count >= 2) {
+    const tokenize = (s: string): Set<string> => {
+      const words = (s || "")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 3);
+      return new Set(words);
+    };
+    const sig = variantsAll.map((v) => tokenize(`${v.style} ${v.requirements}`));
+    let flagged = false;
+    for (let i = 0; i < sig.length && !flagged; i++) {
+      for (let j = i + 1; j < sig.length && !flagged; j++) {
+        const a = sig[i]!, b = sig[j]!;
+        if (a.size === 0 || b.size === 0) continue;
+        let inter = 0;
+        for (const t of a) if (b.has(t)) inter++;
+        const uni = a.size + b.size - inter;
+        const jac = uni === 0 ? 0 : inter / uni;
+        if (jac >= 0.9) {
+          await emit(ctx, {
+            level: "warn",
+            message: `   ⚠ niska różnorodność wariantów ${i + 1} i ${j + 1} (Jaccard ${(jac * 100).toFixed(0)}%) — rozważ ponowną analizę lub ręczną edycję`,
+          });
+          flagged = true;
+        }
+      }
+    }
+  }
 
   const { data: finalEn } = await supabaseAdmin
     .from("enrichments")
