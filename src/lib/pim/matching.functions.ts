@@ -903,7 +903,7 @@ export async function scoreAndCapForProduct(
 
   const { data: productRow } = await supabaseAdmin
     .from("source_products")
-    .select("id, nazwa, ean, raw, manual_lock, matching_mode")
+    .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (!productRow) return { count: 0, strong: 0 };
@@ -1003,7 +1003,14 @@ export async function scoreAndCapForProduct(
       })
       .filter((s) => s.title || s.description);
     if (sources.length) {
-      const val = await validateSourcesWithAI(apiKey, nazwa, productRow.ean ?? null, sources, mode);
+      const val = await validateSourcesWithAI(
+        apiKey,
+        nazwa,
+        productRow.ean ?? null,
+        sources,
+        mode,
+        ((productRow as { category?: string | null }).category ?? null),
+      );
       kept = candidates.filter((url) => val.keep.has(url));
       if (!pinned && val.ok) clustersByUrl = val.clustersByUrl;
     }
