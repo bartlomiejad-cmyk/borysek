@@ -66,6 +66,10 @@ type BulkJobRow = {
   lock_token?: string | null;
 };
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
 async function processItem(
   kind: JobKind,
   productId: string,
@@ -172,6 +176,12 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
   // Attempts-per-item counter is stored on job.payload.attempts so it
   // survives across tick invocations without a schema change.
   const payload: Record<string, unknown> = { ...(job.payload ?? {}) };
+  const originalItems = stringArray(payload.all_items).length
+    ? stringArray(payload.all_items)
+    : [...remaining];
+  payload.all_items = originalItems;
+  const completedItems = new Set(stringArray(payload.completed_items));
+  const failedItems = new Set(stringArray(payload.failed_items));
   const attempts: Record<string, number> =
     (payload.attempts && typeof payload.attempts === "object"
       ? (payload.attempts as Record<string, number>)
@@ -235,7 +245,9 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
       if (next > MAX_ITEM_ATTEMPTS) {
         remaining.shift();
         delete attempts[pid];
+        failedItems.add(pid);
         payload.attempts = attempts;
+        payload.failed_items = Array.from(failedItems);
         failed++;
         lastError = `Przekroczono limit prób (${MAX_ITEM_ATTEMPTS}) — prawdopodobny timeout na tym produkcie`;
         try {
@@ -290,6 +302,10 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
           delete attempts[pid];
           payload.attempts = attempts;
         }
+        completedItems.add(pid);
+        failedItems.delete(pid);
+        payload.completed_items = Array.from(completedItems);
+        payload.failed_items = Array.from(failedItems);
         processed++;
       } else {
         break;
@@ -303,6 +319,8 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
         delete attempts[pid];
         payload.attempts = attempts;
       }
+      failedItems.add(pid);
+      payload.failed_items = Array.from(failedItems);
       failed++;
       lastError = e instanceof Error ? e.message : String(e);
       await ctx.onEvent?.({ level: "error", message: `❌ ${lastError}` });
@@ -359,10 +377,19 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
         } else if (result.remaining.length === 0) {
           const totalProcessed = job.processed_count + result.processed;
           const totalFailed = job.failed_count + result.failed;
-          patch = {
-            status: totalProcessed === 0 && totalFailed > 0 ? "FAILED" : "COMPLETED",
-            finished_at: new Date().toISOString(),
-          };
+          const accounted = totalProcessed + totalFailed;
+          if (accounted >= job.total) {
+            patch = {
+              status: totalProcessed === 0 && totalFailed > 0 ? "FAILED" : "COMPLETED",
+              finished_at: new Date().toISOString(),
+            };
+          } else {
+            patch = {
+              status: "FAILED",
+              finished_at: new Date().toISOString(),
+              last_error: `Kolejka opróżniona przedwcześnie: ${accounted}/${job.total} produktów rozliczonych. Uruchom wyszukiwanie ponownie dla brakujących produktów.`,
+            };
+          }
         }
         if (patch) {
           await supabaseAdmin
