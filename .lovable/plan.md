@@ -1,51 +1,29 @@
-## Cel
+# Fix: martwe zdjęcia nie znikają po ponownej weryfikacji
 
-Uzgodnić kryterium „bez źródeł" między paskiem pipeline a `startFirecrawlDiscovery`, żeby klik „Wyszukaj źródła (N)" faktycznie uruchamiał discovery, a resetowanie źródeł pozostawiało spójny stan.
+## Diagnoza
+
+`revalidateImages` w `src/routes/_auth/projects.$id.products.$pid.tsx` wywołuje `analyzeProductImages` z `urls: allVisible.slice(0, 8)` (a server-fn dodatkowo ma walidator `.max(8)`). W widoku produktu jest 16 zdjęć — te uszkodzone są dalej w liście (pozycje 9–16), więc `filterAliveImages` nigdy ich nie probuje i nie ustawia `dead:true`. W efekcie po kliknięciu przycisku:
+- top 8 zdjęć: identity re-scoring działa, ale one nie były martwe,
+- dalsze 8 (te faktycznie zbite): nie są sondowane wcale → nadal widoczne z pustą miniaturką.
+
+Dodatkowo `runPimImageVerify` (używany w Weryfikacji zbiorczej) filtruje `toScore` przez `needsCheck` (`identity_v` cache), więc dla obrazów już zescore'owanych też pomija HEAD-probe — ten sam problem w drugim wariancie.
 
 ## Zmiany
 
-### 1. `src/lib/pim/firecrawl.functions.ts` — `startFirecrawlDiscovery`
+1. **Rozbić re-weryfikację na dwa kroki po stronie serwera.**  
+   W `src/lib/pim/ai.functions.ts` dodać osobną, tanią server-fn `probeVisibleImagesAlive({ productId })`:
+   - Pobiera enrichment + wszystkie `product_sources.images / extra_images` dla `picked_urls`.
+   - Wyklucza `hidden_images` i (w compatible mode) obrazy z nie-primary źródeł.
+   - Wywołuje `filterAliveImages` na CAŁYM zbiorze URL-i (bez limitu 8), z `revalidate` semantyką: URL-e oznaczone wcześniej `dead:true` są ponownie sondowane; `manual_keep` nietykalne.
+   - Zwraca `{ alive, dead }` i zapisuje merged `image_scores` (już to robi `filterAliveImages`).
+   - Server-fn autoryzowana przez `requireSupabaseAuth`.
 
-- Wybór produktów opiera się wyłącznie na:
-  - jawnej selekcji przez `productIds` (użytkownik zaznaczył/otworzył produkt), **lub**
-  - `pipeline_status IS NULL` / `= 'IMPORTED'`, gdy `productIds` nie podano.
-- Usuwam obecny filtr sprawdzający obecność `search_results.term` (to on powoduje „Brak produktów do przetworzenia").
-- `onlyMissing` staje się no-opem/deprecated: gdy przekazano jawne `productIds`, produkt jest zawsze kwalifikowalny (regresja: „Szukaj ponownie" z edytora działa dla dowolnego statusu). Gdy `productIds` brak, filtruję po `pipeline_status = IMPORTED`.
-- Guard „brak nazwy" pozostaje — produkty z pustą `nazwa` są pomijane i liczone osobno; nie przerywają całego zadania.
-- Rzut wyjątku tylko gdy `targetIds.length === 0` — z rozdzielonymi licznikami: `skippedAdvanced` (status dalej niż Import) i `skippedNoName`.
-- Ładunek wyjątku zawiera oba liczniki: front pokazuje precyzyjny toast.
+2. **Front-end: `revalidateImages`** wywołuje najpierw `probeVisibleImagesAlive({ productId: pid })`, a dopiero potem `analyzeProductImages` na `alive.slice(0, 8)` (identity re-scoring pozostaje z limitem 8, bo używa Vision — to droga część). Po obu krokach `invalidate()`.
 
-### 2. Toast błędu (klient) — `projects.$id.index.tsx` (CTA banner + Narzędzia)
+3. **`runPimImageVerify` (bulk „Zweryfikuj zdjęcia")** — przenieść `filterAliveImages` PRZED filtrem `needsCheck`, żeby HEAD-probe zawsze objął pełen `uniq`. `needsCheck` decyduje tylko o AI identity, nie o probingu.
 
-- Po nieudanym starcie parsuję nowe liczniki i wyświetlam: `0 produktów: X pominięto (status dalej niż Import), Y pominięto (brak nazwy).`
-- Fallback zostawiam dla nieoczekiwanych błędów sieciowych.
-
-### 3. „Wyczyść źródła" — pełny reset (project-level i product-level)
-
-Obecny `recleanProductSources` sanityzuje tylko zapisane treści. Rozdzielam intencję na dwie akcje:
-
-- **Sanitize** (dotychczasowe) — pozostaje pod obecnym tooltipem „Usuwa logo metod płatności…" w narzędziach projektu i w edytorze produktu; label zmieniam na „Wyczyść śmieci ze źródeł" (bez zmiany działania).
-- **Reset źródeł** — nowy `resetProductSources` w `firecrawl.functions.ts`, wywoływany z:
-  - narzędzi projektu (whole project),
-  - edytora produktu (single product, scope po `productIds`).
-  Wywołanie deterministycznie:
-  - kasuje `search_results` dla objętych produktów (po `term`, w ramach `project_id`, tylko jeśli term nie jest używany przez inny produkt w projekcie),
-  - kasuje `product_sources` powiązane z tymi produktami (przez `matching_products` / bezpośrednie linki, spójne z modelem obecnym w kodzie),
-  - resetuje discovery-related pola w `enrichments` (te, które worker ustawia przy discovery/matching: `image_scores`, `image_meta.discovery`, `viz_analysis` jeśli oznaczone jako auto — analog do obecnych resetów w matching),
-  - ustawia `pipeline_status = 'IMPORTED'` (nigdy nie modyfikuje `manual_lock`, `review_status`, `client_guidelines`, oceny audytu, ani ręcznych override'ów sceny wizualizacji: `viz_analysis.manual = true`).
-
-### 4. Regresja: per-product „Szukaj ponownie" (edytor)
-
-- Pozostaje bez zmian: przekazuje `productIds: [id]`, więc trafia w gałąź jawnej selekcji i działa dla dowolnego statusu.
-
-## Poza zakresem
-
-- Silnik wyszukiwania (Firecrawl + Apify combined, warianty, preselekcja AI) — bez zmian.
-- Backfill — niepotrzebny; jeden dotknięty produkt zacznie działać po pierwszym kliknięciu CTA.
+4. **UI**: bez zmian wizualnych. Toast pokazuje `Zweryfikowano N zdjęć · X martwych` gdy `dead.length > 0`, żeby użytkownik widział że sekcja „Niedostępne" powinna urosnąć.
 
 ## Weryfikacja
 
-1. Na projekcie `ps2` (product „Filtry Do Rekuperatora…", `pipeline_status = IMPORTED`, stare `search_results` istnieje) klik „Wyszukaj źródła (1)" tworzy `bulk_jobs` (`FIRECRAWL_DISCOVERY`, total 1). Sprawdzę w `bulk_jobs` po uruchomieniu.
-2. Import produktu bez `nazwa` i klik CTA → toast: „0 produktów: 0 pominięto (status dalej niż Import), 1 pominięto (brak nazwy)."
-3. „Reset źródeł" na produkcie ze statusem `GOLDEN_READY` → status wraca do `IMPORTED`, `manual_lock` i `review_status` niezmienione, `search_results` dla jego termu skasowane (o ile nie współdzielone).
-4. „Szukaj ponownie" z edytora dla produktu w `GOLDEN_READY` → discovery startuje mimo statusu.
+Na tym produkcie: klik „Zweryfikuj zdjęcia ponownie" → 8 pustych kafelków przechodzi do sekcji „Niedostępne", licznik „widocznych" spada, żywe zdjęcia zostają. Powtórny klik nie zmienia stanu (dead cache).

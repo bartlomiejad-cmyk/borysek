@@ -4254,6 +4254,36 @@ export async function runPimImageVerify(
     return;
   }
 
+  // HEAD-probe EVERY visible URL (not just those failing needsCheck) so dead
+  // images always get flagged, even when their identity score is current.
+  const preAlive = await filterAliveImages(
+    supabaseAdmin as never,
+    enRow.id,
+    uniq,
+    existing as never,
+    { revalidate: force },
+  );
+  let currentScores = existing as Record<string, unknown> as Record<string, {
+    manual_keep?: boolean;
+    identity_v?: number;
+    dead?: boolean;
+  }>;
+  if (preAlive.dead.length) {
+    const { data: refreshedEarly } = await supabaseAdmin
+      .from("enrichments")
+      .select("image_scores")
+      .eq("id", enRow.id)
+      .maybeSingle();
+    currentScores =
+      ((refreshedEarly as { image_scores?: Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }> } | null)?.image_scores ??
+        existing) as Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }>;
+    await emit(ctx, {
+      level: "warn",
+      message: `Pominięto ${preAlive.dead.length} martwych URL-i (404/timeout)`,
+    });
+  }
+  const aliveSet = new Set(preAlive.alive);
+
   const needsCheck = (u: string): boolean => {
     const prev = existing[u];
     if (!prev) return true;
@@ -4262,12 +4292,7 @@ export async function runPimImageVerify(
     if (force) return true;
     return (prev.identity_v ?? 0) < IDENTITY_VERSION;
   };
-  let toScore = uniq.filter(needsCheck);
-  let currentScores = existing as Record<string, unknown> as Record<string, {
-    manual_keep?: boolean;
-    identity_v?: number;
-    dead?: boolean;
-  }>;
+  let toScore = uniq.filter((u) => aliveSet.has(u) && needsCheck(u));
 
   if (!toScore.length) {
     await emit(ctx, {
@@ -4299,29 +4324,6 @@ export async function runPimImageVerify(
     (enRow.pinned_main_url && enRow.pinned_main_url !== "__imported__" ? enRow.pinned_main_url : null) ??
     (regen && regen !== "__imported__" ? regen : null) ??
     pickBestSameAnchor();
-
-  // Pre-flight probe so 404s don't waste Vision calls.
-  const { alive, dead } = await filterAliveImages(
-    supabaseAdmin as never,
-    enRow.id,
-    toScore,
-    existing as never,
-  );
-  toScore = alive;
-  if (dead.length) {
-    const { data: refreshed } = await supabaseAdmin
-      .from("enrichments")
-      .select("image_scores")
-      .eq("id", enRow.id)
-      .maybeSingle();
-    currentScores =
-      ((refreshed as { image_scores?: Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }> } | null)?.image_scores ??
-        existing) as Record<string, { manual_keep?: boolean; identity_v?: number; dead?: boolean }>;
-    await emit(ctx, {
-      level: "warn",
-      message: `Pominięto ${dead.length} martwych URL-i (404/timeout)`,
-    });
-  }
 
   if (!toScore.length) {
     await emit(ctx, { level: "info", message: "Brak żywych zdjęć do weryfikacji" });

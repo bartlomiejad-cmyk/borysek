@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getProductDetail, updateGoldenRecord, setImageManualKeep } from "@/lib/pim/queries.functions";
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
-import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt } from "@/lib/pim/ai.functions";
+import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt, probeVisibleImagesAlive } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
 import { runAuditForProduct } from "@/lib/pim/audit.functions";
 import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
@@ -86,6 +86,7 @@ function ProductDetail() {
   const unhideFn = useServerFn(unhideImage);
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
+  const probeAliveFn = useServerFn(probeVisibleImagesAlive);
   const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const auditFn = useServerFn(runAuditForProduct);
@@ -253,16 +254,28 @@ function ProductDetail() {
   // image (up to the server-fn cap) with the new anchor-reference logic.
   // Manually-kept and hidden entries are protected server-side.
   const revalidateImages = async () => {
-    const urls = allVisible.filter((u) => !hiddenSet.has(u)).slice(0, 8);
-    if (!urls.length) {
+    const visible = allVisible.filter((u) => !hiddenSet.has(u));
+    if (!visible.length) {
       toast.info("Brak widocznych zdjęć do weryfikacji");
       return;
     }
     setRevalidating(true);
     try {
       analyzedKeyRef.current = "revalidated"; // stop the auto-analyze effect from firing again
-      await analyzeFn({ data: { productId: pid, urls, revalidate: true } });
-      toast.success(`Zweryfikowano ${urls.length} zdjęć`);
+      // 1) Cheap HEAD-probe over EVERY visible URL — flags dead ones so the
+      //    gallery hides them. Not bounded by the 8-URL AI cap.
+      const probe = await probeAliveFn({ data: { productId: pid, revalidate: true } });
+      // 2) AI identity re-scoring on the alive subset (capped at 8).
+      const aliveUrls = (probe?.alive ?? visible.filter((u) => !new Set(probe?.dead ?? []).has(u))).slice(0, 8);
+      if (aliveUrls.length) {
+        await analyzeFn({ data: { productId: pid, urls: aliveUrls, revalidate: true } });
+      }
+      const deadCount = probe?.dead?.length ?? 0;
+      toast.success(
+        deadCount
+          ? `Zweryfikowano ${aliveUrls.length} zdjęć · ${deadCount} martwych`
+          : `Zweryfikowano ${aliveUrls.length} zdjęć`,
+      );
       invalidate();
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się zweryfikować zdjęć"));
