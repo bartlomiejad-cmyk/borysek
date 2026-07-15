@@ -3437,16 +3437,54 @@ export async function runPimVisualization(
         .join("; ")
     : "";
 
-  // Candidate source images for vision (main first, then rest of picked_urls).
+  // Candidate source images for vision. IMPORTANT: `picked_urls` are product
+  // PAGE URLs (source pages), not image URLs — feeding them to Gemini Vision
+  // returns "URL did not return an image (received text/error content)".
+  // Pull real image URLs from product_sources for the picked pages, apply the
+  // same gallery visibility rules used by the editor/export (hidden, dead,
+  // rejected, unsure filtered out), and finally guard with filterImageUrls
+  // in case any non-image slipped through.
   const analysisCandidates: string[] = [];
   if (e.pinned_main_url) analysisCandidates.push(e.pinned_main_url);
   if (e.regenerated_main_image && e.regenerated_main_image !== "__imported__") {
     analysisCandidates.push(e.regenerated_main_image);
   }
-  for (const u of e.picked_urls ?? []) {
-    if (u && u !== "__imported__") analysisCandidates.push(u);
+  const pickedPageUrls = (e.picked_urls ?? []).filter((u) => u && u !== "__imported__");
+  if (pickedPageUrls.length) {
+    const { data: projForImgs } = await supabaseAdmin
+      .from("projects")
+      .select("include_extra_images")
+      .eq("id", (product as { project_id: string }).project_id)
+      .maybeSingle();
+    const includeExtra = (projForImgs as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
+    const { data: srcRows } = await supabaseAdmin
+      .from("product_sources")
+      .select("url, images, extra_images")
+      .eq("project_id", (product as { project_id: string }).project_id)
+      .in("url", pickedPageUrls);
+    const galleryUrls: string[] = [];
+    for (const pageUrl of pickedPageUrls) {
+      const row = (srcRows ?? []).find((r) => (r as { url?: string }).url === pageUrl) as
+        | { images?: unknown; extra_images?: unknown }
+        | undefined;
+      if (!row) continue;
+      const main = Array.isArray(row.images) ? (row.images as string[]) : [];
+      const extra = includeExtra && Array.isArray(row.extra_images)
+        ? (row.extra_images as string[])
+        : [];
+      for (const img of [...main, ...extra]) {
+        if (img && !galleryUrls.includes(img)) galleryUrls.push(img);
+      }
+    }
+    const { accepted } = getVisibleGallery(galleryUrls, {
+      hidden_images: e.hidden_images ?? [],
+      image_scores: (e.image_scores as Record<string, never>) ?? {},
+      pinned_main_url: e.pinned_main_url,
+    });
+    for (const u of accepted) analysisCandidates.push(u);
   }
-  const analysisUrls = Array.from(new Set(analysisCandidates)).slice(0, 4);
+  // Final guard: dedup + only real image URLs + hard cap.
+  const analysisUrls = filterImageUrls(Array.from(new Set(analysisCandidates))).slice(0, 4);
   const sourceUrlsHash = analysisUrls.length ? await sha256Hex(analysisUrls.join("|")) : "";
 
   type VizAnalysisRec = {
