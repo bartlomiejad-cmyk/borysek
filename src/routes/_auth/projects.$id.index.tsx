@@ -2448,6 +2448,56 @@ function downloadBlob(blob: Blob, name: string) {
   URL.revokeObjectURL(url);
 }
 
+function ProjectUsagePanel() {
+  const { id } = Route.useParams();
+  const [totals, setTotals] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data } = await supabase
+        .from("bulk_jobs" as never)
+        .select("usage, created_at")
+        .eq("project_id", id)
+        .eq("kind", "FIRECRAWL_DISCOVERY")
+        .gte("created_at", since);
+      if (cancelled) return;
+      const sum: Record<string, number> = {};
+      for (const r of (data ?? []) as Array<{ usage?: Record<string, number> | null }>) {
+        const u = r.usage ?? {};
+        for (const [k, v] of Object.entries(u)) {
+          if (typeof v === "number") sum[k] = (sum[k] ?? 0) + v;
+        }
+      }
+      setTotals(sum);
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+  if (!totals) return null;
+  const rows: Array<{ k: string; label: string }> = [
+    { k: "fc_scrapes", label: "FC scrape" },
+    { k: "fc_searches", label: "FC search" },
+    { k: "skipped_fc_searches", label: "FC search pominięte" },
+    { k: "apify_runs", label: "Apify SERP" },
+    { k: "apify_empty", label: "Apify puste" },
+    { k: "cache_hits_24h", label: "Cache 24h" },
+    { k: "cache_hits_shared", label: "Cache shared 14d" },
+  ];
+  return (
+    <div className="pt-4 border-t space-y-2">
+      <Label className="text-sm font-medium">Zużycie (30 dni)</Label>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        {rows.map((r) => (
+          <div key={r.k} className="rounded border px-2 py-1 flex items-center justify-between">
+            <span className="text-muted-foreground">{r.label}</span>
+            <span className="font-mono">{totals[r.k] ?? 0}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProductThumbs({
   images,
   extraImages,
