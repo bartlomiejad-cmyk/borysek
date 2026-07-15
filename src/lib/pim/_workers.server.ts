@@ -3929,8 +3929,13 @@ export async function runPimVisualization(
   // e.g. no analysisUrls at all — keeps behaviour parity with the old code).
   const fallbackSingleRef = mainUrl;
   // Effective references for FAL image_urls (top reference first).
-  const effectiveRefUrls: string[] =
-    referenceUrlsForFal.length ? referenceUrlsForFal : [fallbackSingleRef];
+  const baseRefs = referenceUrlsForFal.length ? referenceUrlsForFal : [fallbackSingleRef];
+  // Host device reference (project default or per-product override) becomes
+  // the LAST reference — the extraRulesPl block above tells the model this is
+  // the environment reference, not the product.
+  const effectiveRefUrls: string[] = hostDeviceUrl && /^https?:\/\//i.test(hostDeviceUrl)
+    ? [...baseRefs, hostDeviceUrl]
+    : baseRefs;
 
   // Upload a FAL result to our bucket so we can persist it and run QC.
   const uploadGalleryCandidate = async (url: string, slot: number, attempt: number): Promise<string> => {
