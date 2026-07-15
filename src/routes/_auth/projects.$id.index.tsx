@@ -155,6 +155,7 @@ const searchSchema = z.object({
     ])
     .catch("ALL"),
   search: z.string().catch(""),
+  category: z.string().catch(""),
   stage: z
     .enum(["NONE", "IMPORT", "SOURCES", "MATCH", "CONTENT", "MEDIA", "REVIEW"])
     .catch("NONE"),
