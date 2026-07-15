@@ -3357,7 +3357,7 @@ export async function runPimVisualization(
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta")
+    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta, hidden_images, image_scores")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enrichment) throw new Error("Brak enrichment");
@@ -3371,6 +3371,8 @@ export async function runPimVisualization(
     golden_description: string | null;
     golden_features: unknown;
     image_meta: Record<string, unknown> | null;
+    hidden_images: string[] | null;
+    image_scores: Record<string, unknown> | null;
   };
 
   // Pick main source image: pinned → regenerated (skip sentinel) → picked[0].
