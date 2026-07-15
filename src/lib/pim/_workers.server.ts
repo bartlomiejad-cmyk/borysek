@@ -3927,6 +3927,8 @@ export async function runPimVisualization(
         overlay_motif: overlayMotif,
         on_product_text: onProductText,
         host_device: hostDeviceName ? { name: hostDeviceName } : null,
+        // Preserved: prior cached fields (variants/count/hide_product_text)
+        // are merged below after we compute the effective variant plan.
       } satisfies VizAnalysisRec,
     };
     await supabaseAdmin
@@ -3936,36 +3938,108 @@ export async function runPimVisualization(
       .then(() => undefined, () => undefined);
   }
 
+  // ------- Effective variant plan (per-render) -------
+  const cachedVariants: Array<EffVar> = Array.isArray(cached?.variants)
+    ? (cached!.variants as Array<{
+        style: string;
+        requirements: string;
+        viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+        overlay_motif?: string;
+        manual?: boolean;
+      }>).map((v) => ({
+        style: v.style,
+        requirements: v.requirements,
+        viz_type: v.viz_type ?? "lifestyle",
+        overlay_motif: v.overlay_motif ?? "",
+        manual: v.manual === true,
+      }))
+    : [];
+  const hideProductText: boolean = cached?.hide_product_text === true;
+  const variantsAll: EffVar[] = [];
+  for (let i = 0; i < count; i++) {
+    const manualAtI = cachedVariants[i]?.manual === true ? cachedVariants[i] : null;
+    if (manualAtI) {
+      variantsAll.push({ ...manualAtI, manual: true });
+      continue;
+    }
+    if (freshVariantsFromAnalysis[i]) {
+      variantsAll.push({ ...freshVariantsFromAnalysis[i]!, manual: false });
+      continue;
+    }
+    if (cachedVariants[i]) {
+      variantsAll.push({ ...cachedVariants[i]!, manual: false });
+      continue;
+    }
+    if (i === 0) {
+      variantsAll.push({
+        style: analysisPl.style,
+        requirements: analysisPl.requirements,
+        viz_type: vizType,
+        overlay_motif: overlayMotif,
+        manual: false,
+      });
+      continue;
+    }
+    // Pad by cloning the last known variant.
+    variantsAll.push({ ...variantsAll[variantsAll.length - 1]!, manual: false });
+  }
+
+  // Persist the effective variants plan (and count/hide flag) so subsequent
+  // resumes / manual UI edits have a stable base to work from.
+  if (!cached?.manual && analysisSource !== "fallback_generic") {
+    await supabaseAdmin.rpc as unknown; // no-op placeholder for readability
+    const { data: fresh } = await supabaseAdmin
+      .from("enrichments")
+      .select("image_meta")
+      .eq("id", e.id)
+      .maybeSingle();
+    const cur = ((fresh as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
+    const va = (cur.viz_analysis ?? {}) as Record<string, unknown>;
+    const nextViz = {
+      ...va,
+      variants: variantsAll.map((v) => ({
+        style: v.style,
+        requirements: v.requirements,
+        viz_type: v.viz_type,
+        overlay_motif: v.overlay_motif,
+        manual: v.manual === true,
+      })),
+      count,
+      hide_product_text: hideProductText,
+    };
+    await supabaseAdmin
+      .from("enrichments")
+      .update({ image_meta: { ...cur, viz_analysis: nextViz } as never } as never)
+      .eq("id", e.id)
+      .then(() => undefined, () => undefined);
+  }
+
   // Compose the Polish requirements block for buildFalPromptsFromPolish:
   // vision analysis first (style + requirements), then project constraints
   // as an authoritative override block (unless the analysis IS the project fallback).
-  const perProductPl = [
-    analysisPl.style ? `Scena: ${analysisPl.style}` : "",
-    analysisPl.requirements,
-  ].filter(Boolean).join("\n");
   const constraintsSuffix = analysisSource === "fallback_project" || !projectConstraintsPl
     ? ""
     : `\n\nOGRANICZENIA PROJEKTU (nadrzędne wobec sceny powyżej):\n${projectConstraintsPl}`;
-  // Extra rules block, always appended: viz_type semantics, on-product text
-  // policy (only what's on reference #1), host-device handling, and the
-  // feature-explainer overlay motif spec.
-  const typeRulesPl = (() => {
-    if (vizType === "feature_explainer") {
+  // Per-variant rules helpers. Text policy toggle from the enrichment overrides
+  // the automatic on-reference rule when the user asked for a textless render.
+  const buildTypeRulesPl = (v: EffVar) => {
+    if (v.viz_type === "feature_explainer") {
       return [
         "TYP WIZUALIZACJI: feature_explainer — produkt w działaniu z JEDNYM motywem grafiki nakładkowej (półprzezroczysty stożek/pole/linia/glow) w jednym kolorze akcentu.",
-        overlayMotif ? `Motyw overlayu: ${overlayMotif}.` : "",
+        v.overlay_motif ? `Motyw overlayu: ${v.overlay_motif}.` : "",
         "Overlay nie może zasłaniać produktu; maksymalnie JEDNA strzałka; tekst na overlayu tylko jedna krótka etykieta (max 5 znaków, np. „360°”) albo brak. Bez badge’y, bez znaków wodnych.",
       ].filter(Boolean).join(" ");
     }
-    if (vizType === "in_use") {
+    if (v.viz_type === "in_use") {
       return "TYP WIZUALIZACJI: in_use — produkt jest bohaterem sceny w jego naturalnym kontekście użycia (instalacja / eksploatacja / montaż), nie sam packshot.";
     }
     return "TYP WIZUALIZACJI: lifestyle — realistyczna scena użytkowa z produktem jako bohaterem, naturalne rekwizyty i światło.";
-  })();
-
-  const onTextRulesPl = onProductText.length
-    ? `NAPISY NA PRODUKCIE: odwzoruj DOKŁADNIE i wyłącznie te napisy widoczne na referencji nr 1: ${onProductText.map((s) => `"${s}"`).join(", ")}. Nie wolno dodać żadnego innego tekstu, kodu, marki ani logo — nawet jeśli pojawia się na innych zdjęciach referencyjnych.`
-    : `NAPISY NA PRODUKCIE: referencja nr 1 nie zawiera żadnych napisów na produkcie — powierzchnia produktu musi pozostać BEZ TEKSTU. Nie dodawaj kodów, nazw marki, numerów modeli ani logo — nawet gdy pojawiają się na innych zdjęciach.`;
+  };
+  const onTextRulesPl = hideProductText
+    ? `NAPISY NA PRODUKCIE: klient sprzedaje wersję bez brandingu — powierzchnia produktu MUSI być całkowicie bez tekstu. Nie umieszczaj żadnych napisów, kodów, numerów modeli, logo ani znaków graficznych na produkcie, nawet gdy pojawiają się na referencjach.`
+    : (onProductText.length
+      ? `NAPISY NA PRODUKCIE: odwzoruj DOKŁADNIE i wyłącznie te napisy widoczne na referencji nr 1: ${onProductText.map((s) => `"${s}"`).join(", ")}. Nie wolno dodać żadnego innego tekstu, kodu, marki ani logo — nawet jeśli pojawia się na innych zdjęciach referencyjnych.`
+      : `NAPISY NA PRODUKCIE: referencja nr 1 nie zawiera żadnych napisów na produkcie — powierzchnia produktu musi pozostać BEZ TEKSTU. Nie dodawaj kodów, nazw marki, numerów modeli ani logo — nawet gdy pojawiają się na innych zdjęciach.`);
 
   const hostRulesPl = (() => {
     if (!hostDeviceName && !hostDeviceUrl) return "";
@@ -3976,49 +4050,71 @@ export async function runPimVisualization(
     return `URZĄDZENIE DOCELOWE: produkt jest akcesorium do „${hostDeviceName}”, ale użytkownik nie dostarczył zdjęcia urządzenia. NIE wymyślaj realnego modelu — pokaż urządzenie GENERYCZNIE, częściowo poza kadrem, w miękkim rozmyciu (płytka głębia ostrości), tak aby nigdy nie sugerować konkretnej marki/modelu. Produkt (referencja nr 1) musi być ostry i pierwszoplanowy.`;
   })();
 
-  const extraRulesPl = [typeRulesPl, onTextRulesPl, hostRulesPl].filter(Boolean).join("\n\n");
-  const combinedRequirementsPl = [
-    `${perProductPl}${constraintsSuffix}`.trim(),
-    extraRulesPl,
-  ].filter(Boolean).join("\n\n").trim();
-
-  if (!lifePrompt) {
-    // Resume from viz_run when the job payload was cleared but viz_run still
-    // holds the built prompt.
-    if (vizRun?.prompt && vizRun.source_urls_hash === sourceUrlsHash && vizRun.constraints_hash === constraintsHash) {
-      lifePrompt = vizRun.prompt;
+  // Per-slot lifePrompt cache; seed from any legacy single-prompt viz_run.
+  const variantPromptCache: Array<string | null> = new Array(count).fill(null);
+  if (Array.isArray(vizRun?.variant_prompts)) {
+    for (let i = 0; i < count; i++) {
+      const p = vizRun!.variant_prompts![i];
+      if (typeof p === "string" && p.length > 0) variantPromptCache[i] = p;
     }
   }
-  if (!lifePrompt) {
+  if (
+    !variantPromptCache[0] &&
+    vizRun?.prompt &&
+    vizRun.source_urls_hash === sourceUrlsHash &&
+    vizRun.constraints_hash === constraintsHash
+  ) {
+    variantPromptCache[0] = vizRun.prompt;
+  }
+  if (!variantPromptCache[0] && lifePrompt) {
+    variantPromptCache[0] = lifePrompt;
+  }
+
+  const buildPromptForVariant = async (idx: number): Promise<string> => {
+    const cachedPrompt = variantPromptCache[idx];
+    if (cachedPrompt) return cachedPrompt;
+    const v = variantsAll[idx] ?? variantsAll[0]!;
+    const perProductPl = [
+      v.style ? `Scena: ${v.style}` : "",
+      v.requirements,
+    ].filter(Boolean).join("\n");
+    const extraRulesPl = [buildTypeRulesPl(v), onTextRulesPl, hostRulesPl].filter(Boolean).join("\n\n");
+    const combinedRequirementsPl = [
+      `${perProductPl}${constraintsSuffix}`.trim(),
+      extraRulesPl,
+    ].filter(Boolean).join("\n\n").trim();
+    let built: string;
     try {
-      await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
-      const built = await buildFalPromptsFromPolish({
+      await emit(ctx, { level: "info", message: `   • buduję prompt EN dla wariantu ${idx + 1}/${count} (gemini-3.1-pro)…` });
+      const r = await buildFalPromptsFromPolish({
         productName: nameForPrompt,
         productDesc: descForPrompt,
         requirementsPl: combinedRequirementsPl,
-        projectStyle: "", // integrated into requirementsPl above
+        projectStyle: "",
         clientGuidelines,
         productNotes,
       });
-      lifePrompt = built.lifestyle_prompt;
+      built = r.lifestyle_prompt;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback: ${msg}` });
+      await emit(ctx, { level: "warn", message: `   ⚠ AI prompt fallback (wariant ${idx + 1}): ${msg}` });
       const fb = fallbackPrompts({
         productName: nameForPrompt,
         productDesc: descForPrompt,
         requirementsPl: combinedRequirementsPl,
         projectStyle: projectStylePl,
       });
-      lifePrompt = fb.lifestyle_prompt;
+      built = fb.lifestyle_prompt;
     }
-    await saveProgress(slotState);
-    await persistVizRun({ phase: "prompt_ready", prompt: lifePrompt, reference_urls: referenceUrlsForFal });
-    if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
-      await emit(ctx, { level: "info", message: `   • prompt gotowy — render wystartuje w następnym przebiegu` });
-      return { complete: false };
-    }
-  }
+    variantPromptCache[idx] = built;
+    await persistVizRun({
+      phase: "prompt_ready",
+      prompt: idx === 0 ? built : (vizRun?.prompt ?? built),
+      reference_urls: referenceUrlsForFal,
+      variant_prompts: [...variantPromptCache],
+    });
+    return built;
+  };
 
   // Fallback single ref (used only if multi-ref list is empty for some reason,
   // e.g. no analysisUrls at all — keeps behaviour parity with the old code).
