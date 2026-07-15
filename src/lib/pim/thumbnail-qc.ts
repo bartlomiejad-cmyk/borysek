@@ -85,6 +85,12 @@ export function qcAllPass(qc: ThumbnailQcResult): boolean {
 export type VisualizationQcResult = {
   product_intact: boolean;
   product_visible: boolean;
+  /**
+   * True when the rendered product carries printed text/codes/branding that
+   * is NOT visible on the primary reference (image 1). Triggered by the QC
+   * prompt below; retried once with a corrective sentence, then review-flagged.
+   */
+  fabricated_text: boolean;
   issues: string[];
 };
 
@@ -102,17 +108,19 @@ export const VISUALIZATION_QC_SYSTEM_PROMPT = [
   "{",
   '  "product_intact": boolean,   // kolor CAŁEJ powierzchni (w tym rdzeń/wnętrze), materiał i proporcje zgodne z referencją; logo/napisy zachowane',
   '  "product_visible": boolean,  // produkt jest głównym obiektem, nieucięty, nie zasłonięty rekwizytami',
+  '  "fabricated_text": boolean,  // TRUE gdy na produkcie na obrazie 2 widnieje tekst/kod/marka/logo nieobecne na obrazie 1 (referencji). FALSE gdy wszystkie napisy są wiernie odwzorowane z referencji lub gdy produkt w obu obrazach jest bez napisów.',
   '  "issues": string[]           // konkretne różnice po polsku (np. "rdzeń rolki na obrazie 2 jest czarny, w referencji jest jasny"); puste gdy wszystko OK',
   "}",
   "Bądź surowy: przy JAKIEJKOLWIEK niezgodności koloru produktu, rdzenia, wnętrza, logo czy proporcji — product_intact=false i wypisz konkretne różnice.",
+  "Zasada tekstu: NIE wolno dodać żadnego napisu/kodu/marki, którego nie ma na referencji nr 1. Jeżeli referencja jest bez tekstu, produkt musi być bez tekstu.",
 ].join("\n");
 
 export function visualizationQcScore(qc: VisualizationQcResult): number {
-  return (qc.product_intact ? 2 : 0) + (qc.product_visible ? 1 : 0);
+  return (qc.product_intact ? 2 : 0) + (qc.product_visible ? 1 : 0) + (qc.fabricated_text ? 0 : 1);
 }
 
 export function visualizationQcPassed(qc: VisualizationQcResult): boolean {
-  return qc.product_intact && qc.product_visible;
+  return qc.product_intact && qc.product_visible && !qc.fabricated_text;
 }
 
 /**
@@ -138,6 +146,11 @@ export function buildVisualizationCorrectionSentence(qc: VisualizationQcResult):
   if (!qc.product_visible) {
     parts.push(
       "PREVIOUS ATTEMPT HID THE PRODUCT. The product must be the hero of the shot: fully visible, sharp, unobstructed by props, not cropped, occupying a clear central region of the frame.",
+    );
+  }
+  if (qc.fabricated_text) {
+    parts.push(
+      "PREVIOUS ATTEMPT PRINTED FABRICATED TEXT/BRANDING on the product. Reference image #1 is the ONLY source of truth for printed text, codes, labels and logos on the product surface. Reproduce ONLY what is physically visible on reference image #1. If reference #1 has no printed text on the product, the product surface MUST remain textless — do not add codes, brand names or model numbers copied from other reference images.",
     );
   }
   return parts.join(" ");
@@ -205,6 +218,7 @@ export async function runVisualizationQc(
   return {
     product_intact: asBool(obj.product_intact, true),
     product_visible: asBool(obj.product_visible, true),
+    fabricated_text: asBool(obj.fabricated_text, false),
     issues,
   };
 }
