@@ -2862,13 +2862,52 @@ export async function scrapeAndStoreSource(
   product: { id: string; project_id: string; nazwa: string | null; kod: string | null; ean: string | null },
   url: string,
   ctx: WorkerCtx | undefined,
-): Promise<{ ok: boolean; imageCount: number }> {
+  opts?: { userId?: string },
+): Promise<{
+  ok: boolean;
+  imageCount: number;
+  featuresCount?: number;
+  descLength?: number;
+  pageMatchesProduct?: boolean;
+  fromCache?: "none" | "shared";
+}> {
   const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
   try {
-    const scrape = (await firecrawl.scrape(url, {
-      formats: ["markdown", "rawHtml"],
-      onlyMainContent: true,
-    } as never)) as Record<string, unknown>;
+    // Cross-project shared cache lookup (14 days). Requires ownership scope.
+    const cacheHash = opts?.userId
+      ? await sha256Hex(`${opts.userId}|${normalizeUrlForCache(url)}`)
+      : null;
+    const cacheCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    let fromCache: "none" | "shared" = "none";
+    let scrape: Record<string, unknown> | null = null;
+    let cachedRow: { title: string | null; markdown: string | null; images: unknown; status: string } | null = null;
+    if (cacheHash) {
+      const { data: c } = await supabaseAdmin
+        .from("scrape_cache" as never)
+        .select("title, markdown, images, status, scraped_at")
+        .eq("url_hash", cacheHash)
+        .gte("scraped_at", cacheCutoff)
+        .maybeSingle();
+      if (c) {
+        cachedRow = c as never;
+      }
+    }
+    if (cachedRow && cachedRow.status === "ok" && typeof cachedRow.markdown === "string") {
+      fromCache = "shared";
+      const imgs = Array.isArray(cachedRow.images) ? (cachedRow.images as string[]) : [];
+      scrape = {
+        markdown: cachedRow.markdown,
+        metadata: { title: cachedRow.title ?? null },
+        // pickImagesFromScrape reads several shapes; give it the raw urls array
+        images: imgs,
+      } as Record<string, unknown>;
+      await emit(ctx, { level: "info", message: `   ♻️ ${host} — shared cache hit (<14d)`, details: { url } });
+    } else {
+      scrape = (await firecrawl.scrape(url, {
+        formats: ["markdown", "rawHtml"],
+        onlyMainContent: true,
+      } as never)) as Record<string, unknown>;
+    }
     const meta = (scrape.metadata ?? {}) as Record<string, unknown>;
     const title = (meta.title as string | undefined) ?? (meta.ogTitle as string | undefined) ?? null;
     const rawMarkdown = typeof scrape.markdown === "string" ? scrape.markdown : "";
@@ -2897,7 +2936,7 @@ export async function scrapeAndStoreSource(
         message: `   ⚠️ ${host} — strona nie dotyczy produktu, pominięto${filteredData.rejectedReason ? ` (${filteredData.rejectedReason})` : ""}`,
         details: { url, reason: filteredData.rejectedReason },
       });
-      return { ok: false, imageCount: 0 };
+      return { ok: false, imageCount: 0, pageMatchesProduct: false, fromCache };
     }
 
     const rejectedImages = candidateImages.filter((u) => !filteredData.imageUrls.includes(u));
@@ -2938,12 +2977,44 @@ export async function scrapeAndStoreSource(
         ai: filteredData.usedAi,
       },
     });
-    return { ok: true, imageCount: filteredData.imageUrls.length };
+
+    // Write-through into shared cache after a fresh Firecrawl scrape.
+    if (fromCache === "none" && cacheHash && opts?.userId) {
+      try {
+        const oversize = rawMarkdown.length > 1_000_000;
+        await supabaseAdmin
+          .from("scrape_cache" as never)
+          .upsert(
+            {
+              url_hash: cacheHash,
+              url: normalizeUrlForCache(url),
+              user_id: opts.userId,
+              title,
+              markdown: oversize ? null : rawMarkdown,
+              images: candidateImages as never,
+              status: oversize ? "partial" : "ok",
+              scraped_at: new Date().toISOString(),
+            } as never,
+            { onConflict: "url_hash" },
+          );
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return {
+      ok: true,
+      imageCount: filteredData.imageUrls.length,
+      featuresCount: filteredData.features.length,
+      descLength: (filteredData.description ?? "").length,
+      pageMatchesProduct: filteredData.is_product_page,
+      fromCache,
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("firecrawl scrape failed", url, e);
     await emit(ctx, { level: "warn", message: `   ⚠️ ${url} — ${msg}`, details: { url, error: msg } });
-    return { ok: false, imageCount: 0 };
+    return { ok: false, imageCount: 0, fromCache: "none" };
   }
 }
 
