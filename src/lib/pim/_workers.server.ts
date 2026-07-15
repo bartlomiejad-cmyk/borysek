@@ -3711,6 +3711,17 @@ export async function runPimVisualization(
   let overlayMotif = "";
   let onProductText: string[] = [];
   let hostDeviceName = "";
+  // Fresh variants[] returned by Gemini this run (if we called it this tick).
+  // Empty when we resumed from cache/viz_run/manual override — in that case
+  // we fall back to the cached variants list on the enrichment.
+  type EffVar = {
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+    manual?: boolean;
+  };
+  let freshVariantsFromAnalysis: EffVar[] = [];
 
   // 1) Manual overrides are never touched.
   if (cached?.manual && cached.style && cached.requirements) {
@@ -3772,6 +3783,7 @@ export async function runPimVisualization(
           featuresText,
           imageUrls: analysisUrls,
           projectConstraintsPl,
+          count,
         });
         analysisPl = { style: out.style, requirements: out.requirements };
         hasText = out.has_text;
@@ -3780,6 +3792,12 @@ export async function runPimVisualization(
         overlayMotif = out.overlay_motif;
         onProductText = out.on_product_text;
         hostDeviceName = out.host_device?.name ?? "";
+        freshVariantsFromAnalysis = out.variants.map((v) => ({
+          style: v.style,
+          requirements: v.requirements,
+          viz_type: v.viz_type,
+          overlay_motif: v.overlay_motif,
+        }));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         // "URL did not return an image" → identify offender, mark dead,
