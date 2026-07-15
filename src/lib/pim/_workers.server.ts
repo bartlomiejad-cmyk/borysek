@@ -3851,7 +3851,41 @@ export async function runPimVisualization(
   const constraintsSuffix = analysisSource === "fallback_project" || !projectConstraintsPl
     ? ""
     : `\n\nOGRANICZENIA PROJEKTU (nadrzędne wobec sceny powyżej):\n${projectConstraintsPl}`;
-  const combinedRequirementsPl = `${perProductPl}${constraintsSuffix}`.trim();
+  // Extra rules block, always appended: viz_type semantics, on-product text
+  // policy (only what's on reference #1), host-device handling, and the
+  // feature-explainer overlay motif spec.
+  const typeRulesPl = (() => {
+    if (vizType === "feature_explainer") {
+      return [
+        "TYP WIZUALIZACJI: feature_explainer — produkt w działaniu z JEDNYM motywem grafiki nakładkowej (półprzezroczysty stożek/pole/linia/glow) w jednym kolorze akcentu.",
+        overlayMotif ? `Motyw overlayu: ${overlayMotif}.` : "",
+        "Overlay nie może zasłaniać produktu; maksymalnie JEDNA strzałka; tekst na overlayu tylko jedna krótka etykieta (max 5 znaków, np. „360°”) albo brak. Bez badge’y, bez znaków wodnych.",
+      ].filter(Boolean).join(" ");
+    }
+    if (vizType === "in_use") {
+      return "TYP WIZUALIZACJI: in_use — produkt jest bohaterem sceny w jego naturalnym kontekście użycia (instalacja / eksploatacja / montaż), nie sam packshot.";
+    }
+    return "TYP WIZUALIZACJI: lifestyle — realistyczna scena użytkowa z produktem jako bohaterem, naturalne rekwizyty i światło.";
+  })();
+
+  const onTextRulesPl = onProductText.length
+    ? `NAPISY NA PRODUKCIE: odwzoruj DOKŁADNIE i wyłącznie te napisy widoczne na referencji nr 1: ${onProductText.map((s) => `"${s}"`).join(", ")}. Nie wolno dodać żadnego innego tekstu, kodu, marki ani logo — nawet jeśli pojawia się na innych zdjęciach referencyjnych.`
+    : `NAPISY NA PRODUKCIE: referencja nr 1 nie zawiera żadnych napisów na produkcie — powierzchnia produktu musi pozostać BEZ TEKSTU. Nie dodawaj kodów, nazw marki, numerów modeli ani logo — nawet gdy pojawiają się na innych zdjęciach.`;
+
+  const hostRulesPl = (() => {
+    if (!hostDeviceName && !hostDeviceUrl) return "";
+    if (hostDeviceUrl) {
+      return `URZĄDZENIE DOCELOWE: pokaż produkt w kontekście urządzenia-gościa widocznego na dodatkowej referencji „environment reference” (ostatnie zdjęcie na wejściu). Urządzenie musi wyglądać dokładnie tak jak na tej referencji — BEZ wymyślania modelu, kolorów ani logo.${hostDeviceName ? ` Nazwa: „${hostDeviceName}”.` : ""} PRODUKT (referencja nr 1) jest głównym bohaterem kadru; urządzenie stanowi tylko tło/kontekst.`;
+    }
+    // No image supplied — keep host generic to avoid confabulation.
+    return `URZĄDZENIE DOCELOWE: produkt jest akcesorium do „${hostDeviceName}”, ale użytkownik nie dostarczył zdjęcia urządzenia. NIE wymyślaj realnego modelu — pokaż urządzenie GENERYCZNIE, częściowo poza kadrem, w miękkim rozmyciu (płytka głębia ostrości), tak aby nigdy nie sugerować konkretnej marki/modelu. Produkt (referencja nr 1) musi być ostry i pierwszoplanowy.`;
+  })();
+
+  const extraRulesPl = [typeRulesPl, onTextRulesPl, hostRulesPl].filter(Boolean).join("\n\n");
+  const combinedRequirementsPl = [
+    `${perProductPl}${constraintsSuffix}`.trim(),
+    extraRulesPl,
+  ].filter(Boolean).join("\n\n").trim();
 
   if (!lifePrompt) {
     // Resume from viz_run when the job payload was cleared but viz_run still
