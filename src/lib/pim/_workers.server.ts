@@ -3987,7 +3987,6 @@ export async function runPimVisualization(
   // Persist the effective variants plan (and count/hide flag) so subsequent
   // resumes / manual UI edits have a stable base to work from.
   if (!cached?.manual && analysisSource !== "fallback_generic") {
-    await supabaseAdmin.rpc as unknown; // no-op placeholder for readability
     const { data: fresh } = await supabaseAdmin
       .from("enrichments")
       .select("image_meta")
