@@ -4991,7 +4991,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<P
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, ean, pipeline_status, review_status")
+    .select("id, project_id, nazwa, ean, category, pipeline_status, review_status")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -5119,6 +5119,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<P
         description: string | null;
       }>,
       clientGuidelines,
+      category: ((product as { category?: string | null }).category ?? "").trim(),
     });
 
     try {
