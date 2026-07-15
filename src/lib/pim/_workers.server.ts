@@ -2340,6 +2340,32 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const useApify = searchProvider === "apify" || searchProvider === "both";
   const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
 
+  // Scrape cap (max scrapes per product). Range 1..12, default 6.
+  const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 6);
+  const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 6));
+
+  // Owner userId for cross-project scrape_cache scoping.
+  let userId: string | null = null;
+  if (ctx?.bulkJobId) {
+    const { data: jobRow } = await supabaseAdmin
+      .from("bulk_jobs" as never)
+      .select("user_id")
+      .eq("id", ctx.bulkJobId)
+      .maybeSingle();
+    userId = ((jobRow as { user_id?: string } | null)?.user_id ?? null);
+  }
+
+  // Per-product usage accumulator; flushed to bulk_jobs.usage at end.
+  const usage: DiscoveryUsage = {
+    fc_searches: 0,
+    fc_scrapes: 0,
+    cache_hits_24h: 0,
+    cache_hits_shared: 0,
+    apify_runs: 0,
+    apify_empty: 0,
+    skipped_fc_searches: 0,
+  };
+
   // Load URLs the user has explicitly removed for this product — we still
   // fetch them via search (for audit / debug in query_variants) but never
   // rescrape them, and matching filters them out at pick-time.
@@ -2354,68 +2380,13 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     ),
   );
 
-  // ---- Firecrawl branch ----
-  if (useFirecrawl) {
-    for (let vi = 0; vi < variants.length; vi++) {
-      const v = variants[vi];
-      perVariant[vi].providers.firecrawl = 0;
-      let hits: FirecrawlSearchHit[] = [];
-      try {
-        const sr = (await firecrawl.search(v.query, {
-          limit: 10,
-          sources: ["web"],
-          location: "Poland",
-          lang: "pl",
-          country: "pl",
-        } as never)) as unknown;
-        const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
-        hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
-        continue;
-      }
-      // Firecrawl's index is noisy for bare-numeric queries; for the EAN
-      // variant (kind "A") keep ONLY hits whose title or snippet contains
-      // the exact EAN. Apify/Google is trusted for the same query.
-      const isEanVariant = v.kind === "A";
-      const eanDigits = isEanVariant ? v.query.replace(/\D/g, "") : "";
-      let droppedByEanFilter = 0;
-      let n = 0;
-      for (const h of hits) {
-        const url = (h.url ?? "").trim();
-        if (!url) continue;
-        if (isEanVariant && eanDigits) {
-          const title = (h as { title?: string }).title ?? "";
-          const snip =
-            (h as { description?: string; snippet?: string }).description ??
-            (h as { snippet?: string }).snippet ??
-            "";
-          const hay = `${title} ${snip}`.replace(/\D/g, "");
-          if (!hay.includes(eanDigits)) {
-            droppedByEanFilter++;
-            continue;
-          }
-        }
-        upsertResult(vi, url, "firecrawl", {
-          title: (h as { title?: string }).title,
-          snippet: (h as { description?: string; snippet?: string }).description
-            ?? (h as { snippet?: string }).snippet,
-          domain: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return undefined; } })(),
-        });
-        n++;
-      }
-      perVariant[vi].providers.firecrawl = n;
-      if (droppedByEanFilter > 0) {
-        await emit(ctx, {
-          level: "info",
-          message: `   ${nazwa} — Firecrawl [A] "${v.query}": odrzucono ${droppedByEanFilter} wyników bez EAN w tytule/snippet`,
-        });
-      }
-    }
-  }
+  // Provider order rule (combined mode): run Apify FIRST, then Firecrawl only
+  // as fallback for variants Apify couldn't serve. In "firecrawl"-only mode
+  // Firecrawl runs unconditionally. The EAN variant (kind "A") is NEVER
+  // sent to Firecrawl in combined mode (its index is noisy for bare
+  // numeric queries and Apify covers it well).
 
-  // ---- Apify branch ----
+  // ---- Apify branch (first in combined mode) ----
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
   const apifyVariantMeta: SerpMeta[] = [];
   if (useApify) {
@@ -2471,6 +2442,8 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         n++;
       }
       perVariant[vi].providers.apify = n;
+      usage.apify_runs = (usage.apify_runs ?? 0) + 1;
+      if (n === 0) usage.apify_empty = (usage.apify_empty ?? 0) + 1;
     }
 
     if (flat.length) {
@@ -2539,6 +2512,78 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         level: "info",
         message: `🎯 ${nazwa} — Apify SERP: ${flat.length} wyników, AI wybrała ${picks.length}${aiPreselectMeta.error ? " (fallback)" : ""}`,
       });
+    }
+  }
+
+  // ---- Firecrawl branch (per-variant, conditional in combined mode) ----
+  if (useFirecrawl) {
+    for (let vi = 0; vi < variants.length; vi++) {
+      const v = variants[vi];
+      perVariant[vi].providers.firecrawl = 0;
+      const apifyCount = perVariant[vi].providers.apify ?? 0;
+      // Combined mode: skip Firecrawl search for the EAN variant (always),
+      // and skip when Apify returned >=1 result for the variant.
+      if (searchProvider === "both") {
+        if (v.kind === "A" || apifyCount > 0) {
+          usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
+          await emit(ctx, {
+            level: "info",
+            message: `   ⏭ ${nazwa} — Firecrawl search [${v.kind}] pominięty (Apify: ${apifyCount} wyników${v.kind === "A" ? ", wariant EAN" : ""})`,
+          });
+          continue;
+        }
+      }
+      let hits: FirecrawlSearchHit[] = [];
+      try {
+        const sr = (await firecrawl.search(v.query, {
+          limit: 10,
+          sources: ["web"],
+          location: "Poland",
+          lang: "pl",
+          country: "pl",
+        } as never)) as unknown;
+        const srObj = sr as { web?: FirecrawlSearchHit[]; data?: FirecrawlSearchHit[] };
+        hits = (srObj.web ?? srObj.data ?? []) as FirecrawlSearchHit[];
+        usage.fc_searches = (usage.fc_searches ?? 0) + 1;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — Firecrawl search [${v.kind}]: ${msg}` });
+        continue;
+      }
+      const isEanVariant = v.kind === "A";
+      const eanDigits = isEanVariant ? v.query.replace(/\D/g, "") : "";
+      let droppedByEanFilter = 0;
+      let n = 0;
+      for (const h of hits) {
+        const url = (h.url ?? "").trim();
+        if (!url) continue;
+        if (isEanVariant && eanDigits) {
+          const title = (h as { title?: string }).title ?? "";
+          const snip =
+            (h as { description?: string; snippet?: string }).description ??
+            (h as { snippet?: string }).snippet ??
+            "";
+          const hay = `${title} ${snip}`.replace(/\D/g, "");
+          if (!hay.includes(eanDigits)) {
+            droppedByEanFilter++;
+            continue;
+          }
+        }
+        upsertResult(vi, url, "firecrawl", {
+          title: (h as { title?: string }).title,
+          snippet: (h as { description?: string; snippet?: string }).description
+            ?? (h as { snippet?: string }).snippet,
+          domain: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return undefined; } })(),
+        });
+        n++;
+      }
+      perVariant[vi].providers.firecrawl = n;
+      if (droppedByEanFilter > 0) {
+        await emit(ctx, {
+          level: "info",
+          message: `   ${nazwa} — Firecrawl [A] "${v.query}": odrzucono ${droppedByEanFilter} wyników bez EAN w tytule/snippet`,
+        });
+      }
     }
   }
 
