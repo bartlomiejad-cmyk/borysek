@@ -3370,7 +3370,7 @@ export async function runPimVisualization(
 
   const { data: product } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, raw, product_notes, manual_lock")
+    .select("id, project_id, nazwa, raw, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("Product not found");
@@ -3387,15 +3387,19 @@ export async function runPimVisualization(
     .single();
   const clientGuidelines =
     ((projRow?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "").trim();
+  const projectHostDeviceUrl = (
+    (projRow?.settings as { host_device_url?: string } | null)?.host_device_url ?? ""
+  ).trim();
   const constraintsHash = await sha256Hex(JSON.stringify({
     style: projectStylePl,
     requirements: projectRequirementsPl,
     client_guidelines: clientGuidelines,
+    host_device_url: projectHostDeviceUrl,
   }));
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta, hidden_images, image_scores")
+    .select("id, picked_urls, regenerated_main_image, pinned_main_url, ai_gallery_urls, golden_name, golden_description, golden_features, image_meta, hidden_images, image_scores, score_breakdown")
     .eq("source_product_id", productId)
     .maybeSingle();
   if (!enrichment) throw new Error("Brak enrichment");
@@ -3411,7 +3415,18 @@ export async function runPimVisualization(
     image_meta: Record<string, unknown> | null;
     hidden_images: string[] | null;
     image_scores: Record<string, unknown> | null;
+    score_breakdown: Array<{ url: string; total?: number }> | null;
   };
+
+  const matchingMode: "strict" | "compatible" =
+    ((product as { matching_mode?: string | null }).matching_mode === "compatible")
+      ? "compatible"
+      : "strict";
+  // Per-product host-device override: takes precedence over the project default.
+  const productHostDeviceUrl = (
+    ((e.image_meta ?? {}) as { host_device_url?: string }).host_device_url ?? ""
+  ).toString().trim();
+  const hostDeviceUrl = productHostDeviceUrl || projectHostDeviceUrl;
 
   // Pick main source image: pinned → regenerated (skip sentinel) → picked[0].
   const regen = e.regenerated_main_image && e.regenerated_main_image !== "__imported__"
