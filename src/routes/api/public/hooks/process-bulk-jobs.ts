@@ -397,6 +397,15 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
             .update(patch as never)
             .eq("id", job.id);
         } else if (!result.cancelled && result.remaining.length > 0) {
+          // Release this tick's claim before self-triggering. Otherwise the
+          // immediate follow-up request sees `locked_at = now()` and skips this
+          // job for the stale-lock window, often picking an old unrelated job
+          // instead of continuing the queue the user just started.
+          await supabaseAdmin
+            .from("bulk_jobs" as never)
+            .update({ locked_at: null, lock_token: null } as never)
+            .eq("id", job.id);
+
           // Continue the same job on the same deployed URL that handled this
           // tick. This avoids waiting for pg_cron (which may still point at an
           // older published hook during preview testing) and keeps long queues

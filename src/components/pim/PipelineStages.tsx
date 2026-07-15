@@ -128,14 +128,18 @@ export function PipelineStages({
    */
   onRunAudit?: () => void;
 }) {
-  // Determine "next step": the earliest stage with the largest pending count.
+  // Determine "next step": the earliest stage with pending work. Later stages
+  // may have more items, but they depend on earlier blockers being cleared
+  // first (e.g. 27 missing sources must stay actionable even if 47 products
+  // are already waiting for matching).
   let best: Stage | null = null;
   let bestPending = 0;
   for (const stg of STAGES) {
     const p = stg.pending(summary);
-    if (p > bestPending) {
+    if (p > 0) {
       best = stg;
       bestPending = p;
+      break;
     }
   }
 
