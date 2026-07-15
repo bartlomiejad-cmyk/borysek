@@ -4486,6 +4486,39 @@ export async function runPimVisualization(
 
   await saveProgress(null);
 
+  // Diversity guard: if the batch produced ≥2 variant prompts and any pair is
+  // ≥90% Jaccard-similar on style+requirements tokens, log a warn so prompt
+  // calibration is visible in the job log.
+  if (count >= 2) {
+    const tokenize = (s: string): Set<string> => {
+      const words = (s || "")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 3);
+      return new Set(words);
+    };
+    const sig = variantsAll.map((v) => tokenize(`${v.style} ${v.requirements}`));
+    let flagged = false;
+    for (let i = 0; i < sig.length && !flagged; i++) {
+      for (let j = i + 1; j < sig.length && !flagged; j++) {
+        const a = sig[i]!, b = sig[j]!;
+        if (a.size === 0 || b.size === 0) continue;
+        let inter = 0;
+        for (const t of a) if (b.has(t)) inter++;
+        const uni = a.size + b.size - inter;
+        const jac = uni === 0 ? 0 : inter / uni;
+        if (jac >= 0.9) {
+          await emit(ctx, {
+            level: "warn",
+            message: `   ⚠ niska różnorodność wariantów ${i + 1} i ${j + 1} (Jaccard ${(jac * 100).toFixed(0)}%) — rozważ ponowną analizę lub ręczną edycję`,
+          });
+          flagged = true;
+        }
+      }
+    }
+  }
+
   const { data: finalEn } = await supabaseAdmin
     .from("enrichments")
     .select("ai_gallery_urls")
