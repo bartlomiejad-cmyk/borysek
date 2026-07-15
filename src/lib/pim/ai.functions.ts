@@ -682,6 +682,7 @@ export async function filterAliveImages(
   enrichmentId: string,
   urls: string[],
   currentScores: Record<string, ImageScore>,
+  opts?: { revalidate?: boolean },
 ): Promise<{ alive: string[]; dead: string[] }> {
   if (!urls.length) return { alive: [], dead: [] };
 
@@ -689,7 +690,7 @@ export async function filterAliveImages(
   const toProbe: string[] = [];
   for (const u of urls) {
     const prev = currentScores[u];
-    if (prev?.dead === true && prev.manual_keep !== true) {
+    if (prev?.dead === true && prev.manual_keep !== true && !opts?.revalidate) {
       cachedDead.push(u);
     } else {
       toProbe.push(u);
