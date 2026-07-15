@@ -4141,7 +4141,7 @@ export async function runPimVisualization(
   };
 
   // Commit a picked URL + its viz_qc metadata to the enrichment row.
-  const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number) => {
+  const commitVisualization = async (publicUrl: string, qc: VisualizationQcResult, attempts: number, slot: number, variantIndex: number) => {
     const { data: fresh, error: readErr } = await supabaseAdmin
       .from("enrichments")
       .select("ai_gallery_urls, image_meta")
@@ -4165,7 +4165,8 @@ export async function runPimVisualization(
       attempts,
       at: new Date().toISOString(),
       reference_url: effectiveRefUrls[0] ?? null,
-    };
+    } as VisualizationQcPersisted & { variant_index?: number };
+    (vizQcMap[publicUrl] as unknown as { variant_index?: number }).variant_index = variantIndex;
     const nextMeta: Record<string, unknown> = { ...meta, viz_qc: vizQcMap };
     const updatePayload: Record<string, unknown> = {
       ai_gallery_urls: merged,
@@ -4296,9 +4297,17 @@ export async function runPimVisualization(
 
       const slot = slotState.slot;
       const attempt = slotState.attempts ?? 0;
+      // Compute the prompt for THIS variant slot (cached across attempts and
+      // across worker resumes via viz_run.variant_prompts).
+      lifePrompt = await buildPromptForVariant(slot);
+      if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
+        await emit(ctx, { level: "info", message: `   • prompt gotowy (wariant ${slot + 1}/${count}) — render wystartuje w następnym przebiegu` });
+        await saveProgress(slotState);
+        return { complete: false };
+      }
       await emit(ctx, {
         level: "info",
-        message: `   • wizualizacja ${slot + 1}/${count} (próba ${attempt + 1}/3)…`,
+        message: `   • wizualizacja ${slot + 1}/${count} · wariant ${slot + 1} (próba ${attempt + 1}/3)…`,
       });
       if (!slotState.mode) slotState = { ...slotState, mode: "edit" };
 
@@ -4397,6 +4406,15 @@ export async function runPimVisualization(
         try {
           const apiKey2 = process.env.LOVABLE_API_KEY!;
           qc = await runVisualizationQc(apiKey2, effectiveRefUrls[0], publicUrl);
+          if (hideProductText) {
+            // User asked for a textless product — any legible text on the
+            // rendered product is a fabrication regardless of what reference
+            // #1 shows. runVisualizationQc's default rule falls back to the
+            // reference; overlay that with our stricter rule here.
+            if (!qc.fabricated_text && (qc.issues.some((s) => /napis|text|logo|kod|nadruk/i.test(s)))) {
+              qc = { ...qc, fabricated_text: true };
+            }
+          }
         } catch (qcErr) {
           const msg = qcErr instanceof Error ? qcErr.message : String(qcErr);
           await emit(ctx, { level: "warn", message: `   ⚠ viz QC skipped (${msg.slice(0, 160)})` });
@@ -4431,7 +4449,7 @@ export async function runPimVisualization(
           continue;
         }
         // Commit the best candidate we have.
-        await commitVisualization(bestUrl, bestQc, attemptsSoFar, slot);
+        await commitVisualization(bestUrl, bestQc, attemptsSoFar, slot, slot);
         await cleanupSource(slotState);
         slotState = { slot: slot + 1 };
         await saveProgress(slotState.slot < count ? slotState : null);
