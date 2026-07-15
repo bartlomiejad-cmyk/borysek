@@ -246,7 +246,7 @@ export async function serpSampleQuery(
   keyword: string;
   isNumeric: boolean;
   rawSample?: string;
-  input?: Record<string, unknown>;
+  inputJson?: string;
 }> {
   const gl = (opts.gl ?? "PL").toUpperCase();
   const hl = (opts.hl ?? "pl").toLowerCase();
@@ -265,7 +265,9 @@ export async function serpSampleQuery(
       keyword: q,
       isNumeric,
       rawSample: b?.meta.apify_raw_sample,
-      input: b?.meta.apify_input_sample ?? { keyword: q, limit: "10", gl, hl },
+      inputJson: JSON.stringify(
+        b?.meta.apify_input_sample ?? { keyword: q, limit: "10", gl, hl },
+      ),
     };
   } catch (e) {
     return {
