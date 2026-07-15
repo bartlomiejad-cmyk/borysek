@@ -114,10 +114,10 @@ async function pickNextJob(): Promise<BulkJobRow | null> {
   // hook ticks can never receive the same job; stale locks (>3 min) are
   // reclaimable. Falls back to the old query if the RPC is unavailable
   // (e.g. pre-migration environments) so the worker keeps running.
-  const { data, error } = await supabaseAdmin.rpc("claim_next_bulk_job" as never, {
+  const { data, error } = (await supabaseAdmin.rpc("claim_next_bulk_job" as never, {
     p_stale_seconds: 180,
-  } as never);
-  if (!error && Array.isArray(data) && data.length) {
+  } as never)) as { data: unknown; error: { message: string } | null };
+  if (!error && Array.isArray(data) && data.length > 0) {
     return (data[0] as unknown) as BulkJobRow;
   }
   if (error) {
