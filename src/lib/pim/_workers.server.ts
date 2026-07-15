@@ -2880,7 +2880,9 @@ export async function scrapeAndStoreSource(
     const cacheCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
     let fromCache: "none" | "shared" = "none";
     let scrape: Record<string, unknown> | null = null;
-    let cachedRow: { title: string | null; markdown: string | null; images: unknown; status: string } | null = null;
+    let cachedRow:
+      | { title: string | null; markdown: string | null; images: unknown; status: string }
+      | null = null;
     if (cacheHash) {
       const { data: c } = await supabaseAdmin
         .from("scrape_cache" as never)
@@ -2889,7 +2891,7 @@ export async function scrapeAndStoreSource(
         .gte("scraped_at", cacheCutoff)
         .maybeSingle();
       if (c) {
-        cachedRow = c as never;
+        cachedRow = c as unknown as typeof cachedRow;
       }
     }
     if (cachedRow && cachedRow.status === "ok" && typeof cachedRow.markdown === "string") {
