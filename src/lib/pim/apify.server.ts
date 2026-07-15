@@ -33,6 +33,15 @@ export type SerpMeta = {
   input: { keyword: string; gl: string; hl: string; limit: number };
   results_count: number;
   error?: string;
+  /**
+   * Diagnostic capture for bare-numeric (EAN-like) queries that returned
+   * zero organic results. Populated at most once per `runSerpSearch` call
+   * (first empty numeric variant). Used to investigate whether the actor
+   * is returning a non-organic payload (captcha, related searches, US
+   * proxy fallback, etc.) despite the same query having Polish results.
+   */
+  apify_raw_sample?: string;
+  apify_input_sample?: Record<string, unknown>;
 };
 
 export type SerpBucket = {
@@ -160,6 +169,7 @@ export async function runSerpSearch(
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
   const buckets: SerpBucket[] = [];
+  let numericSampleCaptured = false;
   for (const keyword of clean) {
     // Actor input validation requires numeric-looking fields as strings
     // (docs list defaults like "10"). Sending a JSON number → HTTP 400
@@ -187,6 +197,20 @@ export async function runSerpSearch(
       if (!Array.isArray(items)) items = [];
       const results = normalizeResults(items);
       meta.results_count = results.length;
+      // Diagnostics: bare-numeric queries (EAN-like) sometimes come back
+      // empty even though the same search in Polish Google UI has hits.
+      // Snapshot the raw dataset so we can see what the actor returned
+      // (related searches, captcha, non-organic blocks, empty array, etc.).
+      if (!numericSampleCaptured && results.length === 0 && /^\d+$/.test(keyword)) {
+        try {
+          const raw = JSON.stringify(items).slice(0, 4096);
+          meta.apify_raw_sample = raw;
+          meta.apify_input_sample = { ...input };
+          numericSampleCaptured = true;
+        } catch {
+          // ignore serialization errors — diagnostics only
+        }
+      }
       buckets.push({ query: keyword, results, meta });
     } catch (e) {
       meta.error = e instanceof Error ? e.message : String(e);
@@ -212,11 +236,23 @@ export async function serpHealthCheck(): Promise<{ ok: boolean; count: number; e
 export async function serpSampleQuery(
   query: string,
   opts: { gl?: string; hl?: string } = {},
-): Promise<{ ok: boolean; count: number; results: SerpResult[]; gl: string; hl: string; error?: string }> {
+): Promise<{
+  ok: boolean;
+  count: number;
+  results: SerpResult[];
+  gl: string;
+  hl: string;
+  error?: string;
+  keyword: string;
+  isNumeric: boolean;
+  rawSample?: string;
+  inputJson?: string;
+}> {
   const gl = (opts.gl ?? "PL").toUpperCase();
   const hl = (opts.hl ?? "pl").toLowerCase();
   try {
     const q = query.trim() || "kawa arabica sklep";
+    const isNumeric = /^\d+$/.test(q);
     const [b] = await runSerpSearch([q], { limit: 10, gl, hl, timeoutMs: 45_000 });
     const results = (b?.results ?? []).slice(0, 5);
     return {
@@ -226,8 +262,23 @@ export async function serpSampleQuery(
       gl,
       hl,
       error: b?.meta.error,
+      keyword: q,
+      isNumeric,
+      rawSample: b?.meta.apify_raw_sample,
+      inputJson: JSON.stringify(
+        b?.meta.apify_input_sample ?? { keyword: q, limit: "10", gl, hl },
+      ),
     };
   } catch (e) {
-    return { ok: false, count: 0, results: [], gl, hl, error: e instanceof Error ? e.message : String(e) };
+    return {
+      ok: false,
+      count: 0,
+      results: [],
+      gl,
+      hl,
+      error: e instanceof Error ? e.message : String(e),
+      keyword: query,
+      isNumeric: /^\d+$/.test(query.trim()),
+    };
   }
 }
