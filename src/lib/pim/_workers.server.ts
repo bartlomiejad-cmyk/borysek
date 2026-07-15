@@ -162,6 +162,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
   featuresText: string;
   imageUrls: string[]; // main first, max 4, must be publicly fetchable
   projectConstraintsPl?: string; // optional PL text; overrides scene choices
+  count?: number; // desired variant count (>=1). Result contains variants[].
 }): Promise<{
   style: string;
   requirements: string;
@@ -173,24 +174,37 @@ export async function analyzeVisualizationSceneForProduct(args: {
   overlay_motif: string;
   on_product_text: string[];
   host_device: { name: string } | null;
+  variants: Array<{
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+  }>;
 }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
   const urls = args.imageUrls.filter(Boolean).slice(0, 4);
   if (!urls.length) throw new Error("Brak zdjęć do analizy");
+  const count = Math.max(1, Math.min(8, Math.floor(args.count ?? 1)));
 
   const system = [
     "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
     "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
     "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
-    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"...", "viz_type":"lifestyle|in_use|feature_explainer", "type_reason":"...", "overlay_motif":"...", "on_product_text":["..."], "host_device": {"name":"..."} | null }.',
-    "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
-    "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    `Zwróć wyłącznie JSON: {"has_text": boolean, "color_anchor_en":"...", "on_product_text":["..."], "host_device": {"name":"..."} | null, "variants": [ { "style":"...", "requirements":"...", "viz_type":"lifestyle|in_use|feature_explainer", "type_reason":"...", "overlay_motif":"..." } ] }.`,
+    `- variants: TABLICA o DOKŁADNIE ${count} pozycji${count === 1 ? "" : ", każdy wpis to inna scena/plan wizualizacji"}.`,
+    ...(count > 1
+      ? [
+          "- REGUŁA RÓŻNORODNOŚCI: Każdy wariant musi różnić się co najmniej DWOMA z: otoczenie/lokalizacja, typ ujęcia (in_use / lifestyle / feature_explainer / detal makro), kąt i odległość kamery, obecność dłoni/osoby, pora dnia i charakter światła. Warianty uporządkuj od najbardziej uniwersalnego do najbardziej kreatywnego. Nie powtarzaj tej samej sceny w innym oświetleniu.",
+        ]
+      : []),
+    "- variants[i].style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
+    "- variants[i].requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
+    "- variants[i].viz_type: 'lifestyle' dla produktów konsumenckich/dekoracyjnych (mieszkanie, kuchnia, ogród, ubranie); 'in_use' dla części/akcesoriów/eksploatacji, które działają wewnątrz/na urządzeniu-goście (filtry, wkłady, końcówki, ostrza, worki); 'feature_explainer' dla urządzeń technicznych z jedną wyraźną funkcją (zasięg, pole działania, przepływ, kierunek pracy).",
+    "- variants[i].type_reason (≤120 znaków, PL): krótkie uzasadnienie viz_type dla tego wariantu.",
+    "- variants[i].overlay_motif (≤80 znaków, PL): TYLKO gdy viz_type=feature_explainer. Jeden motyw grafiki nakładkowej ilustrującej funkcję. Dla innych viz_type: pusty string.",
     '- has_text: true jeśli na produkcie widać czytelne napisy/logo/etykiety, false gdy produkt jest "gładki" (np. jednokolorowa taśma, folia, karton bez druku).',
     '- color_anchor_en (60–180 znaków, PO ANGIELSKU): konkretne, nazwane kolory najważniejszych powierzchni produktu i wnętrza/rdzenia (np. "outer wound surface uniformly bright green, side face green, core light beige/white"). Kluczowe zwłaszcza dla produktów bez tekstu — zastępuje ogólne "preserve colours".',
-    "- viz_type: 'lifestyle' dla produktów konsumenckich/dekoracyjnych (mieszkanie, kuchnia, ogród, ubranie); 'in_use' dla części/akcesoriów/eksploatacji, które działają wewnątrz/na urządzeniu-goście (filtry, wkłady, końcówki, ostrza, worki); 'feature_explainer' dla urządzeń technicznych z jedną wyraźną funkcją (zasięg, pole działania, przepływ, kierunek pracy).",
-    "- type_reason (≤120 znaków, PL): krótkie uzasadnienie wyboru viz_type.",
-    '- overlay_motif (≤80 znaków, PL): TYLKO gdy viz_type=feature_explainer. Jeden motyw grafiki nakładkowej ilustrującej funkcję (np. "półprzezroczysty stożek zasięgu 120°", "świecąca linia pola działania", "strzałka przepływu powietrza w jednym akcencie kolorystycznym"). Dla innych viz_type: pusty string.',
     "- on_product_text: dokładnie te napisy/kody/marki widoczne fizycznie na produkcie na obrazie 1 (referencji głównej), każdy jako osobny string z cudzysłowem („PRODUCT NAME”). Pusta tablica gdy produkt jest bez napisów.",
     '- host_device: gdy nazwa produktu lub cechy wskazują urządzenie-gościa (np. "do rekuperatora Wanas", "pasuje do Bosch MUM"), zwróć { "name": "<pełna nazwa urządzenia>" }. W innym wypadku null.',
     "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
@@ -203,7 +217,7 @@ export async function analyzeVisualizationSceneForProduct(args: {
     constraintsBlock
       ? `OGRANICZENIA PROJEKTU (nadrzędne wobec Twoich pomysłów na scenę):\n${constraintsBlock}`
       : "",
-    `Przeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON.`,
+    `Przeanalizuj ${urls.length} zdjęci${urls.length === 1 ? "e" : "a"} poniżej i zwróć JSON z ${count} wariant${count === 1 ? "em" : "ami"} sceny.`,
   ].filter(Boolean).join("\n");
 
   const content: Array<
@@ -225,18 +239,53 @@ export async function analyzeVisualizationSceneForProduct(args: {
     overlay_motif?: unknown;
     on_product_text?: unknown;
     host_device?: unknown;
+    variants?: unknown;
   };
-  const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
-  const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+  const rawVariants: Array<{
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+  }> = [];
+  if (Array.isArray(parsed.variants)) {
+    for (const v of parsed.variants as unknown[]) {
+      if (!v || typeof v !== "object") continue;
+      const obj = v as { style?: unknown; requirements?: unknown; viz_type?: unknown; overlay_motif?: unknown };
+      const s = typeof obj.style === "string" ? obj.style.trim() : "";
+      const r = typeof obj.requirements === "string" ? obj.requirements.trim() : "";
+      if (!s || !r) continue;
+      const vt0 = typeof obj.viz_type === "string" ? obj.viz_type.trim().toLowerCase() : "";
+      const vt: "lifestyle" | "in_use" | "feature_explainer" =
+        vt0 === "in_use" || vt0 === "feature_explainer" ? vt0 : "lifestyle";
+      const om = typeof obj.overlay_motif === "string" ? obj.overlay_motif.trim() : "";
+      rawVariants.push({ style: s, requirements: r, viz_type: vt, overlay_motif: om });
+    }
+  }
+  // Legacy fallback: model returned flat top-level fields instead of variants[].
+  if (rawVariants.length === 0) {
+    const s = typeof parsed.style === "string" ? parsed.style.trim() : "";
+    const r = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
+    const vt0 = typeof parsed.viz_type === "string" ? parsed.viz_type.trim().toLowerCase() : "";
+    const vt: "lifestyle" | "in_use" | "feature_explainer" =
+      vt0 === "in_use" || vt0 === "feature_explainer" ? vt0 : "lifestyle";
+    const om = typeof parsed.overlay_motif === "string" ? parsed.overlay_motif.trim() : "";
+    if (s && r) rawVariants.push({ style: s, requirements: r, viz_type: vt, overlay_motif: om });
+  }
+  if (rawVariants.length === 0) throw new Error("Model nie zwrócił planu sceny");
+  // Pad up to requested count by cloning the last unique variant (model
+  // occasionally returns fewer entries than requested).
+  while (rawVariants.length < count) {
+    rawVariants.push({ ...rawVariants[rawVariants.length - 1]! });
+  }
+  const variants = rawVariants.slice(0, count);
+  const style = variants[0]!.style;
+  const requirements = variants[0]!.requirements;
+  const viz_type = variants[0]!.viz_type;
+  const overlay_motif = variants[0]!.overlay_motif;
+  const type_reason = typeof parsed.type_reason === "string" ? parsed.type_reason.trim() : "";
   const has_text = typeof parsed.has_text === "boolean" ? parsed.has_text : true;
   const color_anchor_en =
     typeof parsed.color_anchor_en === "string" ? parsed.color_anchor_en.trim() : "";
-  const vt = typeof parsed.viz_type === "string" ? parsed.viz_type.trim().toLowerCase() : "";
-  const viz_type: "lifestyle" | "in_use" | "feature_explainer" =
-    vt === "in_use" || vt === "feature_explainer" ? vt : "lifestyle";
-  const type_reason = typeof parsed.type_reason === "string" ? parsed.type_reason.trim() : "";
-  const overlay_motif =
-    typeof parsed.overlay_motif === "string" ? parsed.overlay_motif.trim() : "";
   const on_product_text: string[] = Array.isArray(parsed.on_product_text)
     ? (parsed.on_product_text as unknown[])
         .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
@@ -250,10 +299,9 @@ export async function analyzeVisualizationSceneForProduct(args: {
       host_device = { name: hd.name.trim() };
     }
   }
-  if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
   return {
     style, requirements, used: urls.length, has_text, color_anchor_en,
-    viz_type, type_reason, overlay_motif, on_product_text, host_device,
+    viz_type, type_reason, overlay_motif, on_product_text, host_device, variants,
   };
 }
 
