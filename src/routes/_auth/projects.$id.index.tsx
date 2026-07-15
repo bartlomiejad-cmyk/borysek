@@ -2322,6 +2322,7 @@ function SettingsCard({
             </div>
           </div>
         </div>
+        <ProjectUsagePanel projectId={(project?.id as string | undefined) ?? ""} />
         <div className="pt-4 border-t space-y-3">
           <div className="flex items-center gap-3">
             <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
