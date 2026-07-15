@@ -168,6 +168,11 @@ export async function analyzeVisualizationSceneForProduct(args: {
   used: number;
   has_text: boolean;
   color_anchor_en: string;
+  viz_type: "lifestyle" | "in_use" | "feature_explainer";
+  type_reason: string;
+  overlay_motif: string;
+  on_product_text: string[];
+  host_device: { name: string } | null;
 }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
@@ -178,11 +183,16 @@ export async function analyzeVisualizationSceneForProduct(args: {
     "Jesteś dyrektorem artystycznym fotografii lifestyle e-commerce.",
     "Analizujesz załączone zdjęcia produktu i piszesz po polsku spersonalizowany prompt do wizualizacji lifestyle (produkt w scenie użytkowej).",
     "Zaobserwuj typ produktu, kategorię, materiał, kolor, kontekst użycia.",
-    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"..."}.',
+    'Zwróć wyłącznie JSON: {"style":"...", "requirements":"...", "has_text": boolean, "color_anchor_en":"...", "viz_type":"lifestyle|in_use|feature_explainer", "type_reason":"...", "overlay_motif":"...", "on_product_text":["..."], "host_device": {"name":"..."} | null }.',
     "- style (80–220 znaków): scena/otoczenie pasujące do TEGO konkretnego produktu — powierzchnia, tło, pora dnia, nastrój, charakter światła. Bez ludzi z twarzą, bez marek, bez cen.",
     "- requirements (140–320 znaków): kąt kamery, głębia ostrości, kierunek/temperatura światła, kompozycja, rekwizyty. Dodaj: zachowaj kolor, logo, etykiety i proporcje produktu dokładnie jak w źródle.",
     '- has_text: true jeśli na produkcie widać czytelne napisy/logo/etykiety, false gdy produkt jest "gładki" (np. jednokolorowa taśma, folia, karton bez druku).',
     '- color_anchor_en (60–180 znaków, PO ANGIELSKU): konkretne, nazwane kolory najważniejszych powierzchni produktu i wnętrza/rdzenia (np. "outer wound surface uniformly bright green, side face green, core light beige/white"). Kluczowe zwłaszcza dla produktów bez tekstu — zastępuje ogólne "preserve colours".',
+    "- viz_type: 'lifestyle' dla produktów konsumenckich/dekoracyjnych (mieszkanie, kuchnia, ogród, ubranie); 'in_use' dla części/akcesoriów/eksploatacji, które działają wewnątrz/na urządzeniu-goście (filtry, wkłady, końcówki, ostrza, worki); 'feature_explainer' dla urządzeń technicznych z jedną wyraźną funkcją (zasięg, pole działania, przepływ, kierunek pracy).",
+    "- type_reason (≤120 znaków, PL): krótkie uzasadnienie wyboru viz_type.",
+    '- overlay_motif (≤80 znaków, PL): TYLKO gdy viz_type=feature_explainer. Jeden motyw grafiki nakładkowej ilustrującej funkcję (np. "półprzezroczysty stożek zasięgu 120°", "świecąca linia pola działania", "strzałka przepływu powietrza w jednym akcencie kolorystycznym"). Dla innych viz_type: pusty string.',
+    "- on_product_text: dokładnie te napisy/kody/marki widoczne fizycznie na produkcie na obrazie 1 (referencji głównej), każdy jako osobny string z cudzysłowem („PRODUCT NAME”). Pusta tablica gdy produkt jest bez napisów.",
+    '- host_device: gdy nazwa produktu lub cechy wskazują urządzenie-gościa (np. "do rekuperatora Wanas", "pasuje do Bosch MUM"), zwróć { "name": "<pełna nazwa urządzenia>" }. W innym wypadku null.',
     "Bez markdown, bez cudzysłowów wokół całości, bez komentarza. Tylko surowy JSON.",
   ].join("\n");
 
@@ -210,14 +220,41 @@ export async function analyzeVisualizationSceneForProduct(args: {
     requirements?: unknown;
     has_text?: unknown;
     color_anchor_en?: unknown;
+    viz_type?: unknown;
+    type_reason?: unknown;
+    overlay_motif?: unknown;
+    on_product_text?: unknown;
+    host_device?: unknown;
   };
   const style = typeof parsed.style === "string" ? parsed.style.trim() : "";
   const requirements = typeof parsed.requirements === "string" ? parsed.requirements.trim() : "";
   const has_text = typeof parsed.has_text === "boolean" ? parsed.has_text : true;
   const color_anchor_en =
     typeof parsed.color_anchor_en === "string" ? parsed.color_anchor_en.trim() : "";
+  const vt = typeof parsed.viz_type === "string" ? parsed.viz_type.trim().toLowerCase() : "";
+  const viz_type: "lifestyle" | "in_use" | "feature_explainer" =
+    vt === "in_use" || vt === "feature_explainer" ? vt : "lifestyle";
+  const type_reason = typeof parsed.type_reason === "string" ? parsed.type_reason.trim() : "";
+  const overlay_motif =
+    typeof parsed.overlay_motif === "string" ? parsed.overlay_motif.trim() : "";
+  const on_product_text: string[] = Array.isArray(parsed.on_product_text)
+    ? (parsed.on_product_text as unknown[])
+        .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+        .map((s) => s.trim())
+        .slice(0, 12)
+    : [];
+  let host_device: { name: string } | null = null;
+  if (parsed.host_device && typeof parsed.host_device === "object") {
+    const hd = parsed.host_device as { name?: unknown };
+    if (typeof hd.name === "string" && hd.name.trim().length > 0) {
+      host_device = { name: hd.name.trim() };
+    }
+  }
   if (!style || !requirements) throw new Error("Model nie zwrócił pełnego wyniku analizy");
-  return { style, requirements, used: urls.length, has_text, color_anchor_en };
+  return {
+    style, requirements, used: urls.length, has_text, color_anchor_en,
+    viz_type, type_reason, overlay_motif, on_product_text, host_device,
+  };
 }
 
 // Deterministic fallback used when the AI gateway call fails — mirrors the
