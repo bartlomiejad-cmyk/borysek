@@ -1195,6 +1195,15 @@ function ProductDetail() {
                 viz_type?: "lifestyle" | "in_use" | "feature_explainer";
                 overlay_motif?: string;
                 host_device?: { name?: string } | null;
+                hide_product_text?: boolean;
+                count?: number;
+                variants?: Array<{
+                  style: string;
+                  requirements: string;
+                  viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+                  overlay_motif?: string;
+                  manual?: boolean;
+                }>;
               } }).viz_analysis) ?? null;
               if (!viz) return null;
               const hostDeviceUrl = ((imageMeta as unknown as { host_device_url?: string }).host_device_url ?? "") as string;
@@ -1213,6 +1222,8 @@ function ProductDetail() {
                         overlay_motif: patch.overlay_motif,
                         host_device_name: patch.host_device_name,
                         host_device_url: patch.host_device_url,
+                        hide_product_text: patch.hide_product_text,
+                        variants: patch.variants,
                       },
                     });
                     toast.success("Zapisano manualne nadpisanie sceny");
