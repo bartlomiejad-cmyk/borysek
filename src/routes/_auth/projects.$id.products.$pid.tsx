@@ -286,6 +286,20 @@ function ProductDetail() {
       for (const u of s.extra_images) if (!allVisible.includes(u)) allVisible.push(u);
     }
   }
+  // Dead URLs and (in compatible mode) images from non-primary equivalent
+  // sources never appear in the "Wybrane zdjęcia" grid — they get their own
+  // collapsed sections below.
+  const deadImageSet = new Set(
+    (((data as { dead_images?: string[] } | undefined)?.dead_images) ?? []) as string[],
+  );
+  const otherEquivImageSet = new Set(
+    (((data as { other_equivalent_images?: string[] } | undefined)?.other_equivalent_images) ?? []) as string[],
+  );
+  {
+    const filtered = allVisible.filter((u) => !deadImageSet.has(u) && !otherEquivImageSet.has(u));
+    allVisible.length = 0;
+    allVisible.push(...filtered);
+  }
   const top4 = [...allVisible]
     .sort((a, b) => {
       const am = imageMeta[a]; const bm = imageMeta[b];
