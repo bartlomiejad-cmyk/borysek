@@ -57,6 +57,8 @@ export type Database = {
           items: Json
           kind: Database["public"]["Enums"]["bulk_job_kind"]
           last_error: string | null
+          lock_token: string | null
+          locked_at: string | null
           payload: Json | null
           processed_count: number
           project_id: string
@@ -75,6 +77,8 @@ export type Database = {
           items?: Json
           kind: Database["public"]["Enums"]["bulk_job_kind"]
           last_error?: string | null
+          lock_token?: string | null
+          locked_at?: string | null
           payload?: Json | null
           processed_count?: number
           project_id: string
@@ -93,6 +97,8 @@ export type Database = {
           items?: Json
           kind?: Database["public"]["Enums"]["bulk_job_kind"]
           last_error?: string | null
+          lock_token?: string | null
+          locked_at?: string | null
           payload?: Json | null
           processed_count?: number
           project_id?: string
@@ -726,7 +732,35 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_next_bulk_job: {
+        Args: { p_stale_seconds?: number }
+        Returns: {
+          cancel_requested: boolean
+          created_at: string
+          failed_count: number
+          finished_at: string | null
+          id: string
+          items: Json
+          kind: Database["public"]["Enums"]["bulk_job_kind"]
+          last_error: string | null
+          lock_token: string | null
+          locked_at: string | null
+          payload: Json | null
+          processed_count: number
+          project_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["bulk_job_status"]
+          total: number
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bulk_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
     }
     Enums: {
       bulk_job_kind:
