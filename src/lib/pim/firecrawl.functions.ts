@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
+import { kickBulkWorker } from "./worker-kick.server";
 
 /**
  * Marketplace / aggregator domains we never want as scraped sources.
@@ -153,17 +154,7 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
 
     // Kick the worker immediately; cron picks up otherwise.
     try {
-      const base =
-        process.env.PUBLIC_APP_URL ||
-        "https://project--a56746f2-6fdf-47b1-8095-043a41af98fd.lovable.app";
-      const apikey = process.env.SUPABASE_PUBLISHABLE_KEY;
-      if (apikey) {
-        void fetch(`${base}/api/public/hooks/process-bulk-jobs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey },
-          body: "{}",
-        }).catch(() => {});
-      }
+      kickBulkWorker();
     } catch {
       // ignore
     }

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { kickBulkWorker } from "./worker-kick.server";
 import {
   sanitizeProductDescription,
   filterImageUrls,
@@ -851,17 +852,7 @@ export const runMatching = createServerFn({ method: "POST" })
         } else {
           // Fire-and-forget kick to worker (same pattern as bulk-jobs.functions.ts).
           try {
-            const base =
-              process.env.PUBLIC_APP_URL ||
-              "https://project--a56746f2-6fdf-47b1-8095-043a41af98fd.lovable.app";
-            const apikeySb = process.env.SUPABASE_PUBLISHABLE_KEY;
-            if (apikeySb) {
-              void fetch(`${base}/api/public/hooks/process-bulk-jobs`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey: apikeySb },
-                body: "{}",
-              }).catch(() => {});
-            }
+            kickBulkWorker();
           } catch {
             /* cron will catch up */
           }
