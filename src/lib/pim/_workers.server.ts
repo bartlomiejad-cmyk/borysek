@@ -3784,6 +3784,7 @@ export async function runPimVisualization(
         const out = await analyzeVisualizationSceneForProduct({
           productName: nameForPrompt,
           featuresText,
+          category: productCategory,
           imageUrls: analysisUrls,
           projectConstraintsPl,
           count,
