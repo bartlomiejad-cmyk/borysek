@@ -341,6 +341,36 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const unsure_identity_images = Object.entries(image_scores)
       .filter(([, s]) => s?.identity === "unsure" && s?.is_banner_or_trash !== true && s?.manual_keep !== true)
       .map(([u]) => u);
+    // Dead-image and compatible-mode alternative-source buckets, mirroring
+    // getVisibleGallery so the editor can render the same partitions.
+    const scoresFull = image_scores as Record<string, { dead?: boolean; manual_keep?: boolean; is_banner_or_trash?: boolean; identity?: string }>;
+    const dead_images = Object.entries(scoresFull)
+      .filter(([, s]) => s?.dead === true)
+      .map(([u]) => u);
+    const matchingMode = (((product as { matching_mode?: string | null }).matching_mode) ?? "strict") as "strict" | "compatible";
+    let other_equivalent_images: string[] = [];
+    if (matchingMode === "compatible" && sources.length > 0) {
+      const scoreBreakdown = ((enrichment as { score_breakdown?: Array<{ url: string; total?: number }> } | null)?.score_breakdown ?? []);
+      const scoreByUrl = new Map(scoreBreakdown.map((b) => [b.url, b.total ?? 0]));
+      const ranked = [...sources].sort((a, b) => (scoreByUrl.get(b.url) ?? 0) - (scoreByUrl.get(a.url) ?? 0));
+      const bestUrls = new Set<string>([...(ranked[0]?.images ?? []), ...(ranked[0]?.extra_images ?? [])]);
+      const pinnedU = ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null;
+      const seen = new Set<string>();
+      for (const s of sources.slice(1)) {
+        for (const u of [...s.images, ...s.extra_images]) {
+          if (!u || seen.has(u)) continue;
+          seen.add(u);
+          if (bestUrls.has(u)) continue;
+          if (u === pinnedU) continue;
+          const sc = scoresFull[u];
+          if (sc?.manual_keep === true) continue;
+          if (sc?.dead === true) continue;
+          if (sc?.is_banner_or_trash === true) continue;
+          if (sc?.identity === "different" || sc?.identity === "unsure") continue;
+          other_equivalent_images.push(u);
+        }
+      }
+    }
     return {
       product,
       enrichment,
@@ -351,6 +381,8 @@ export const getProductDetail = createServerFn({ method: "GET" })
       image_scores,
       rejected_identity_images,
       unsure_identity_images,
+      dead_images,
+      other_equivalent_images,
       pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
     };
   });
