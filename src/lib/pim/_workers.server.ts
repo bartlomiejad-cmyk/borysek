@@ -3530,11 +3530,27 @@ export async function runPimVisualization(
         if (img && !galleryUrls.includes(img)) galleryUrls.push(img);
       }
     }
+    // In compatible mode, restrict accepted images to the single best-ranked
+    // source (plus pinned + manual_keep). Equivalent-source images never enter
+    // FAL as references — that's what causes fabricated branding transfer.
+    const sourceCtx = matchingMode === "compatible"
+      ? (srcRows ?? []).map((r) => {
+          const url = (r as { url?: string }).url ?? "";
+          const main = Array.isArray((r as { images?: unknown }).images)
+            ? ((r as { images: string[] }).images)
+            : [];
+          const extra = includeExtra && Array.isArray((r as { extra_images?: unknown }).extra_images)
+            ? ((r as { extra_images: string[] }).extra_images)
+            : [];
+          const score = (e.score_breakdown ?? []).find((b) => b.url === url)?.total ?? 0;
+          return { url, score, images: [...main, ...extra] };
+        })
+      : undefined;
     const { accepted } = getVisibleGallery(galleryUrls, {
       hidden_images: e.hidden_images ?? [],
       image_scores: (e.image_scores as Record<string, never>) ?? {},
       pinned_main_url: e.pinned_main_url,
-    });
+    }, sourceCtx ? { matchingMode: "compatible", sources: sourceCtx } : undefined);
     for (const u of accepted) analysisCandidates.push(u);
   }
   // Final guard: dedup + only real image URLs + reject known source-page URLs
