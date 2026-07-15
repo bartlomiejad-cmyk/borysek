@@ -3638,6 +3638,10 @@ export async function runPimVisualization(
   let hasText = true;
   let colorAnchorEn = "";
   let cachedReferenceUrls: string[] | null = null;
+  let vizType: "lifestyle" | "in_use" | "feature_explainer" = "lifestyle";
+  let overlayMotif = "";
+  let onProductText: string[] = [];
+  let hostDeviceName = "";
 
   // 1) Manual overrides are never touched.
   if (cached?.manual && cached.style && cached.requirements) {
@@ -3645,6 +3649,10 @@ export async function runPimVisualization(
     hasText = cached.has_text ?? true;
     colorAnchorEn = cached.color_anchor_en ?? "";
     cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
+    vizType = cached.viz_type ?? "lifestyle";
+    overlayMotif = cached.overlay_motif ?? "";
+    onProductText = cached.on_product_text ?? [];
+    hostDeviceName = cached.host_device?.name ?? "";
     await emit(ctx, { level: "info", message: `   • używam ręcznej analizy sceny (manual override)` });
   } else if (vizRun && vizRun.scene && (vizRun.phase === "analyzed" || vizRun.phase === "prompt_ready" || vizRun.phase === "rendering")) {
     // Resume: viz_run persisted a scene from a previous tick — never re-run
@@ -3669,6 +3677,10 @@ export async function runPimVisualization(
     hasText = cached.has_text ?? true;
     colorAnchorEn = cached.color_anchor_en ?? "";
     cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
+    vizType = cached.viz_type ?? "lifestyle";
+    overlayMotif = cached.overlay_motif ?? "";
+    onProductText = cached.on_product_text ?? [];
+    hostDeviceName = cached.host_device?.name ?? "";
     await emit(ctx, { level: "info", message: `   • używam zapisanej analizy sceny (cache)` });
   } else if (analysisUrls.length) {
     // 3) Fresh vision analysis — max 2 attempts. On "URL did not return an
@@ -3691,6 +3703,10 @@ export async function runPimVisualization(
         analysisPl = { style: out.style, requirements: out.requirements };
         hasText = out.has_text;
         colorAnchorEn = out.color_anchor_en;
+        vizType = out.viz_type;
+        overlayMotif = out.overlay_motif;
+        onProductText = out.on_product_text;
+        hostDeviceName = out.host_device?.name ?? "";
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         // "URL did not return an image" → identify offender, mark dead,
@@ -3812,6 +3828,10 @@ export async function runPimVisualization(
         color_anchor_en: colorAnchorEn,
         reference_urls: referenceUrlsForFal,
         consistency_at: new Date().toISOString(),
+        viz_type: vizType,
+        overlay_motif: overlayMotif,
+        on_product_text: onProductText,
+        host_device: hostDeviceName ? { name: hostDeviceName } : null,
       } satisfies VizAnalysisRec,
     };
     await supabaseAdmin
