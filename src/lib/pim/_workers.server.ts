@@ -3396,6 +3396,7 @@ export async function runPimVisualization(
   slotState.slot = Math.max(0, Math.min(count, Math.floor(slotState.slot || 0)));
 
   let lifePrompt = (progress.prompts?.[productId] ?? "").trim();
+  // (viz_run.prompt is applied further down once vizRun is loaded from meta.)
   const saveProgress = async (next: PimVisualizationSlot | null) => {
     if (!ctx?.bulkJobId) return;
     const nextProducts = { ...productsProgress };
