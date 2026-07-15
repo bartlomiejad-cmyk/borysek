@@ -239,7 +239,7 @@ export const exportProject = createServerFn({ method: "GET" })
           golden_slug: ((e as { golden_slug?: string | null } | undefined)?.golden_slug) ?? "",
           golden_meta_description: ((e as { golden_meta_description?: string | null } | undefined)?.golden_meta_description) ?? "",
           golden_description: e?.golden_description ?? "",
-          cechy: features.map((f) => `${f.key}: ${f.value}`).join(" | "),
+          ...featureCols,
           slowa_kluczowe: (((e as { golden_seo_keywords?: string[] | null } | undefined)?.golden_seo_keywords) ?? []).join(" | "),
           opis_allegro: sanitizeAllegroHtml(
             ((e as { allegro_description?: string | null } | undefined)?.allegro_description) ?? "",
