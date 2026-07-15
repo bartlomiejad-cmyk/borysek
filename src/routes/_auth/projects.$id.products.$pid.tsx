@@ -2058,20 +2058,45 @@ function VizAnalysisPanel({
     at?: string;
     manual?: boolean;
     source?: string;
+    viz_type?: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif?: string;
+    host_device?: { name?: string } | null;
+    host_device_url?: string;
   };
-  onSave: (style: string, requirements: string) => Promise<void>;
+  onSave: (patch: {
+    style: string;
+    requirements: string;
+    viz_type: "lifestyle" | "in_use" | "feature_explainer";
+    overlay_motif: string;
+    host_device_name: string;
+    host_device_url: string;
+  }) => Promise<void>;
 }) {
   const [style, setStyle] = useState((viz.style ?? "").trim());
   const [requirements, setRequirements] = useState((viz.requirements ?? "").trim());
+  const [vizType, setVizType] = useState<"lifestyle" | "in_use" | "feature_explainer">(
+    viz.viz_type ?? "lifestyle",
+  );
+  const [overlayMotif, setOverlayMotif] = useState((viz.overlay_motif ?? "").trim());
+  const [hostDeviceName, setHostDeviceName] = useState((viz.host_device?.name ?? "").trim());
+  const [hostDeviceUrl, setHostDeviceUrl] = useState((viz.host_device_url ?? "").trim());
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     setStyle((viz.style ?? "").trim());
     setRequirements((viz.requirements ?? "").trim());
-  }, [viz.style, viz.requirements]);
+    setVizType(viz.viz_type ?? "lifestyle");
+    setOverlayMotif((viz.overlay_motif ?? "").trim());
+    setHostDeviceName((viz.host_device?.name ?? "").trim());
+    setHostDeviceUrl((viz.host_device_url ?? "").trim());
+  }, [viz.style, viz.requirements, viz.viz_type, viz.overlay_motif, viz.host_device?.name, viz.host_device_url]);
   const dirty =
     style.trim() !== (viz.style ?? "").trim() ||
-    requirements.trim() !== (viz.requirements ?? "").trim();
+    requirements.trim() !== (viz.requirements ?? "").trim() ||
+    vizType !== (viz.viz_type ?? "lifestyle") ||
+    overlayMotif.trim() !== (viz.overlay_motif ?? "").trim() ||
+    hostDeviceName.trim() !== (viz.host_device?.name ?? "").trim() ||
+    hostDeviceUrl.trim() !== (viz.host_device_url ?? "").trim();
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className="rounded border bg-muted/20 p-3 space-y-2">
@@ -2096,6 +2121,47 @@ function VizAnalysisPanel({
           </div>
         )}
         <CollapsibleContent className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground">Typ wizualizacji</label>
+              <select
+                className="w-full h-8 rounded-md border bg-background px-2 text-sm"
+                value={vizType}
+                onChange={(e) => setVizType(e.target.value as typeof vizType)}
+              >
+                <option value="lifestyle">Lifestyle (produkt w scenie)</option>
+                <option value="in_use">In-use (produkt w działaniu / instalacji)</option>
+                <option value="feature_explainer">Feature explainer (produkt + overlay funkcji)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground">Motyw overlayu (feature_explainer)</label>
+              <Input
+                value={overlayMotif}
+                onChange={(e) => setOverlayMotif(e.target.value)}
+                placeholder="np. półprzezroczysty stożek zasięgu 120°"
+                disabled={vizType !== "feature_explainer"}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground">Urządzenie docelowe (nazwa)</label>
+              <Input
+                value={hostDeviceName}
+                onChange={(e) => setHostDeviceName(e.target.value)}
+                placeholder="np. rekuperator Wanas HRV350"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground">Zdjęcie urządzenia (URL)</label>
+              <Input
+                value={hostDeviceUrl}
+                onChange={(e) => setHostDeviceUrl(e.target.value)}
+                placeholder="https://…/urzadzenie.jpg"
+              />
+            </div>
+          </div>
           <div>
             <label className="text-[11px] font-medium text-muted-foreground">Scena / stylistyka</label>
             <Textarea rows={2} value={style} onChange={(e) => setStyle(e.target.value)} />
@@ -2111,7 +2177,14 @@ function VizAnalysisPanel({
               onClick={async () => {
                 setBusy(true);
                 try {
-                  await onSave(style.trim(), requirements.trim());
+                  await onSave({
+                    style: style.trim(),
+                    requirements: requirements.trim(),
+                    viz_type: vizType,
+                    overlay_motif: overlayMotif.trim(),
+                    host_device_name: hostDeviceName.trim(),
+                    host_device_url: hostDeviceUrl.trim(),
+                  });
                 } catch (e) {
                   toast.error(friendlyError(e, "Nie udało się zapisać"));
                 } finally {
