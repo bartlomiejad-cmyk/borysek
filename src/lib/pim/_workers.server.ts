@@ -14,6 +14,7 @@ import { probeManySizes } from "./image-size.server";
 import { isMarketplaceUrl } from "./firecrawl.functions";
 import { extractDescriptionSection, filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
 import { getVisibleGallery } from "./gallery";
+import { sanitizeImageInputs, dropDeadUrls, isNotAnImageError, extractOffendingUrl } from "./viz-image-guard.server";
 import {
   slugifyPl as slugifyPlShared,
   clampName as clampNameShared,
@@ -3395,6 +3396,7 @@ export async function runPimVisualization(
   slotState.slot = Math.max(0, Math.min(count, Math.floor(slotState.slot || 0)));
 
   let lifePrompt = (progress.prompts?.[productId] ?? "").trim();
+  // (viz_run.prompt is applied further down once vizRun is loaded from meta.)
   const saveProgress = async (next: PimVisualizationSlot | null) => {
     if (!ctx?.bulkJobId) return;
     const nextProducts = { ...productsProgress };
@@ -3483,8 +3485,16 @@ export async function runPimVisualization(
     });
     for (const u of accepted) analysisCandidates.push(u);
   }
-  // Final guard: dedup + only real image URLs + hard cap.
-  const analysisUrls = filterImageUrls(Array.from(new Set(analysisCandidates))).slice(0, 4);
+  // Final guard: dedup + only real image URLs + reject known source-page URLs
+  // + on-the-spot probe of unprobed URLs. This is the SINGLE choke point for
+  // every external image URL used below (vision, consistency, FAL refs).
+  const preFiltered = filterImageUrls(Array.from(new Set(analysisCandidates)));
+  let analysisUrls = (await sanitizeImageInputs({
+    projectId: (product as { project_id: string }).project_id,
+    enrichmentId: e.id,
+    candidates: preFiltered,
+    imageScores: (e.image_scores ?? {}) as never,
+  })).slice(0, 4);
   const sourceUrlsHash = analysisUrls.length ? await sha256Hex(analysisUrls.join("|")) : "";
 
   type VizAnalysisRec = {
@@ -3500,8 +3510,55 @@ export async function runPimVisualization(
     reference_urls?: string[];
     consistency_at?: string;
   };
+  type VizRunRec = {
+    phase: "analyzed" | "prompt_ready" | "rendering" | "done" | "failed";
+    analysis_attempts?: number;
+    scene?: { style: string; requirements: string; source?: VizAnalysisRec["source"]; has_text?: boolean; color_anchor_en?: string };
+    prompt?: string;
+    reference_urls?: string[];
+    updated_at: string;
+    job_id?: string | null;
+    source_urls_hash?: string;
+    constraints_hash?: string;
+  };
   const existingMeta = (e.image_meta ?? {}) as Record<string, unknown>;
   const cached = existingMeta.viz_analysis as VizAnalysisRec | undefined;
+  let vizRun = (existingMeta.viz_run ?? null) as VizRunRec | null;
+  // Reset viz_run when the caller asked for a re-analysis or when the source
+  // set / constraints changed (otherwise a stale "prompt_ready" would jump
+  // straight to a render for an unrelated setup).
+  if (
+    vizRun && (
+      forceReanalyze ||
+      vizRun.source_urls_hash !== sourceUrlsHash ||
+      vizRun.constraints_hash !== constraintsHash ||
+      vizRun.phase === "done" || vizRun.phase === "failed"
+    )
+  ) {
+    vizRun = null;
+  }
+  const persistVizRun = async (patch: Partial<VizRunRec>): Promise<void> => {
+    const merged: VizRunRec = {
+      ...(vizRun ?? { phase: "analyzed", updated_at: new Date().toISOString() }),
+      ...patch,
+      updated_at: new Date().toISOString(),
+      job_id: ctx?.bulkJobId ?? vizRun?.job_id ?? null,
+      source_urls_hash: sourceUrlsHash,
+      constraints_hash: constraintsHash,
+    } as VizRunRec;
+    vizRun = merged;
+    const { data: fresh } = await supabaseAdmin
+      .from("enrichments")
+      .select("image_meta")
+      .eq("id", e.id)
+      .maybeSingle();
+    const cur = ((fresh as { image_meta?: Record<string, unknown> } | null)?.image_meta ?? {}) as Record<string, unknown>;
+    await supabaseAdmin
+      .from("enrichments")
+      .update({ image_meta: { ...cur, viz_run: merged } as never } as never)
+      .eq("id", e.id)
+      .then(() => undefined, () => undefined);
+  };
 
   let analysisPl: { style: string; requirements: string } | null = null;
   let analysisSource: VizAnalysisRec["source"] = "vision";
@@ -3516,6 +3573,15 @@ export async function runPimVisualization(
     colorAnchorEn = cached.color_anchor_en ?? "";
     cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
     await emit(ctx, { level: "info", message: `   • używam ręcznej analizy sceny (manual override)` });
+  } else if (vizRun && vizRun.scene && (vizRun.phase === "analyzed" || vizRun.phase === "prompt_ready" || vizRun.phase === "rendering")) {
+    // Resume: viz_run persisted a scene from a previous tick — never re-run
+    // Gemini in the same job.
+    analysisPl = { style: vizRun.scene.style, requirements: vizRun.scene.requirements };
+    analysisSource = vizRun.scene.source ?? "vision";
+    hasText = vizRun.scene.has_text ?? true;
+    colorAnchorEn = vizRun.scene.color_anchor_en ?? "";
+    cachedReferenceUrls = vizRun.reference_urls && vizRun.reference_urls.length ? vizRun.reference_urls : null;
+    await emit(ctx, { level: "info", message: `   • wznawiam z zapisu (viz_run.${vizRun.phase})` });
   } else if (
     !forceReanalyze &&
     cached?.style &&
@@ -3532,8 +3598,12 @@ export async function runPimVisualization(
     cachedReferenceUrls = cached.reference_urls && cached.reference_urls.length ? cached.reference_urls : null;
     await emit(ctx, { level: "info", message: `   • używam zapisanej analizy sceny (cache)` });
   } else if (analysisUrls.length) {
-    // 3) Fresh vision analysis — up to 1 retry on API error.
-    for (let attempt = 0; attempt < 2 && !analysisPl; attempt++) {
+    // 3) Fresh vision analysis — max 2 attempts. On "URL did not return an
+    // image", mark the offending URL dead and retry ONCE with a reduced set;
+    // never retry the identical payload.
+    const priorAttempts = vizRun?.analysis_attempts ?? 0;
+    const maxAttempts = Math.max(0, 2 - priorAttempts);
+    for (let attempt = 0; attempt < maxAttempts && !analysisPl; attempt++) {
       try {
         await emit(ctx, {
           level: "info",
@@ -3550,12 +3620,34 @@ export async function runPimVisualization(
         colorAnchorEn = out.color_anchor_en;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        // "URL did not return an image" → identify offender, mark dead,
+        // drop from payload, retry ONCE with the reduced set.
+        if (isNotAnImageError(msg)) {
+          const bad = extractOffendingUrl(msg);
+          if (bad) {
+            analysisUrls = await dropDeadUrls(e.id, analysisUrls, [bad]);
+            await emit(ctx, { level: "warn", message: `   ⚠ Gemini odrzucił URL (nie-obraz), oznaczam martwe i redukuję zestaw` });
+            if (!analysisUrls.length) break;
+            continue;
+          }
+        }
         if (attempt === 0) {
           await emit(ctx, { level: "warn", message: `   ⚠ analiza sceny błąd, ponawiam: ${msg}` });
         } else {
           await emit(ctx, { level: "warn", message: `   ⚠ analiza sceny nieudana: ${msg}` });
         }
       }
+      await persistVizRun({
+        analysis_attempts: (vizRun?.analysis_attempts ?? 0) + 1,
+        phase: analysisPl ? "analyzed" : (vizRun?.phase ?? "analyzed"),
+        scene: analysisPl ? {
+          style: analysisPl.style,
+          requirements: analysisPl.requirements,
+          source: "vision",
+          has_text: hasText,
+          color_anchor_en: colorAnchorEn,
+        } : vizRun?.scene,
+      });
     }
   } else {
     await emit(ctx, {
@@ -3580,6 +3672,17 @@ export async function runPimVisualization(
       analysisSource = "fallback_generic";
       await emit(ctx, { level: "warn", message: `   ⚠ fallback: bezpieczna scena generyczna` });
     }
+    // Persist the fallback scene so this job never re-runs analysis.
+    await persistVizRun({
+      phase: "analyzed",
+      scene: {
+        style: analysisPl.style,
+        requirements: analysisPl.requirements,
+        source: analysisSource,
+        has_text: hasText,
+        color_anchor_en: colorAnchorEn,
+      },
+    });
   }
 
   // Persist the analysis (unless it's a preserved manual override) so
@@ -3658,6 +3761,13 @@ export async function runPimVisualization(
   const combinedRequirementsPl = `${perProductPl}${constraintsSuffix}`.trim();
 
   if (!lifePrompt) {
+    // Resume from viz_run when the job payload was cleared but viz_run still
+    // holds the built prompt.
+    if (vizRun?.prompt && vizRun.source_urls_hash === sourceUrlsHash && vizRun.constraints_hash === constraintsHash) {
+      lifePrompt = vizRun.prompt;
+    }
+  }
+  if (!lifePrompt) {
     try {
       await emit(ctx, { level: "info", message: `   • buduję prompt EN (gemini-3.1-pro)…` });
       const built = await buildFalPromptsFromPolish({
@@ -3681,6 +3791,7 @@ export async function runPimVisualization(
       lifePrompt = fb.lifestyle_prompt;
     }
     await saveProgress(slotState);
+    await persistVizRun({ phase: "prompt_ready", prompt: lifePrompt, reference_urls: referenceUrlsForFal });
     if (ctx?.deadline && Date.now() > ctx.deadline - 8_000) {
       await emit(ctx, { level: "info", message: `   • prompt gotowy — render wystartuje w następnym przebiegu` });
       return { complete: false };
@@ -3851,6 +3962,9 @@ export async function runPimVisualization(
 
   let lastFalErr: string | null = null;
   try {
+    if (vizRun && vizRun.phase !== "rendering") {
+      await persistVizRun({ phase: "rendering" });
+    }
     while (slotState.slot < count) {
       if (ctx?.deadline && Date.now() > ctx.deadline - 4_000) {
         await saveProgress(slotState);
@@ -4052,10 +4166,12 @@ export async function runPimVisualization(
   // failed_count/last_error reflect reality. Otherwise the user sees a
   // "COMPLETED" job with no visualizations and no explanation.
   if (added === 0) {
+    await persistVizRun({ phase: "failed" });
     throw new Error(
       `FAL nie wygenerował żadnej wizualizacji dla „${label}". ${lastFalErr ? `Ostatni błąd: ${lastFalErr.slice(0, 200)}` : ""}`.trim(),
     );
   }
+  await persistVizRun({ phase: "done" });
   await advancePipelineStatus(supabaseAdmin as never, (product as { id: string }).id, "VISUALS_READY");
   return { complete: true };
 }
