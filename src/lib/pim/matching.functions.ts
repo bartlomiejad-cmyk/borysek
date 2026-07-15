@@ -353,7 +353,7 @@ export const runMatching = createServerFn({ method: "POST" })
     const [{ data: products }, { data: searches }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, nazwa, ean, raw, manual_lock, matching_mode")
+        .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
         .eq("project_id", data.projectId),
       supabase
         .from("search_results")
@@ -605,7 +605,14 @@ export const runMatching = createServerFn({ method: "POST" })
             }))
             .filter((s) => s.title || s.description);
           if (sources.length) {
-            const val = await validateSourcesWithAI(apiKey, prod.nazwa, prod.ean ?? null, sources, mode);
+            const val = await validateSourcesWithAI(
+              apiKey,
+              prod.nazwa,
+              prod.ean ?? null,
+              sources,
+              mode,
+              ((prod as { category?: string | null }).category ?? null),
+            );
             kept = u.picked_urls.filter((url) => val.keep.has(url));
             if (!skipClustering && val.ok) clustersByUrl = val.clustersByUrl;
             validated++;
