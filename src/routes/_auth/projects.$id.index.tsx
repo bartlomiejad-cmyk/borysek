@@ -1505,6 +1505,15 @@ function ProjectPage() {
                         <div className="text-xs text-muted-foreground line-clamp-1">{p.nazwa}</div>
                       )}
                       <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {((p as { category?: string | null }).category ?? "").trim() && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 text-muted-foreground"
+                            title={(p as { category?: string | null }).category ?? ""}
+                          >
+                            {(((p as { category?: string | null }).category ?? "").split(" > ").pop() ?? "").trim()}
+                          </Badge>
+                        )}
                         <Badge
                           variant="outline"
                           className="text-[10px] px-1.5 py-0 border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-300"
