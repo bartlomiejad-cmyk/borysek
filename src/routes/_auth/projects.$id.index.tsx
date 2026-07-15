@@ -410,9 +410,26 @@ function ProjectPage() {
         const blob = `${p.nazwa ?? ""} ${p.ean ?? ""} ${p.kod ?? ""} ${p.golden_name ?? ""}`.toLowerCase();
         if (!blob.includes(q)) return false;
       }
+      if (category) {
+        const pc = ((p as { category?: string | null }).category ?? "").trim();
+        if (!pc) return false;
+        // Match exact path OR any parent that starts-with category + " > ".
+        if (pc !== category && !pc.startsWith(`${category} > `)) return false;
+      }
       return true;
     });
-  }, [products, filter, search]);
+  }, [products, filter, search, category]);
+
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      const c = ((p as { category?: string | null }).category ?? "").trim();
+      if (!c) continue;
+      const parts = c.split(" > ");
+      for (let i = 1; i <= parts.length; i++) set.add(parts.slice(0, i).join(" > "));
+    }
+    return Array.from(set).sort();
+  }, [products]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
