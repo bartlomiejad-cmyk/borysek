@@ -3962,6 +3962,9 @@ export async function runPimVisualization(
 
   let lastFalErr: string | null = null;
   try {
+    if (vizRun && vizRun.phase !== "rendering") {
+      await persistVizRun({ phase: "rendering" });
+    }
     while (slotState.slot < count) {
       if (ctx?.deadline && Date.now() > ctx.deadline - 4_000) {
         await saveProgress(slotState);
