@@ -701,9 +701,10 @@ function ProjectPage() {
   const exportFile = async (
     fmt: "csv" | "xlsx",
     approvedOnly = false,
-    mode: "client" | "qc" = "client",
+    mode: "client" | "qc" | "delivery" = "client",
+    hostImages = false,
   ) => {
-    const allRows = await exportFn({ data: { projectId: id, approvedOnly, mode } });
+    const allRows = await exportFn({ data: { projectId: id, approvedOnly, mode, hostImages } });
     const rows =
       selectedIds.size > 0
         ? (allRows as Array<Record<string, unknown>>).filter((r) => {
@@ -828,6 +829,23 @@ function ProjectPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => exportFile("xlsx", true, "qc")}>
                 <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Dostawa (tylko nowe dane, trwałe linki)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => exportFile("csv", false, "delivery", true)}>
+                <Download className="h-4 w-4 mr-2" /> CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", false, "delivery", true)}>
+                <Download className="h-4 w-4 mr-2" /> XLSX
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("csv", true, "delivery", true)}>
+                <Download className="h-4 w-4 mr-2" /> CSV (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("xlsx", true, "delivery", true)}>
+                <Download className="h-4 w-4 mr-2" /> XLSX (tylko zatwierdzone)
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportFile("csv", false, "delivery", false)}>
+                <Download className="h-4 w-4 mr-2" /> CSV (bez kopiowania obrazów)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -21,13 +21,15 @@ export const exportProject = createServerFn({ method: "GET" })
       .object({
         projectId: z.string().uuid(),
         approvedOnly: z.boolean().optional(),
-        mode: z.enum(["client", "qc"]).optional(),
+        mode: z.enum(["client", "qc", "delivery"]).optional(),
+        hostImages: z.boolean().optional(),
       })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const mode = data.mode ?? "client";
+    const hostImages = mode === "delivery" && (data.hostImages ?? true);
 
     const { data: project } = await supabase
       .from("projects")
@@ -78,6 +80,58 @@ export const exportProject = createServerFn({ method: "GET" })
 
     const map = new Map((ens ?? []).map((e) => [e.source_product_id, e]));
 
+    // --- Durable image hosting (delivery mode) --------------------------
+    const HOSTED_BUCKET = "regenerated-images";
+    const MAX_BYTES = 8 * 1024 * 1024;
+    const isHostedUrl = (u: string) =>
+      /\/storage\/v1\/object\/public\//i.test(u) || u.includes(HOSTED_BUCKET);
+    const extFromContentType = (ct: string): string => {
+      const c = ct.toLowerCase();
+      if (c.includes("png")) return "png";
+      if (c.includes("webp")) return "webp";
+      if (c.includes("gif")) return "gif";
+      if (c.includes("avif")) return "avif";
+      return "jpg";
+    };
+    async function sha1Hex(input: string): Promise<string> {
+      const bytes = new TextEncoder().encode(input);
+      const digest = await crypto.subtle.digest("SHA-1", bytes);
+      return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    const admin = hostImages
+      ? (await import("@/integrations/supabase/client.server")).supabaseAdmin
+      : null;
+    async function hostOne(url: string, projectId: string, productId: string): Promise<string | null> {
+      if (!admin) return url;
+      if (isHostedUrl(url)) return url;
+      try {
+        const res = await fetch(url, {
+          redirect: "follow",
+          headers: {
+            Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (compatible; LovableProductImageBot/1.0)",
+          },
+        });
+        if (!res.ok) { console.warn(`[export.host] skip ${url} status=${res.status}`); return null; }
+        const ct = res.headers.get("content-type") ?? "image/jpeg";
+        if (!ct.startsWith("image/")) { console.warn(`[export.host] skip ${url} non-image ct=${ct}`); return null; }
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength > MAX_BYTES) { console.warn(`[export.host] skip ${url} size=${buf.byteLength}`); return null; }
+        const ext = extFromContentType(ct);
+        const hash = (await sha1Hex(url)).slice(0, 20);
+        const path = `exports/${projectId}/${productId}/${hash}.${ext}`;
+        const { error: upErr } = await admin.storage
+          .from(HOSTED_BUCKET)
+          .upload(path, new Uint8Array(buf), { contentType: ct, upsert: true });
+        if (upErr) { console.warn(`[export.host] upload failed ${url}: ${upErr.message}`); return null; }
+        const { data: pub } = admin.storage.from(HOSTED_BUCKET).getPublicUrl(path);
+        return pub.publicUrl;
+      } catch (err) {
+        console.warn(`[export.host] fetch failed ${url}:`, (err as Error).message);
+        return null;
+      }
+    }
+
     // Pass 1: zbierz unikalny zbiór kluczy cech w całym projekcie (stabilna kolejność kolumn).
     const normalizeKey = (k: string) =>
       k.trim().replace(/[\s;]+/g, "_").replace(/_{2,}/g, "_");
@@ -98,7 +152,8 @@ export const exportProject = createServerFn({ method: "GET" })
       if (Array.isArray(g) && g.length > maxGallery) maxGallery = g.length;
     }
 
-    return (products ?? []).map((p) => {
+    const rows: Array<Record<string, string | number>> = [];
+    for (const p of products ?? []) {
       const e = map.get(p.id);
       const urls = (e?.picked_urls as string[] | undefined) ?? [];
       const hidden = new Set(((e as { hidden_images?: string[] } | undefined)?.hidden_images ?? []) as string[]);
@@ -141,6 +196,63 @@ export const exportProject = createServerFn({ method: "GET" })
       }
       const galleryCols: Record<string, string> = {};
       for (let i = 0; i < maxGallery; i++) galleryCols[`ai_gallery_${i + 1}`] = gallery[i] ?? "";
+
+      // --- Delivery mode: minimal rows, hosted image URLs -------------
+      if (mode === "delivery") {
+        const galleryUrls = accepted.filter((u) => !identityScores[u]?.dead);
+        let hostedGallery: string[] = galleryUrls;
+        if (hostImages && admin) {
+          const metaHosted = (meta as { hosted_urls?: Record<string, string> } | undefined)?.hosted_urls ?? {};
+          const cache: Record<string, string> = { ...metaHosted };
+          const out: string[] = [];
+          let dirty = false;
+          for (const u of galleryUrls) {
+            if (isHostedUrl(u)) { out.push(u); continue; }
+            const cached = cache[u];
+            if (cached) { out.push(cached); continue; }
+            const hosted = await hostOne(u, data.projectId, p.id);
+            if (hosted) {
+              cache[u] = hosted;
+              dirty = true;
+              out.push(hosted);
+            }
+          }
+          hostedGallery = out;
+          if (dirty && e) {
+            const nextMeta = { ...(meta as Record<string, unknown>), hosted_urls: cache };
+            await supabase
+              .from("enrichments")
+              .update({ image_meta: nextMeta } as never)
+              .eq("source_product_id", p.id);
+          }
+        }
+        const idCols: Record<string, string> = {};
+        if (p.ext_id) idCols.id = p.ext_id;
+        if (p.kod) idCols.kod = p.kod;
+        if (p.ean) idCols.ean = p.ean;
+        idCols.product_id = p.id;
+        const thumb = regenClean;
+        const visuals = gallery;
+        rows.push({
+          ...idCols,
+          golden_name: e?.golden_name ?? "",
+          golden_slug: ((e as { golden_slug?: string | null } | undefined)?.golden_slug) ?? "",
+          golden_meta_description: ((e as { golden_meta_description?: string | null } | undefined)?.golden_meta_description) ?? "",
+          golden_description: e?.golden_description ?? "",
+          cechy: features.map((f) => `${f.key}: ${f.value}`).join(" | "),
+          slowa_kluczowe: (((e as { golden_seo_keywords?: string[] | null } | undefined)?.golden_seo_keywords) ?? []).join(" | "),
+          opis_allegro: sanitizeAllegroHtml(
+            ((e as { allegro_description?: string | null } | undefined)?.allegro_description) ?? "",
+          ),
+          jakosc_danych: ((e as { data_sufficiency?: string | null } | undefined)?.data_sufficiency) ?? "",
+          miniatura_url: thumb,
+          wizualizacje_urls: visuals.join(";"),
+          galeria_urls: hostedGallery.join(";"),
+          zdjecia_lacznie: (thumb ? 1 : 0) + visuals.length + hostedGallery.length,
+        });
+        continue;
+      }
+
       const base = {
         id: p.ext_id ?? "",
         nazwa: p.nazwa ?? "",
@@ -176,7 +288,7 @@ export const exportProject = createServerFn({ method: "GET" })
         model: e?.model ?? "",
         generated_at: e?.generated_at ?? "",
       };
-      if (mode !== "qc") return base;
+      if (mode !== "qc") { rows.push(base); continue; }
 
       // --- QC / roboczy columns --------------------------------------------
       const pipeline = ((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED") as PimPipelineStatus;
@@ -189,7 +301,7 @@ export const exportProject = createServerFn({ method: "GET" })
       const mainUrl = allegroMainImage || listImages[0] || "";
       const mainScore = mainUrl ? (identityScores as Record<string, GalleryImageScore>)[mainUrl] : undefined;
       const mainPx = mainScore?.w && mainScore?.h ? `${mainScore.w}x${mainScore.h}` : "";
-      return {
+      rows.push({
         ...base,
         status_pipeline: PIPELINE_STATUS_LABEL[pipeline] ?? pipeline,
         status_review: (p as { review_status?: string | null }).review_status ?? "",
@@ -200,6 +312,7 @@ export const exportProject = createServerFn({ method: "GET" })
         audyt_uwagi: uwagi,
         zrodla_ean_potwierdzone: eanConfirmed,
         zdjecie_glowne_px: mainPx,
-      };
-    });
+      });
+    }
+    return rows;
   });
