@@ -66,6 +66,7 @@ export type Database = {
           status: Database["public"]["Enums"]["bulk_job_status"]
           total: number
           updated_at: string
+          usage: Json | null
           user_id: string
         }
         Insert: {
@@ -86,6 +87,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["bulk_job_status"]
           total?: number
           updated_at?: string
+          usage?: Json | null
           user_id: string
         }
         Update: {
@@ -106,6 +108,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["bulk_job_status"]
           total?: number
           updated_at?: string
+          usage?: Json | null
           user_id?: string
         }
         Relationships: []
@@ -630,6 +633,39 @@ export type Database = {
         }
         Relationships: []
       }
+      scrape_cache: {
+        Row: {
+          images: Json | null
+          markdown: string | null
+          scraped_at: string
+          status: string
+          title: string | null
+          url: string
+          url_hash: string
+          user_id: string
+        }
+        Insert: {
+          images?: Json | null
+          markdown?: string | null
+          scraped_at?: string
+          status?: string
+          title?: string | null
+          url: string
+          url_hash: string
+          user_id: string
+        }
+        Update: {
+          images?: Json | null
+          markdown?: string | null
+          scraped_at?: string
+          status?: string
+          title?: string | null
+          url?: string
+          url_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       search_results: {
         Row: {
           created_at: string
@@ -755,6 +791,7 @@ export type Database = {
           status: Database["public"]["Enums"]["bulk_job_status"]
           total: number
           updated_at: string
+          usage: Json | null
           user_id: string
         }[]
         SetofOptions: {
