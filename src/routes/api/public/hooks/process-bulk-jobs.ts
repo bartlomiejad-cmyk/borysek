@@ -396,10 +396,11 @@ export const Route = createFileRoute("/api/public/hooks/process-bulk-jobs")({
             .from("bulk_jobs" as never)
             .update(patch as never)
             .eq("id", job.id);
-        } else if (job.kind === "PIM_VISUALIZATIONS" && result.remaining.length > 0) {
-          // FAL visualizations can span multiple request windows. Kick the
-          // worker again immediately (cron remains the fallback) so completed
-          // queue renders are polled, uploaded, and saved without waiting.
+        } else if (!result.cancelled && result.remaining.length > 0) {
+          // Continue the same job on the same deployed URL that handled this
+          // tick. This avoids waiting for pg_cron (which may still point at an
+          // older published hook during preview testing) and keeps long queues
+          // moving without reusing stale worker code.
           const apikey = process.env.SUPABASE_PUBLISHABLE_KEY;
           if (apikey) {
             void fetch(new URL(request.url).toString(), {
