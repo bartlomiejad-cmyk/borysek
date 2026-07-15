@@ -441,7 +441,7 @@ function ProjectPage() {
   // Reset page when filter/search/pageSize changes
   useEffect(() => {
     if (page !== 1) updateSearch({ page: 1 });
-  }, [filter, search, pageSize]);
+  }, [filter, search, pageSize, category]);
 
   const handleStageClick = (s: Exclude<StageKey, "NONE">) => {
     if (stage === s) {
