@@ -130,13 +130,47 @@ export function PipelineStages({
   onRunAudit?: () => void;
   onShowExcluded?: () => void;
 }) {
+  const workflow = summary.workflow ?? "full";
+  // Filter and rewrite stages based on the project's workflow so projects
+  // that skip discovery/matching (content_only) or content generation
+  // (media_only) still surface a coherent pipeline.
+  const stages: Stage[] = STAGES.filter((s) => {
+    if (workflow === "content_only" && (s.key === "SOURCES" || s.key === "MATCH")) return false;
+    if (workflow === "media_only" && (s.key === "SOURCES" || s.key === "MATCH" || s.key === "CONTENT")) return false;
+    return true;
+  }).map((s) => {
+    if (workflow === "content_only" && s.key === "CONTENT") {
+      const preGolden = (x: PipelineSummary) => x.imported + x.sources_found + x.matched;
+      return {
+        ...s,
+        progress: (x) => ({ done: Math.max(0, x.total - preGolden(x)), total: x.total }),
+        pending: (x) => preGolden(x),
+        remainingLabel: (n) => `${n} do generacji`,
+        nextSentence: (n) => `${n} produktów gotowych do generacji opisu z danych klienta.`,
+      } as Stage;
+    }
+    if (workflow === "media_only" && s.key === "MEDIA") {
+      return {
+        ...s,
+        progress: (x) => ({ done: x.visuals_ready, total: x.total }),
+        pending: (x) => Math.max(0, x.total - x.visuals_ready),
+        remainingLabel: (n) => `${n} do generacji mediów`,
+        nextSentence: (n) => `${n} produktów oczekuje na generację mediów.`,
+      } as Stage;
+    }
+    return s;
+  });
+
+  // Renumber stages so the badges stay sequential after filtering.
+  const numbered = stages.map((s, i) => ({ ...s, n: i + 1 }));
+
   // Determine "next step": the earliest stage with pending work. Later stages
   // may have more items, but they depend on earlier blockers being cleared
   // first (e.g. 27 missing sources must stay actionable even if 47 products
   // are already waiting for matching).
   let best: Stage | null = null;
   let bestPending = 0;
-  for (const stg of STAGES) {
+  for (const stg of numbered) {
     const p = stg.pending(summary);
     if (p > 0) {
       best = stg;
@@ -171,8 +205,8 @@ export function PipelineStages({
           )}
         </div>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-        {STAGES.map((stg) => {
+      <div className={"grid grid-cols-2 gap-2 " + (numbered.length >= 6 ? "md:grid-cols-3 lg:grid-cols-6" : numbered.length >= 4 ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-3")}>
+        {numbered.map((stg) => {
           const isBest = best?.key === stg.key;
           const Icon = stg.Icon;
           const { done, total } = stg.progress(summary);
