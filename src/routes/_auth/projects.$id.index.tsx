@@ -1930,6 +1930,28 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <RoundtripExportDialog
+        open={roundtripOpen}
+        onOpenChange={setRoundtripOpen}
+        projectId={id}
+        importMeta={
+          ((meta?.project as { settings?: { import_meta?: {
+            headers: string[];
+            filename: string;
+            sheet_name: string | null;
+            format: "csv" | "xlsx";
+            delimiter: string | null;
+          } } } | undefined)?.settings?.import_meta) ?? null
+        }
+        savedMapping={
+          ((meta?.project as { settings?: { roundtrip_mapping?: {
+            updates?: Record<string, never>;
+            appended?: never;
+            propagateToVariants?: boolean;
+            approvedOnly?: boolean;
+          } } } | undefined)?.settings?.roundtrip_mapping) ?? null
+        }
+      />
       <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
         <DialogContent className="max-w-md">
           <div className="space-y-3">
