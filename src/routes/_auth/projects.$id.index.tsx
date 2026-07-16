@@ -2147,6 +2147,15 @@ function SettingsCard({
     return true;
   })();
   const [autoRescrape, setAutoRescrape] = useState<boolean>(initialAutoRescrape);
+  const initialWorkflow: "full" | "content_only" | "media_only" = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).workflow;
+      if (v === "content_only" || v === "media_only" || v === "full") return v;
+    }
+    return "full";
+  })();
+  const [workflow, setWorkflow] = useState<"full" | "content_only" | "media_only">(initialWorkflow);
   const [apifyTest, setApifyTest] = useState<{
     state: "idle" | "loading" | "ok" | "err";
     msg?: string;
