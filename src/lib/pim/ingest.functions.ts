@@ -13,6 +13,7 @@ const sourceProductSchema = z.object({
   gallery_urls: z.array(z.string()).optional(),
   row_kind: z.enum(["main", "variant"]).optional(),
   parent_sku: z.string().nullable().optional(),
+  import_row_index: z.number().int().nullable().optional(),
   raw: z.record(z.unknown()),
 });
 
@@ -42,11 +43,23 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
     z.object({
       projectId: z.string().uuid(),
       rows: z.array(sourceProductSchema).max(2000),
+      importMeta: z
+        .object({
+          headers: z.array(z.string()),
+          filename: z.string(),
+          sheet_name: z.string().nullable().optional(),
+          format: z.enum(["csv", "xlsx"]),
+          delimiter: z.string().nullable().optional(),
+        })
+        .optional(),
+      overwriteImportMeta: z.boolean().optional(),
+      rowIndexOffset: z.number().int().optional(),
     }).parse(input),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const payload = data.rows.map((r) => {
+    const offset = data.rowIndexOffset ?? 0;
+    const payload = data.rows.map((r, i) => {
       const {
         has_images: _hi,
         main_image_url: _mi,
@@ -54,6 +67,7 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
         category,
         row_kind,
         parent_sku,
+        import_row_index,
         ...rest
       } = r;
       const kind = row_kind ?? "main";
@@ -63,6 +77,7 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
         project_id: data.projectId,
         row_kind: kind,
         parent_sku: parent_sku ?? null,
+        import_row_index: import_row_index ?? offset + i,
       };
       // Variants are preserved for round-trip export but never processed by
       // the pipeline. Flag them as excluded on import; the flag is NOT
@@ -77,6 +92,25 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
     });
     const { error } = await supabase.from("source_products").insert(payload as never);
     if (error) throw new Error(error.message);
+
+    // Persist import shape once (first import wins) unless caller opts in.
+    if (data.importMeta) {
+      const { data: proj } = await supabase
+        .from("projects")
+        .select("settings")
+        .eq("id", data.projectId)
+        .maybeSingle();
+      const settings = (proj?.settings as Record<string, unknown> | null) ?? {};
+      const existing = settings.import_meta as unknown;
+      if (!existing || data.overwriteImportMeta) {
+        const nextSettings = { ...settings, import_meta: data.importMeta };
+        await supabase
+          .from("projects")
+          .update({ settings: nextSettings } as never)
+          .eq("id", data.projectId);
+      }
+    }
+
     // Create pending enrichments
     const { data: inserted } = await supabase
       .from("source_products")
