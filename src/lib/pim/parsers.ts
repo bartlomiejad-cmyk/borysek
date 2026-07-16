@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 
 export type CsvRow = {
   ext_id: string | null;
@@ -111,6 +112,13 @@ export const parseCsv = (file: File, mapping?: CsvMapping): Promise<CsvRow[]> =>
 export type RawCsv = {
   headers: string[];
   rows: Array<Record<string, string>>;
+};
+
+export type RawImport = RawCsv & {
+  filename: string;
+  format: "csv" | "xlsx";
+  sheet_name: string | null;
+  delimiter: string | null;
 };
 
 export type ExplicitCsvMapping = {
