@@ -613,8 +613,16 @@ function ProjectPage() {
 
   const generateAll = async (productIds?: string[]) => {
     const idSet = productIds ? new Set(productIds) : null;
+    const workflow = (summary?.workflow ?? "full");
     const targets = products.filter((p) => {
       if (idSet && !idSet.has(p.id)) return false;
+      if ((p as { row_kind?: string | null }).row_kind === "variant") return false;
+      if ((p as { excluded?: boolean | null }).excluded) return false;
+      if (workflow === "content_only") {
+        // No source dependency — anything not yet generated is a target.
+        if (idSet) return true;
+        return p.status !== "GENERATED";
+      }
       if (idSet) return p.match_type !== "NO_MATCH";
       return p.match_type !== "NO_MATCH" && p.status !== "GENERATED";
     });
@@ -2139,6 +2147,15 @@ function SettingsCard({
     return true;
   })();
   const [autoRescrape, setAutoRescrape] = useState<boolean>(initialAutoRescrape);
+  const initialWorkflow: "full" | "content_only" | "media_only" = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).workflow;
+      if (v === "content_only" || v === "media_only" || v === "full") return v;
+    }
+    return "full";
+  })();
+  const [workflow, setWorkflow] = useState<"full" | "content_only" | "media_only">(initialWorkflow);
   const [apifyTest, setApifyTest] = useState<{
     state: "idle" | "loading" | "ok" | "err";
     msg?: string;
@@ -2310,12 +2327,40 @@ function SettingsCard({
                 search_provider: searchProvider,
                 scrape_cap: scrapeCap,
                 auto_rescrape: autoRescrape,
+                workflow,
               },
             })
           }
         >
           Zapisz
         </Button>
+        <div className="pt-4 border-t space-y-2">
+          <Label className="text-sm font-medium">Tryb projektu</Label>
+          <p className="text-xs text-muted-foreground">
+            Steruje widocznością etapów. „Tylko treści" pomija Wyszukiwanie i Dopasowanie — opis generowany jest wyłącznie z danych klienta. „Tylko media" pomija także generację treści.
+          </p>
+          <div className="flex flex-col gap-2">
+            {([
+              { v: "full", title: "Pełny proces", desc: "Wyszukiwanie → Dopasowanie → Treści → Media → Review." },
+              { v: "content_only", title: "Tylko treści (z danych klienta)", desc: "Pomija discovery i matching; opis generowany z RAW atrybutów klienta." },
+              { v: "media_only", title: "Tylko media", desc: "Pomija generację opisów — użyj gdy klient dostarcza własne treści." },
+            ] as const).map((o) => (
+              <label key={o.v} className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="workflow"
+                  className="mt-1"
+                  checked={workflow === o.v}
+                  onChange={() => setWorkflow(o.v)}
+                />
+                <span>
+                  <span className="font-medium">{o.title}</span>
+                  <span className="block text-xs text-muted-foreground">{o.desc}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
         <div className="pt-4 border-t space-y-2">
           <Label className="text-sm font-medium">Źródło wyszukiwania</Label>
           <p className="text-xs text-muted-foreground">

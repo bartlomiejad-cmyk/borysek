@@ -22,6 +22,7 @@ export type PipelineSummary = {
   audit_completed: number;   // enrichments.audit is not null within eligible set
   excluded_count: number;    // products flagged out of pipeline (auto or manual)
   variant_count: number;     // rows classified as product variants (row_kind='variant')
+  workflow: "full" | "content_only" | "media_only";
 };
 
 export const getPipelineSummary = createServerFn({ method: "GET" })
@@ -29,7 +30,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
   .inputValidator((i) => z.object({ projectId: z.string().uuid() }).parse(i))
   .handler(async ({ data, context }): Promise<PipelineSummary> => {
     const { supabase } = context;
-    const [{ data: sp }, { data: en }] = await Promise.all([
+    const [{ data: sp }, { data: en }, { data: proj }] = await Promise.all([
       supabase
         .from("source_products")
         .select("id, pipeline_status, review_status, excluded, excluded_reason, row_kind")
@@ -40,7 +41,17 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
         .select("source_product_id, rescrape_rounds, score_breakdown, audit")
         .eq("project_id", data.projectId)
         .limit(20000),
+      supabase
+        .from("projects")
+        .select("settings")
+        .eq("id", data.projectId)
+        .maybeSingle(),
     ]);
+    const workflow =
+      (((proj?.settings as { workflow?: string } | null)?.workflow ?? "full") as
+        | "full"
+        | "content_only"
+        | "media_only");
     const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null; excluded?: boolean | null; excluded_reason?: string | null; row_kind?: string | null }>;
     const s: PipelineSummary = {
       total: 0,
@@ -58,6 +69,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
       audit_completed: 0,
       excluded_count: 0,
       variant_count: 0,
+      workflow,
     };
     const eligibleIds = new Set<string>();
     for (const r of rows) {

@@ -838,7 +838,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw, product_notes, manual_lock, matching_mode")
+    .select("id, project_id, nazwa, kod, ean, category, raw, product_notes, manual_lock, matching_mode")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -858,33 +858,62 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     .single();
   const customPrompt = project?.custom_prompt ?? "";
   const blacklist = (project?.blacklist as string[] | null) ?? [];
+  const projectSettings = (project?.settings as Record<string, unknown> | null) ?? {};
   const clientGuidelines =
-    ((project?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+    (projectSettings.client_guidelines as string | undefined) ?? "";
+  const workflow =
+    (projectSettings.workflow as "full" | "content_only" | "media_only" | undefined) ?? "full";
   const productNotes = (product as { product_notes?: string | null }).product_notes ?? "";
   const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, productNotes);
 
-  const { data: enrichment } = await supabaseAdmin
+  let { data: enrichment } = await supabaseAdmin
     .from("enrichments")
     .select("*")
     .eq("source_product_id", product.id)
     .maybeSingle();
-  if (!enrichment) throw new Error("No enrichment record. Run matching first.");
 
-  const urls = ((enrichment.picked_urls as string[] | null) ?? []).slice(0, 3);
-  if (!urls.length) throw new Error("No source URLs to enrich from.");
+  const pickedUrls = ((enrichment?.picked_urls as string[] | null) ?? []).slice(0, 3);
+  // Decide input mode: content_only workflow (or absence of picked sources)
+  // forces client_data — descriptions built from the client's own attributes
+  // without external sources.
+  const sourceMode: "sources" | "client_data" =
+    workflow === "content_only" || pickedUrls.length === 0 ? "client_data" : "sources";
 
-  const { data: srcs } = await supabaseAdmin
-    .from("product_sources")
-    .select("url, title, description")
-    .eq("project_id", product.project_id)
-    .in("url", urls);
+  if (!enrichment) {
+    if (sourceMode !== "client_data") {
+      throw new Error("No enrichment record. Run matching first.");
+    }
+    const { data: newEn, error: enErr } = await supabaseAdmin
+      .from("enrichments")
+      .insert({
+        source_product_id: product.id,
+        project_id: product.project_id,
+        status: "PENDING",
+        match_type: "NO_MATCH",
+      } as never)
+      .select("*")
+      .single();
+    if (enErr || !newEn) throw new Error(enErr?.message ?? "Nie udało się utworzyć rekordu enrichments");
+    enrichment = newEn as unknown as NonNullable<typeof enrichment>;
+  }
+  // After the guard above enrichment is guaranteed non-null.
+  const enr = enrichment!;
 
-  const sourceBlocks = (srcs ?? [])
-    .map((s, idx) => {
-      const desc = sanitizeProductDescription(s.description ?? "").slice(0, 4000);
-      return `### Źródło ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
-    })
-    .join("\n\n---\n\n");
+  let sourceBlocks = "";
+  if (sourceMode === "sources") {
+    const { data: srcs } = await supabaseAdmin
+      .from("product_sources")
+      .select("url, title, description")
+      .eq("project_id", product.project_id)
+      .in("url", pickedUrls);
+
+    sourceBlocks = (srcs ?? [])
+      .map((s, idx) => {
+        const desc = sanitizeProductDescription(s.description ?? "").slice(0, 4000);
+        return `### Źródło ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
+      })
+      .join("\n\n---\n\n");
+  }
 
   const raw = (product.raw as Record<string, unknown> | null) ?? {};
   const extraProps =
@@ -894,7 +923,17 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     (raw.additional_properties as unknown) ||
     null;
 
-  const systemPrompt = GOLDEN_SEO_SYSTEM_PROMPT;
+  const CLIENT_DATA_ADDENDUM = [
+    "",
+    "## TRYB: DANE KLIENTA (bez źródeł zewnętrznych)",
+    "- Nie masz żadnych źródeł internetowych. Traktuj pola PRODUKT + EXTRA PROPERTIES + KATEGORIA + DODATKOWE INSTRUKCJE KLIENTA jako JEDYNE źródło faktów.",
+    "- Zasada 'TYLKO FAKTY ZE ŹRÓDEŁ' odnosi się w tym trybie do danych klienta — nie halucynuj cech, których w tych polach nie ma.",
+    "- Ustaw pole data_sufficiency uczciwie: 'full' gdy dane klienta pokrywają wszystkie istotne cechy, 'partial' gdy fragmentarycznie, 'poor' gdy tylko nazwa/kod.",
+  ].join("\n");
+  const systemPrompt =
+    sourceMode === "client_data"
+      ? GOLDEN_SEO_SYSTEM_PROMPT + "\n" + CLIENT_DATA_ADDENDUM
+      : GOLDEN_SEO_SYSTEM_PROMPT;
 
   const isCompatibleMode =
     ((product as { matching_mode?: string | null }).matching_mode === "compatible");
@@ -902,21 +941,30 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     ? "PRODUKT TYPU ZAMIENNIK/AKCESORIUM: opis może czerpać parametry techniczne i listy kompatybilności ze źródeł równoważnych, ale NIE przenoś nazw marek zamienników innych sklepów do nazwy i opisu; nazwą wiodącą jest nazwa z bazy klienta."
     : "";
 
+  const category = (product as { category?: string | null }).category ?? "";
   const userPrompt = [
     `PRODUKT (z bazy klienta):`,
     `nazwa: ${product.nazwa ?? ""}`,
     `kod: ${product.kod ?? ""}`,
     `ean: ${product.ean ?? ""}`,
+    category ? `kategoria: ${category}` : "",
     "",
     `EXTRA PROPERTIES (z bazy klienta):`,
     extraProps ? JSON.stringify(extraProps).slice(0, 4000) : "(brak)",
     "",
+    sourceMode === "client_data"
+      ? [
+          `RAW ATRYBUTY (z bazy klienta):`,
+          JSON.stringify(raw).slice(0, 4000),
+          "",
+        ].join("\n")
+      : "",
     `DODATKOWE INSTRUKCJE KLIENTA:`,
     customPrompt || "(brak)",
     "",
-    `ŹRÓDŁA:`,
-    sourceBlocks || "(brak)",
-    "",
+    sourceMode === "sources"
+      ? `ŹRÓDŁA:\n${sourceBlocks || "(brak)"}\n`
+      : `ŹRÓDŁA:\n(brak — tryb 'dane klienta')\n`,
     guidelinesBlock ? guidelinesBlock + "\n" : "",
     compatibilityLine,
     'Wygeneruj JSON {"name", "slug", "description", "meta_description", "seo_keywords", "features"} zgodnie z regułami SEO opisanymi w system prompt.',
@@ -978,26 +1026,26 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const newFeatures = (out.features ?? [])
       .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
       .filter((f) => f.key && f.value);
-    const existingFeatures = ((enrichment as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
+    const existingFeatures = ((enr as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
     const shouldWriteFeatures = newFeatures.length > 0 && (mode === "all" || !existingFeatures.length);
     const description = sanitizeGoldenDescriptionHtml(rawDescription, {
       name,
       features: shouldWriteFeatures ? newFeatures : existingFeatures,
     });
 
-    const prevRow = enrichment as typeof enrichment & {
+    const prevRow = enr as typeof enr & {
       golden_slug?: string | null;
       golden_meta_description?: string | null;
       golden_seo_keywords?: unknown;
     };
-    const previous = enrichment.golden_name
+    const previous = enr.golden_name
       ? {
-          name: enrichment.golden_name,
-          description: enrichment.golden_description,
+          name: enr.golden_name,
+          description: enr.golden_description,
           slug: prevRow.golden_slug ?? null,
           meta_description: prevRow.golden_meta_description ?? null,
           seo_keywords: prevRow.golden_seo_keywords ?? null,
-          at: enrichment.generated_at,
+          at: enr.generated_at,
         }
       : null;
 
@@ -1019,7 +1067,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const { error } = await supabaseAdmin
       .from("enrichments")
       .update(updatePayload as never)
-      .eq("id", enrichment.id);
+      .eq("id", enr.id);
     if (error) throw new Error(error.message);
     // Regeneration invalidates a prior manual approval — demote APPROVED to
     // NEEDS_REVIEW so reviewers re-check the new golden record.
@@ -1059,7 +1107,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     await supabaseAdmin
       .from("enrichments")
       .update({ status: "FAILED", error: msg } as never)
-      .eq("id", enrichment.id);
+      .eq("id", enr.id);
     await emit(ctx, { level: "error", message: `❌ ${product.nazwa ?? productId} — ${msg}` });
     throw new Error(msg);
   }
