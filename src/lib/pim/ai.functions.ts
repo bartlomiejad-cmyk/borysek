@@ -308,7 +308,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const newFeatures = (out.features ?? [])
         .map((f) => ({ key: sanitizeStr(f.key), value: sanitizeStr(f.value) }))
         .filter((f) => f.key && f.value);
-      const existingFeatures = ((enrichment as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
+      const existingFeatures = ((enr as { golden_features?: unknown }).golden_features ?? []) as Array<{ key: string; value: string }>;
       const shouldWriteFeatures =
         newFeatures.length > 0 && (data.mode === "all" || !existingFeatures.length);
       const description = sanitizeGoldenDescriptionHtml(rawDescription, {
@@ -316,19 +316,19 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
         features: shouldWriteFeatures ? newFeatures : existingFeatures,
       });
 
-      const prevRow = enrichment as typeof enrichment & {
+      const prevRow = enr as typeof enr & {
         golden_slug?: string | null;
         golden_meta_description?: string | null;
         golden_seo_keywords?: unknown;
       };
-      const previous = enrichment.golden_name
+      const previous = enr.golden_name
         ? {
-            name: enrichment.golden_name,
-            description: enrichment.golden_description,
+            name: enr.golden_name,
+            description: enr.golden_description,
             slug: prevRow.golden_slug ?? null,
             meta_description: prevRow.golden_meta_description ?? null,
             seo_keywords: prevRow.golden_seo_keywords ?? null,
-            at: enrichment.generated_at,
+            at: enr.generated_at,
           }
         : null;
 
@@ -350,7 +350,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       const { error } = await supabase
         .from("enrichments")
         .update(updatePayload as never)
-        .eq("id", enrichment.id);
+        .eq("id", enr.id);
       if (error) throw new Error(error.message);
       await advancePipelineStatus(supabase as never, product.id, "GOLDEN_READY");
       return {
@@ -367,7 +367,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       await supabase
         .from("enrichments")
         .update({ status: "FAILED", error: msg } as never)
-        .eq("id", enrichment.id);
+        .eq("id", enr.id);
       throw new Error(msg);
     }
   });
