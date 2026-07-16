@@ -2447,9 +2447,10 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const useApify = searchProvider === "apify" || searchProvider === "both";
   const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
 
-  // Scrape cap (max scrapes per product). Range 1..12, default 6.
-  const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 6);
-  const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 6));
+  // Scrape cap (max scrapes per product). Range 1..12, default 4.
+  // Existing projects with a saved value keep it; only the default changed.
+  const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 4);
+  const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 4));
 
   // Owner userId for cross-project scrape_cache scoping.
   let userId: string | null = null;
