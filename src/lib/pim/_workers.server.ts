@@ -2497,6 +2497,10 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   // ---- Apify branch (first in combined mode) ----
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
   const apifyVariantMeta: SerpMeta[] = [];
+  // Per-variant Apify outcome (indexed by vi). Used by the Firecrawl branch
+  // to decide, in combined mode, whether to run a fallback SERP search.
+  const apifyStatusByVi: Array<"ok" | "empty" | "error" | "quota_exhausted" | "none">
+    = variants.map(() => "none");
   if (useApify) {
     let buckets: SerpBucket[] = [];
     try {
@@ -2524,6 +2528,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const results = bucket?.results ?? [];
       if (bucket?.meta) {
         apifyVariantMeta.push(bucket.meta);
+        apifyStatusByVi[vi] = (bucket.meta.status ?? (bucket.meta.error ? "error" : "empty")) as typeof apifyStatusByVi[number];
         if (bucket.meta.error) {
           await emit(ctx, {
             level: "warn",
@@ -2536,7 +2541,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
           input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: 100 },
           results_count: 0,
           error: "no bucket returned",
+          status: "error",
         });
+        apifyStatusByVi[vi] = "error";
       }
       let n = 0;
       for (const r of results) {
