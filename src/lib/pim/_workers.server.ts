@@ -2552,12 +2552,19 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       perVariant[vi].providers.apify = n;
       usage.apify_runs = (usage.apify_runs ?? 0) + 1;
       if (n === 0) usage.apify_empty = (usage.apify_empty ?? 0) + 1;
+      const bStatus = bucket?.meta?.status;
+      if (bStatus === "quota_exhausted") {
+        usage.apify_quota_exhausted = (usage.apify_quota_exhausted ?? 0) + 1;
+      }
+      if (bStatus === "error" || (bucket?.meta?.error && bStatus !== "quota_exhausted")) {
+        usage.variant_errors = (usage.variant_errors ?? 0) + 1;
+      }
     }
 
     if (flat.length) {
       // Candidate-pool reduction BEFORE AI pre-selection:
       //   1) Drop marketplace / blacklist hits (they will never scrape well).
-      //   2) Host-level dedup: keep up to 2 URLs per host, prioritized by
+      //   2) Host-level dedup: keep MAX 1 URL per host, prioritized by
       //      (a) exact EAN present in title/snippet, (b) original SERP
       //      position. AI pre-selection's output on this pool is then FINAL —
       //      no host-dedup runs after it, so AI picks always survive.
@@ -2567,7 +2574,14 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         const hay = `${r.title} ${r.snippet}`.replace(/\D/g, "");
         return hay.includes(eanDigits);
       };
-      const preFiltered = flat.filter((r) => !isMarketplaceUrl(r.url, extraBlacklist));
+      let droppedMarketplacePre = 0;
+      const preFiltered = flat.filter((r) => {
+        if (isMarketplaceUrl(r.url, extraBlacklist)) { droppedMarketplacePre++; return false; }
+        return true;
+      });
+      if (droppedMarketplacePre > 0) {
+        usage.dedup_dropped_marketplace = (usage.dedup_dropped_marketplace ?? 0) + droppedMarketplacePre;
+      }
       const byHost = new Map<string, typeof preFiltered>();
       for (const r of preFiltered) {
         const h = r.domain || (() => { try { return new URL(r.url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
@@ -2577,6 +2591,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         byHost.set(h, arr);
       }
       const dedupPool: typeof preFiltered = [];
+      let droppedHostPre = 0;
       for (const [, arr] of byHost) {
         const sorted = arr.slice().sort((a, b) => {
           const ea = hasEanInSnippet(a) ? 1 : 0;
@@ -2584,7 +2599,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
           if (ea !== eb) return eb - ea;
           return a.i - b.i; // lower SERP position wins
         });
-        dedupPool.push(...sorted.slice(0, 2));
+        // 1 URL per host — winner picked by (EAN in snippet, then SERP position).
+        dedupPool.push(sorted[0]);
+        droppedHostPre += Math.max(0, sorted.length - 1);
+      }
+      if (droppedHostPre > 0) {
+        usage.dedup_dropped_host = (usage.dedup_dropped_host ?? 0) + droppedHostPre;
       }
       // Preserve original SERP order in the pool we send to the AI so the
       // prompt's "position matters" heuristic still holds.
@@ -2603,9 +2623,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
           .filter((v): v is Pick => v !== null);
         aiPreselectMeta = { total: capped.length, picked: picks.length };
       } else {
-        picks = capped.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
+        // Fallback when preselect fails: keep the same cap as the AI's
+        // hard limit (8) so scrape budget stays predictable.
+        picks = capped.slice(0, 8).map((f) => ({ url: f.url, vi: f.vi }));
         aiPreselectMeta = { total: capped.length, picked: picks.length, error: preselect.error ?? "empty" };
       }
+      usage.preselect_kept = (usage.preselect_kept ?? 0) + picks.length;
       for (const p of picks) {
         upsertResult(p.vi, p.url, "apify", { ai_pick: true, ai_reason: p.why });
       }
