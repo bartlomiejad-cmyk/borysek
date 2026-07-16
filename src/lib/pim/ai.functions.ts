@@ -183,7 +183,7 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
 
     const { data: product, error: pErr } = await supabase
       .from("source_products")
-      .select("id, project_id, nazwa, kod, ean, raw, product_notes")
+      .select("id, project_id, nazwa, kod, ean, category, raw, product_notes")
       .eq("id", data.productId)
       .single();
     if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -195,34 +195,54 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       .single();
     const customPrompt = project?.custom_prompt ?? "";
     const blacklist = (project?.blacklist as string[] | null) ?? [];
-    const clientGuidelines =
-      ((project?.settings as { client_guidelines?: string } | null)?.client_guidelines ?? "") || "";
+    const projectSettings = (project?.settings as Record<string, unknown> | null) ?? {};
+    const clientGuidelines = (projectSettings.client_guidelines as string | undefined) ?? "";
+    const workflow =
+      (projectSettings.workflow as "full" | "content_only" | "media_only" | undefined) ?? "full";
     const productNotes = (product as { product_notes?: string | null }).product_notes ?? "";
     const guidelinesBlock = buildClientGuidelinesBlock(clientGuidelines, productNotes);
 
-    const { data: enrichment } = await supabase
+    let { data: enrichment } = await supabase
       .from("enrichments")
       .select("*")
       .eq("source_product_id", product.id)
       .maybeSingle();
-    if (!enrichment) throw new Error("No enrichment record. Run matching first.");
 
-    let urls = ((enrichment.picked_urls as string[] | null) ?? []).slice(0, 3);
+    let urls = ((enrichment?.picked_urls as string[] | null) ?? []).slice(0, 3);
     if (data.mode === "single" && data.singleUrl) urls = [data.singleUrl];
-    if (!urls.length) throw new Error("No source URLs to enrich from.");
+    const sourceMode: "sources" | "client_data" =
+      workflow === "content_only" || urls.length === 0 ? "client_data" : "sources";
+    if (!enrichment) {
+      if (sourceMode !== "client_data") throw new Error("No enrichment record. Run matching first.");
+      const { data: newEn, error: enErr } = await supabase
+        .from("enrichments")
+        .insert({
+          source_product_id: product.id,
+          project_id: product.project_id,
+          status: "PENDING",
+          match_type: "NO_MATCH",
+        } as never)
+        .select("*")
+        .single();
+      if (enErr || !newEn) throw new Error(enErr?.message ?? "Nie udało się utworzyć rekordu enrichments");
+      enrichment = newEn as unknown as NonNullable<typeof enrichment>;
+    }
+    const enr = enrichment!;
 
-    const { data: srcs } = await supabase
-      .from("product_sources")
-      .select("url, title, description")
-      .eq("project_id", product.project_id)
-      .in("url", urls);
-
-    const sourceBlocks = (srcs ?? [])
-      .map((s, idx) => {
-        const desc = (s.description ?? "").slice(0, 4000);
-        return `### Źródło ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
-      })
-      .join("\n\n---\n\n");
+    let sourceBlocks = "";
+    if (sourceMode === "sources") {
+      const { data: srcs } = await supabase
+        .from("product_sources")
+        .select("url, title, description")
+        .eq("project_id", product.project_id)
+        .in("url", urls);
+      sourceBlocks = (srcs ?? [])
+        .map((s, idx) => {
+          const desc = (s.description ?? "").slice(0, 4000);
+          return `### Źródło ${idx + 1}\nURL: ${s.url}\nTYTUŁ: ${s.title ?? ""}\nOPIS:\n${desc}`;
+        })
+        .join("\n\n---\n\n");
+    }
 
     const raw = (product.raw as Record<string, unknown> | null) ?? {};
     const extraProps =
@@ -232,23 +252,37 @@ export const generateGoldenRecord = createServerFn({ method: "POST" })
       (raw.additional_properties as unknown) ||
       null;
 
-    const systemPrompt = GOLDEN_SEO_SYSTEM_PROMPT;
+    const CLIENT_DATA_ADDENDUM = [
+      "",
+      "## TRYB: DANE KLIENTA (bez źródeł zewnętrznych)",
+      "- Traktuj pola PRODUKT + EXTRA PROPERTIES + RAW ATRYBUTY + KATEGORIA + DODATKOWE INSTRUKCJE KLIENTA jako JEDYNE źródło faktów.",
+      "- Nie halucynuj cech spoza tych danych. Ustaw data_sufficiency uczciwie.",
+    ].join("\n");
+    const systemPrompt =
+      sourceMode === "client_data"
+        ? GOLDEN_SEO_SYSTEM_PROMPT + "\n" + CLIENT_DATA_ADDENDUM
+        : GOLDEN_SEO_SYSTEM_PROMPT;
 
+    const category = (product as { category?: string | null }).category ?? "";
     const userPrompt = [
       `PRODUKT (z bazy klienta):`,
       `nazwa: ${product.nazwa ?? ""}`,
       `kod: ${product.kod ?? ""}`,
       `ean: ${product.ean ?? ""}`,
+      category ? `kategoria: ${category}` : "",
       "",
       `EXTRA PROPERTIES (z bazy klienta):`,
       extraProps ? JSON.stringify(extraProps).slice(0, 4000) : "(brak)",
       "",
+      sourceMode === "client_data"
+        ? `RAW ATRYBUTY (z bazy klienta):\n${JSON.stringify(raw).slice(0, 4000)}\n`
+        : "",
       `DODATKOWE INSTRUKCJE KLIENTA:`,
       customPrompt || "(brak)",
       "",
-      `ŹRÓDŁA:`,
-      sourceBlocks || "(brak)",
-      "",
+      sourceMode === "sources"
+        ? `ŹRÓDŁA:\n${sourceBlocks || "(brak)"}\n`
+        : `ŹRÓDŁA:\n(brak — tryb 'dane klienta')\n`,
       guidelinesBlock ? guidelinesBlock + "\n" : "",
       'Wygeneruj JSON {"name", "slug", "description", "meta_description", "seo_keywords", "features"} zgodnie z regułami SEO opisanymi w system prompt.',
     ].filter(Boolean).join("\n");
