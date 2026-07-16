@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 
 export type CsvRow = {
   ext_id: string | null;
@@ -111,6 +112,13 @@ export const parseCsv = (file: File, mapping?: CsvMapping): Promise<CsvRow[]> =>
 export type RawCsv = {
   headers: string[];
   rows: Array<Record<string, string>>;
+};
+
+export type RawImport = RawCsv & {
+  filename: string;
+  format: "csv" | "xlsx";
+  sheet_name: string | null;
+  delimiter: string | null;
 };
 
 export type ExplicitCsvMapping = {
@@ -294,6 +302,53 @@ export const parseCsvRaw = (file: File): Promise<RawCsv> =>
         resolve({ headers, rows });
       },
       error: (err) => reject(err),
+    });
+  });
+
+/**
+ * Parse the first sheet of an XLSX file into RawCsv shape (string cells,
+ * original header order). Returns the sheet name alongside for round-trip.
+ */
+export const parseXlsxRaw = async (
+  file: File,
+): Promise<{ headers: string[]; rows: Array<Record<string, string>>; sheet_name: string }> => {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) return { headers: [], rows: [], sheet_name: "" };
+  const ws = wb.Sheets[sheetName];
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    raw: false,
+    defval: "",
+  });
+  const headerRow = (aoa[0] ?? []) as unknown[];
+  const headers = headerRow.map((h) => (h == null ? "" : String(h))).filter((h) => h !== "");
+  const rows: Array<Record<string, string>> = [];
+  for (let i = 1; i < aoa.length; i++) {
+    const arr = aoa[i] ?? [];
+    const row: Record<string, string> = {};
+    let any = false;
+    headers.forEach((h, j) => {
+      const v = (arr as unknown[])[j];
+      const s = v === null || v === undefined ? "" : String(v).trim();
+      if (s) any = true;
+      row[h] = s;
+    });
+    if (any) rows.push(row);
+  }
+  return { headers, rows, sheet_name: sheetName };
+};
+
+/**
+ * Detect a CSV file's delimiter using Papa's preview parser. Returns ',' by default.
+ */
+export const detectCsvDelimiter = (file: File): Promise<string> =>
+  new Promise((resolve) => {
+    Papa.parse<Record<string, unknown>>(file, {
+      preview: 2,
+      complete: (res) => resolve(res.meta.delimiter || ","),
+      error: () => resolve(","),
     });
   });
 

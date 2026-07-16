@@ -25,6 +25,8 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Upload, Loader2, FileCheck } from "lucide-react";
 import {
   parseCsvRaw,
+  parseXlsxRaw,
+  detectCsvDelimiter,
   buildCsvRowsFromMapping,
   type RawCsv,
   type ExplicitCsvMapping,
@@ -68,6 +70,12 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [csv, setCsv] = useState<RawCsv | null>(null);
+  const [fileMeta, setFileMeta] = useState<{
+    filename: string;
+    format: "csv" | "xlsx";
+    sheet_name: string | null;
+    delimiter: string | null;
+  } | null>(null);
   const [mapping, setMapping] = useState<Record<Field, string>>({
     id_column: SKIP,
     name_column: SKIP,
@@ -81,6 +89,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
     children_column: SKIP,
   });
   const [clearPrevious, setClearPrevious] = useState(true);
+  const [overwriteImportMeta, setOverwriteImportMeta] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const qc = useQueryClient();
@@ -102,6 +111,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
 
   const reset = () => {
     setCsv(null);
+    setFileMeta(null);
     setMapping({
       id_column: SKIP,
       name_column: SKIP,
@@ -115,18 +125,31 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
       children_column: SKIP,
     });
     setClearPrevious(true);
+    setOverwriteImportMeta(false);
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
     try {
-      const raw = await parseCsvRaw(file);
+      const isXlsx = /\.xlsx$/i.test(file.name);
+      let raw: RawCsv;
+      let meta: { filename: string; format: "csv" | "xlsx"; sheet_name: string | null; delimiter: string | null };
+      if (isXlsx) {
+        const parsed = await parseXlsxRaw(file);
+        raw = { headers: parsed.headers, rows: parsed.rows };
+        meta = { filename: file.name, format: "xlsx", sheet_name: parsed.sheet_name, delimiter: null };
+      } else {
+        raw = await parseCsvRaw(file);
+        const delimiter = await detectCsvDelimiter(file);
+        meta = { filename: file.name, format: "csv", sheet_name: null, delimiter };
+      }
       if (!raw.headers.length || !raw.rows.length) {
-        toast.error("Pusty plik CSV lub brak nagłówków");
+        toast.error("Pusty plik lub brak nagłówków");
         return;
       }
       setCsv(raw);
+      setFileMeta(meta);
       const find = (name?: string | null, aliases: string[] = []) => {
         const names = [name, ...aliases].filter(Boolean) as string[];
         for (const n of names) {
@@ -157,7 +180,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         children_column: find(null, ["_children", "children", "variant_skus"]),
       });
     } catch (e) {
-      toast.error(friendlyError(e, "Nie udało się wczytać CSV"));
+      toast.error(friendlyError(e, "Nie udało się wczytać pliku"));
     }
   };
 
@@ -199,8 +222,34 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
       let mains = 0;
       let variants = 0;
       const batchSize = 1000;
+      // Annotate original row index BEFORE batching so it stays stable
+      // across batches. Uses the pre-mapping index within `csv.rows` where
+      // possible (matches the file's row order).
+      const rowIndexByRaw = new Map<Record<string, unknown>, number>();
+      csv.rows.forEach((r, i) => rowIndexByRaw.set(r as unknown as Record<string, unknown>, i));
+      const withIndex = rows.map((r) => {
+        const idx = rowIndexByRaw.get(r.raw as unknown as Record<string, unknown>);
+        return { ...r, import_row_index: idx ?? null };
+      });
       for (let i = 0; i < rows.length; i += batchSize) {
-        const res = await ingestFn({ data: { projectId, rows: rows.slice(i, i + batchSize) } });
+        const isFirst = i === 0;
+        const res = await ingestFn({
+          data: {
+            projectId,
+            rows: withIndex.slice(i, i + batchSize),
+            importMeta: isFirst && fileMeta
+              ? {
+                  headers: csv.headers,
+                  filename: fileMeta.filename,
+                  sheet_name: fileMeta.sheet_name,
+                  format: fileMeta.format,
+                  delimiter: fileMeta.delimiter,
+                }
+              : undefined,
+            overwriteImportMeta: isFirst ? (clearPrevious || overwriteImportMeta) : false,
+            rowIndexOffset: i,
+          },
+        });
         mains += (res as { mains?: number }).mains ?? 0;
         variants += (res as { variants?: number }).variants ?? 0;
       }
@@ -265,7 +314,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
           <input
             ref={fileRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="hidden"
             onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
           />
@@ -276,7 +325,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
             disabled={busy}
           >
             <Upload className="h-4 w-4 mr-2" />
-            {csv ? `Wczytano: ${csv.rows.length} wierszy` : "Wybierz CSV"}
+            {csv ? `Wczytano: ${csv.rows.length} wierszy` : "Wybierz plik (CSV lub XLSX)"}
           </Button>
         </div>
 
@@ -380,6 +429,18 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
                 Wyczyść poprzednie produkty przed importem (usuwa też wyniki AI)
               </Label>
             </div>
+            {!clearPrevious && (
+              <div className="flex items-center gap-2 ml-6">
+                <Checkbox
+                  id="overwrite-import-meta"
+                  checked={overwriteImportMeta}
+                  onCheckedChange={(v) => setOverwriteImportMeta(v === true)}
+                />
+                <Label htmlFor="overwrite-import-meta" className="text-xs cursor-pointer">
+                  Nadpisz strukturę pliku (nagłówki/nazwa) dla eksportu round-trip
+                </Label>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>
                 Anuluj

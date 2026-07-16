@@ -45,6 +45,7 @@ import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillM
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
 import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
 import { ClientGuidelinesDialog } from "@/components/pim/ClientGuidelinesDialog";
+import { RoundtripExportDialog } from "@/components/pim/RoundtripExportDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -239,6 +240,7 @@ function ProjectPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [remapOpen, setRemapOpen] = useState(false);
+  const [roundtripOpen, setRoundtripOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
@@ -891,6 +893,11 @@ function ProjectPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => exportFile("csv", false, "delivery", false)}>
                 <Download className="h-4 w-4 mr-2" /> CSV (bez kopiowania obrazów)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Plik klienta (aktualizacja)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setRoundtripOpen(true)}>
+                <Download className="h-4 w-4 mr-2" /> Round-trip (oryginalny układ)…
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1923,6 +1930,24 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <RoundtripExportDialog
+        open={roundtripOpen}
+        onOpenChange={setRoundtripOpen}
+        projectId={id}
+        importMeta={
+          ((meta?.project as { settings?: { import_meta?: {
+            headers: string[];
+            filename: string;
+            sheet_name: string | null;
+            format: "csv" | "xlsx";
+            delimiter: string | null;
+          } } } | undefined)?.settings?.import_meta) ?? null
+        }
+        savedMapping={
+          ((meta?.project as { settings?: { roundtrip_mapping?: unknown } } | undefined)
+            ?.settings?.roundtrip_mapping as never) ?? null
+        }
+      />
       <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
         <DialogContent className="max-w-md">
           <div className="space-y-3">
