@@ -259,7 +259,7 @@ export const exportRoundtrip = createServerFn({ method: "POST" })
           // else: preserve original cell
         }
       }
-      for (const k of appendedHeaders) {
+      for (const k of appendedHeaders as RoundtripAppendedKey[]) {
         if (isVariant && !data.mapping.propagateToVariants) {
           out[k] = "";
         } else if (g && !passThrough) {
