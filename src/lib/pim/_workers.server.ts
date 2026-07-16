@@ -2659,17 +2659,38 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const v = variants[vi];
       perVariant[vi].providers.firecrawl = 0;
       const apifyCount = perVariant[vi].providers.apify ?? 0;
-      // Combined mode: skip Firecrawl search for the EAN variant (always),
-      // and skip when Apify returned >=1 result for the variant.
+      const apifyStatus = apifyStatusByVi[vi];
+      // Combined mode — status-aware Firecrawl fallback:
+      //   * EAN variant (kind "A") NEVER runs Firecrawl (FC index unreliable
+      //     for bare-numeric queries; Apify covers it).
+      //   * Name variants (B/C/D) run Firecrawl ONLY when the Apify status
+      //     is "error" or "quota_exhausted". Status "empty" (Google truly
+      //     had 0 results) does not trigger a fallback.
       if (searchProvider === "both") {
-        if (v.kind === "A" || apifyCount > 0) {
+        if (v.kind === "A") {
+          usage.fc_skipped_ean = (usage.fc_skipped_ean ?? 0) + 1;
           usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
           await emit(ctx, {
             level: "info",
-            message: `   ⏭ ${nazwa} — Firecrawl search [${v.kind}] pominięty (Apify: ${apifyCount} wyników${v.kind === "A" ? ", wariant EAN" : ""})`,
+            message: `   ⏭ ${nazwa} — Firecrawl search [A] pominięty (wariant EAN, Apify: ${apifyCount})`,
           });
           continue;
         }
+        const apifyUsable = apifyStatus === "ok" || apifyStatus === "empty";
+        if (apifyUsable) {
+          if (apifyStatus === "empty") {
+            usage.fc_skipped_apify_empty = (usage.fc_skipped_apify_empty ?? 0) + 1;
+          }
+          usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
+          await emit(ctx, {
+            level: "info",
+            message: apifyStatus === "empty"
+              ? `   ⏭ ${nazwa} — FC [${v.kind}] pominięty (Google: 0 wyników)`
+              : `   ⏭ ${nazwa} — FC [${v.kind}] pominięty (Apify: ${apifyCount} wyników)`,
+          });
+          continue;
+        }
+        // apifyStatus is "error" | "quota_exhausted" | "none" → fallback runs.
       }
       let hits: FirecrawlSearchHit[] = [];
       try {
