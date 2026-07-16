@@ -739,8 +739,75 @@ function ProductDetail() {
       </div>
 
       <Collapsible open={notesOpen} onOpenChange={setNotesOpen} className="mb-6">
-        {/* stub — see below */}
+        <CollapsibleTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full justify-between">
+            <span className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Notatki do tego produktu (wewnętrzne, wstrzykiwane do promptów AI)
+              {notesInitial.trim() ? (
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              ) : null}
+            </span>
+            <span className="text-xs text-muted-foreground">{notesOpen ? "Zwiń" : "Rozwiń"}</span>
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 space-y-2">
+          <Textarea
+            value={productNotes}
+            onChange={(e) => setProductNotes(e.target.value)}
+            onBlur={saveNotes}
+            rows={5}
+            maxLength={2000}
+            placeholder="Wskazówki tylko dla AI, np. „podkreśl wersję lewostronną”, „unikaj słowa X”, „w opisie wymień kompatybilność z modelem Y”."
+          />
+          <div className="flex justify-between items-center text-xs text-muted-foreground">
+            <span>{productNotes.length} / 2000 · zapis automatyczny po opuszczeniu pola</span>
+            <span>{notesSaving ? "Zapisywanie…" : productNotes !== notesInitial ? "Nie zapisano" : "Zapisane"}</span>
+          </div>
+        </CollapsibleContent>
       </Collapsible>
+
+      {(() => {
+        const variants = (((data as { variants?: Array<{ id: string; kod: string | null; ean: string | null; nazwa: string | null; attrs: Record<string, string> }> } | undefined)?.variants) ?? []);
+        if (!variants.length) return null;
+        const attrKeys = Array.from(
+          new Set(variants.flatMap((v) => Object.keys(v.attrs))),
+        ).slice(0, 6);
+        return (
+          <div className="mb-6 rounded-lg border bg-card p-3">
+            <div className="mb-2 text-sm font-medium">
+              Warianty tego produktu <span className="text-muted-foreground">({variants.length})</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              Warianty są pomijane w pipeline (wykluczone z powodem „variant”) i eksportowane razem z rodzicem.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="text-left py-1 pr-3">SKU</th>
+                    <th className="text-left py-1 pr-3">EAN</th>
+                    {attrKeys.map((k) => (
+                      <th key={k} className="text-left py-1 pr-3">{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {variants.map((v) => (
+                    <tr key={v.id} className="border-b last:border-b-0">
+                      <td className="py-1 pr-3 font-mono">{v.kod ?? "—"}</td>
+                      <td className="py-1 pr-3 font-mono">{v.ean ?? "—"}</td>
+                      {attrKeys.map((k) => (
+                        <td key={k} className="py-1 pr-3">{v.attrs[k] ?? "—"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
         <CollapsibleTrigger asChild>
           <Button variant="outline" size="sm" className="w-full justify-between">
             <span className="flex items-center gap-2">
