@@ -521,6 +521,27 @@ export const runMatching = createServerFn({ method: "POST" })
           if (!urlToProduct.has(url)) urlToProduct.set(url, { nazwa: p.nazwa, ean: p.ean });
         }
       }
+      // Product-id → mode + brand/mpn context, used to strengthen the
+      // page_matches_product judgment in STRICT mode.
+      const ctxById = new Map<string, { mode: "strict" | "compatible"; brand: string | null; mpn: string | null }>();
+      for (const p of products as Array<{ id: string; raw?: unknown }>) {
+        const rawObj = (p.raw && typeof p.raw === "object") ? (p.raw as Record<string, unknown>) : {};
+        const brand =
+          (typeof rawObj.producent === "string" && rawObj.producent.trim()) ||
+          (typeof rawObj.brand === "string" && (rawObj.brand as string).trim()) ||
+          (typeof rawObj.marka === "string" && (rawObj.marka as string).trim()) || null;
+        const mpn =
+          (typeof rawObj.kod_producenta === "string" && rawObj.kod_producenta.trim()) ||
+          (typeof rawObj.mpn === "string" && (rawObj.mpn as string).trim()) ||
+          (typeof rawObj.kod === "string" && (rawObj.kod as string).trim()) || null;
+        ctxById.set(p.id, { mode: modeById.get(p.id) ?? "strict", brand: brand || null, mpn: mpn || null });
+      }
+      const urlToProductId = new Map<string, string>();
+      for (const u of updates) {
+        for (const url of u.picked_urls) {
+          if (!urlToProductId.has(url)) urlToProductId.set(url, u.source_product_id);
+        }
+      }
       const CHUNK = 200;
       for (let i = 0; i < allUrls.length; i += CHUNK) {
         const chunk = allUrls.slice(i, i + CHUNK);
@@ -548,10 +569,15 @@ export const runMatching = createServerFn({ method: "POST" })
           };
           if (regexClean.length > LLM_CLEAN_MIN_CHARS) {
             const ctx = urlToProduct.get(rr.url);
+            const pid = urlToProductId.get(rr.url);
+            const cctx = pid ? ctxById.get(pid) : undefined;
             const llm = await llmCleanDescription({
               rawHtml: descRaw,
               productName: ctx?.nazwa ?? null,
               ean: ctx?.ean ?? null,
+              brand: cctx?.brand ?? null,
+              mpn: cctx?.mpn ?? null,
+              matchingMode: cctx?.mode ?? "strict",
             });
             descClean = llm.description || regexClean;
             cleaningMeta = llm.meta;
