@@ -613,8 +613,16 @@ function ProjectPage() {
 
   const generateAll = async (productIds?: string[]) => {
     const idSet = productIds ? new Set(productIds) : null;
+    const workflow = (summary?.workflow ?? "full");
     const targets = products.filter((p) => {
       if (idSet && !idSet.has(p.id)) return false;
+      if ((p as { row_kind?: string | null }).row_kind === "variant") return false;
+      if ((p as { excluded?: boolean | null }).excluded) return false;
+      if (workflow === "content_only") {
+        // No source dependency — anything not yet generated is a target.
+        if (idSet) return true;
+        return p.status !== "GENERATED";
+      }
       if (idSet) return p.match_type !== "NO_MATCH";
       return p.match_type !== "NO_MATCH" && p.status !== "GENERATED";
     });
