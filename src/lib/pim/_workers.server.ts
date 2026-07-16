@@ -894,8 +894,10 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       .select("*")
       .single();
     if (enErr || !newEn) throw new Error(enErr?.message ?? "Nie udało się utworzyć rekordu enrichments");
-    enrichment = newEn as typeof enrichment;
+    enrichment = newEn as unknown as NonNullable<typeof enrichment>;
   }
+  // After the guard above enrichment is guaranteed non-null.
+  const enr = enrichment!;
 
   let sourceBlocks = "";
   if (sourceMode === "sources") {
