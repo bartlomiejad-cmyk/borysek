@@ -106,6 +106,15 @@ export async function llmCleanDescription(opts: {
   productName: string | null;
   brand?: string | null;
   ean?: string | null;
+  mpn?: string | null;
+  /**
+   * Matching mode of the source product. STRICT tightens the
+   * page_matches_product judgment: the LLM must confirm EAN/MPN in the
+   * page content or structured data, or an exact brand+model+variant name
+   * match. In `compatible` (functional-equivalence) mode we keep the
+   * looser default because equivalents legitimately carry different codes.
+   */
+  matchingMode?: "strict" | "compatible";
 }): Promise<LlmCleanResult> {
   const apiKey = process.env.LOVABLE_API_KEY;
 
@@ -123,14 +132,20 @@ export async function llmCleanDescription(opts: {
 
   const trimmed = preClean.slice(0, MAX_INPUT_CHARS);
 
+  const strictJudgment =
+    "Potwierdź, że strona fizycznie dotyczy szukanego produktu: zgodny EAN lub MPN w treści/danych strukturalnych, a w ich braku ścisła zgodność marki+modelu+wariantu w nazwie. W razie niezgodności zwróć page_matches_product=false, description_html=\"\" i confidence=0.";
+  const looseJudgment =
+    "Jeżeli dostarczony HTML NIE opisuje tego produktu (inna kategoria, inny artykuł), zwróć page_matches_product=false, description_html=\"\" i confidence=0.";
+  const judgmentRule = opts.matchingMode === "strict" ? strictJudgment : looseJudgment;
+
   const system = [
     "You receive HTML scraped from an e-commerce product page.",
-    `Return ONLY content that describes this exact product: ${opts.productName ?? "(unknown)"}, brand: ${opts.brand ?? "(unknown)"}, EAN: ${opts.ean ?? "(unknown)"}.`,
+    `Return ONLY content that describes this exact product: ${opts.productName ?? "(unknown)"}, brand: ${opts.brand ?? "(unknown)"}, EAN: ${opts.ean ?? "(unknown)"}, MPN: ${opts.mpn ?? "(unknown)"}.`,
     "Remove: shipping/delivery info, return policies, prices, promotions, contact data, phone numbers, related/recommended products, reviews, store navigation, cookie notices.",
     "Preserve the HTML structure of the remaining content using only these tags: h3, p, ul, li, strong, table, tr, td.",
     "OUTPUT LANGUAGE: description_html MUST be in Polish. If the source is in another language, translate to natural Polish while preserving literally: product name, brand, model, variant, units, calibers, weights and technical designations. Do not add commercial information absent from the source.",
     "Features keys must also be in Polish (np. \"Waga\", \"Kaliber\", \"Materiał\").",
-    "Jeżeli dostarczony HTML NIE opisuje tego produktu (inna kategoria, inny artykuł), zwróć page_matches_product=false, description_html=\"\" i confidence=0.",
+    judgmentRule,
     "description_html może zawierać WYŁĄCZNIE treść obecną w dostarczonym HTML — nigdy nie uzupełniaj braków wiedzą o produkcie z nagłówka/kontekstu.",
     'Output JSON: { "page_matches_product": boolean, "description_html": string, "features": [{"key": string, "value": string}], "confidence": number 0-1, "removed_sections": string[] }.',
   ].join("\n");

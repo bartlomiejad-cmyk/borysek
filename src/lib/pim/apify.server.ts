@@ -34,6 +34,14 @@ export type SerpMeta = {
   results_count: number;
   error?: string;
   /**
+   * Coarse-grained outcome for the caller:
+   *   - "ok"               : run succeeded with >=1 organic result
+   *   - "empty"            : run succeeded, zero organic results
+   *   - "error"            : actor / HTTP error, retriable or otherwise
+   *   - "quota_exhausted"  : provider signalled quota / rate-limit
+   */
+  status?: "ok" | "empty" | "error" | "quota_exhausted";
+  /**
    * Diagnostic capture for bare-numeric (EAN-like) queries that returned
    * zero organic results. Populated at most once per `runSerpSearch` call
    * (first empty numeric variant). Used to investigate whether the actor
@@ -132,6 +140,7 @@ async function runOnce(
       const trimmed = text.slice(0, 300);
       const err = new Error(`Apify actor HTTP ${res.status}${trimmed ? `: ${trimmed}` : ""}`);
       (err as Error & { retriable?: boolean }).retriable = res.status >= 500;
+      (err as Error & { httpStatus?: number }).httpStatus = res.status;
       throw err;
     }
     const j = (await res.json()) as DatasetItem[] | { items?: DatasetItem[] };
@@ -147,6 +156,14 @@ async function runOnce(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function classifyErrorStatus(err: unknown): "quota_exhausted" | "error" {
+  const msg = err instanceof Error ? err.message : String(err);
+  const status = (err as { httpStatus?: number } | null)?.httpStatus;
+  if (status === 402 || status === 429) return "quota_exhausted";
+  if (/quota|rate.?limit|too many|payment required|insufficient/i.test(msg)) return "quota_exhausted";
+  return "error";
 }
 
 /**
@@ -168,9 +185,9 @@ export async function runSerpSearch(
   const limit = Math.max(10, Math.min(100, opts.limit ?? 100));
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
-  const buckets: SerpBucket[] = [];
+  // Numeric-sample capture is per-call; guard against parallel writes.
   let numericSampleCaptured = false;
-  for (const keyword of clean) {
+  const buildInput = (keyword: string): Record<string, unknown> => {
     // Actor input validation requires numeric-looking fields as strings
     // (docs list defaults like "10"). Sending a JSON number → HTTP 400
     // "Field input.limit must be string".
@@ -181,10 +198,16 @@ export async function runSerpSearch(
       hl,
     };
     if (opts.lr) input.lr = opts.lr;
+    return input;
+  };
+
+  const runOneVariant = async (keyword: string): Promise<SerpBucket> => {
+    const input = buildInput(keyword);
     const meta: SerpMeta = {
       provider: "apify",
       input: { keyword, gl, hl, limit },
       results_count: 0,
+      status: "empty",
     };
     try {
       let items = await runOnce(token, input, timeoutMs).catch(async (e) => {
@@ -197,6 +220,7 @@ export async function runSerpSearch(
       if (!Array.isArray(items)) items = [];
       const results = normalizeResults(items);
       meta.results_count = results.length;
+      meta.status = results.length > 0 ? "ok" : "empty";
       // Diagnostics: bare-numeric queries (EAN-like) sometimes come back
       // empty even though the same search in Polish Google UI has hits.
       // Snapshot the raw dataset so we can see what the actor returned
@@ -211,10 +235,37 @@ export async function runSerpSearch(
           // ignore serialization errors — diagnostics only
         }
       }
-      buckets.push({ query: keyword, results, meta });
+      return { query: keyword, results, meta };
     } catch (e) {
       meta.error = e instanceof Error ? e.message : String(e);
-      buckets.push({ query: keyword, results: [], meta });
+      meta.status = classifyErrorStatus(e);
+      return { query: keyword, results: [], meta };
+    }
+  };
+
+  // Parallel per-variant execution. Account limit is 5 concurrent runs and
+  // discovery keeps variants per product ≤ 4, so this is safe as long as
+  // callers do not overlap product-level invocations.
+  const settled = await Promise.allSettled(clean.map((q) => runOneVariant(q)));
+  const buckets: SerpBucket[] = [];
+  for (let i = 0; i < settled.length; i++) {
+    const s = settled[i];
+    if (s.status === "fulfilled") {
+      buckets.push(s.value);
+    } else {
+      const keyword = clean[i];
+      const err = s.reason;
+      buckets.push({
+        query: keyword,
+        results: [],
+        meta: {
+          provider: "apify",
+          input: { keyword, gl, hl, limit },
+          results_count: 0,
+          status: classifyErrorStatus(err),
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
     }
   }
   return buckets;

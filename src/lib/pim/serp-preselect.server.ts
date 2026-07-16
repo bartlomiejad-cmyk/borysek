@@ -27,11 +27,11 @@ export type PreselectResult = {
 };
 
 const SYSTEM_PROMPT =
-  'Wybierz wyniki wyszukiwania, które najprawdopodobniej prowadzą do strony produktowej opisującej DOKŁADNIE ten produkt. ' +
-  "Priorytety: (1) EAN lub kod producenta widoczny w tytule/snippecie, (2) strona producenta, (3) tytuł zawiera markę+model+wariant. " +
-  "Wynik, którego tytuł lub opis zawiera DOKŁADNY EAN produktu (np. 'EAN: 5904905976918'), ma najwyższy priorytet — zawsze umieszczaj go na początku picks. " +
-  "Odrzuć: listingi kategorii, blogi/poradniki, agregatory, inne warianty. " +
-  'Zwróć JSON {"picks": [{"i": number, "why": string(krótko)}]} — maksymalnie 12 pozycji, posortowane od najlepszej.';
+  "Wybierz maksymalnie 8 adresów. Najwyższy priorytet: strony z dokładnym EAN produktu w tytule lub snippecie. " +
+  "Następnie: wysoko rankowane wyniki, których tytuł/snippet wskazuje na konkretną kartę produktu z parametrami " +
+  "(nie stronę kategorii, nie blog, nie agregator) — przepuszczaj je także bez widocznego EAN, sklepy często trzymają EAN " +
+  "tylko w danych strukturalnych. Odrzucaj: kategorie, poradniki, agregatory, inne warianty produktu. " +
+  'Zwróć JSON {"picks": [{"i": number, "why": string(krótko)}]} — posortowane od najlepszej.';
 
 export async function preselectSerpResults(input: PreselectInput): Promise<PreselectResult> {
   const apiKey = process.env.LOVABLE_API_KEY;
@@ -88,7 +88,7 @@ export async function preselectSerpResults(input: PreselectInput): Promise<Prese
             return { i, why };
           })
           .filter((v): v is PreselectPick => v !== null)
-          .slice(0, 12)
+          .slice(0, 8)
       : [];
     return { ok: true, picks };
   } catch (e) {

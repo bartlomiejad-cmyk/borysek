@@ -10,7 +10,7 @@ import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
  */
 export const MARKETPLACE_DOMAINS: string[] = [
   "amazon.",
-  "allegro.pl",
+  "allegro.",
   "allegrolokalnie.pl",
   "ebay.",
   "aliexpress.",
@@ -19,6 +19,7 @@ export const MARKETPLACE_DOMAINS: string[] = [
   "ceneo.pl",
   "skapiec.pl",
   "nokaut.pl",
+  "opineo.pl",
   "okazje.info.pl",
   "google.",
   "youtube.",

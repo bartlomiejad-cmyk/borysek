@@ -101,6 +101,13 @@ type DiscoveryUsage = {
   apify_runs?: number;
   apify_empty?: number;
   skipped_fc_searches?: number;
+  fc_skipped_ean?: number;
+  fc_skipped_apify_empty?: number;
+  apify_quota_exhausted?: number;
+  variant_errors?: number;
+  dedup_dropped_host?: number;
+  dedup_dropped_marketplace?: number;
+  preselect_kept?: number;
 };
 
 async function bumpJobUsage(bulkJobId: string | undefined, patch: DiscoveryUsage): Promise<void> {
@@ -2440,9 +2447,10 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const useApify = searchProvider === "apify" || searchProvider === "both";
   const useFirecrawl = searchProvider === "firecrawl" || searchProvider === "both";
 
-  // Scrape cap (max scrapes per product). Range 1..12, default 6.
-  const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 6);
-  const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 6));
+  // Scrape cap (max scrapes per product). Range 1..12, default 4.
+  // Existing projects with a saved value keep it; only the default changed.
+  const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 4);
+  const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 4));
 
   // Owner userId for cross-project scrape_cache scoping.
   let userId: string | null = null;
@@ -2489,6 +2497,10 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   // ---- Apify branch (first in combined mode) ----
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
   const apifyVariantMeta: SerpMeta[] = [];
+  // Per-variant Apify outcome (indexed by vi). Used by the Firecrawl branch
+  // to decide, in combined mode, whether to run a fallback SERP search.
+  const apifyStatusByVi: Array<"ok" | "empty" | "error" | "quota_exhausted" | "none">
+    = variants.map(() => "none");
   if (useApify) {
     let buckets: SerpBucket[] = [];
     try {
@@ -2516,6 +2528,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const results = bucket?.results ?? [];
       if (bucket?.meta) {
         apifyVariantMeta.push(bucket.meta);
+        apifyStatusByVi[vi] = (bucket.meta.status ?? (bucket.meta.error ? "error" : "empty")) as typeof apifyStatusByVi[number];
         if (bucket.meta.error) {
           await emit(ctx, {
             level: "warn",
@@ -2528,7 +2541,9 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
           input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: 100 },
           results_count: 0,
           error: "no bucket returned",
+          status: "error",
         });
+        apifyStatusByVi[vi] = "error";
       }
       let n = 0;
       for (const r of results) {
@@ -2544,12 +2559,19 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       perVariant[vi].providers.apify = n;
       usage.apify_runs = (usage.apify_runs ?? 0) + 1;
       if (n === 0) usage.apify_empty = (usage.apify_empty ?? 0) + 1;
+      const bStatus = bucket?.meta?.status;
+      if (bStatus === "quota_exhausted") {
+        usage.apify_quota_exhausted = (usage.apify_quota_exhausted ?? 0) + 1;
+      }
+      if (bStatus === "error" || (bucket?.meta?.error && bStatus !== "quota_exhausted")) {
+        usage.variant_errors = (usage.variant_errors ?? 0) + 1;
+      }
     }
 
     if (flat.length) {
       // Candidate-pool reduction BEFORE AI pre-selection:
       //   1) Drop marketplace / blacklist hits (they will never scrape well).
-      //   2) Host-level dedup: keep up to 2 URLs per host, prioritized by
+      //   2) Host-level dedup: keep MAX 1 URL per host, prioritized by
       //      (a) exact EAN present in title/snippet, (b) original SERP
       //      position. AI pre-selection's output on this pool is then FINAL —
       //      no host-dedup runs after it, so AI picks always survive.
@@ -2559,7 +2581,14 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         const hay = `${r.title} ${r.snippet}`.replace(/\D/g, "");
         return hay.includes(eanDigits);
       };
-      const preFiltered = flat.filter((r) => !isMarketplaceUrl(r.url, extraBlacklist));
+      let droppedMarketplacePre = 0;
+      const preFiltered = flat.filter((r) => {
+        if (isMarketplaceUrl(r.url, extraBlacklist)) { droppedMarketplacePre++; return false; }
+        return true;
+      });
+      if (droppedMarketplacePre > 0) {
+        usage.dedup_dropped_marketplace = (usage.dedup_dropped_marketplace ?? 0) + droppedMarketplacePre;
+      }
       const byHost = new Map<string, typeof preFiltered>();
       for (const r of preFiltered) {
         const h = r.domain || (() => { try { return new URL(r.url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
@@ -2569,6 +2598,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         byHost.set(h, arr);
       }
       const dedupPool: typeof preFiltered = [];
+      let droppedHostPre = 0;
       for (const [, arr] of byHost) {
         const sorted = arr.slice().sort((a, b) => {
           const ea = hasEanInSnippet(a) ? 1 : 0;
@@ -2576,7 +2606,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
           if (ea !== eb) return eb - ea;
           return a.i - b.i; // lower SERP position wins
         });
-        dedupPool.push(...sorted.slice(0, 2));
+        // 1 URL per host — winner picked by (EAN in snippet, then SERP position).
+        dedupPool.push(sorted[0]);
+        droppedHostPre += Math.max(0, sorted.length - 1);
+      }
+      if (droppedHostPre > 0) {
+        usage.dedup_dropped_host = (usage.dedup_dropped_host ?? 0) + droppedHostPre;
       }
       // Preserve original SERP order in the pool we send to the AI so the
       // prompt's "position matters" heuristic still holds.
@@ -2595,9 +2630,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
           .filter((v): v is Pick => v !== null);
         aiPreselectMeta = { total: capped.length, picked: picks.length };
       } else {
-        picks = capped.slice(0, 20).map((f) => ({ url: f.url, vi: f.vi }));
+        // Fallback when preselect fails: keep the same cap as the AI's
+        // hard limit (8) so scrape budget stays predictable.
+        picks = capped.slice(0, 8).map((f) => ({ url: f.url, vi: f.vi }));
         aiPreselectMeta = { total: capped.length, picked: picks.length, error: preselect.error ?? "empty" };
       }
+      usage.preselect_kept = (usage.preselect_kept ?? 0) + picks.length;
       for (const p of picks) {
         upsertResult(p.vi, p.url, "apify", { ai_pick: true, ai_reason: p.why });
       }
@@ -2621,17 +2659,38 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const v = variants[vi];
       perVariant[vi].providers.firecrawl = 0;
       const apifyCount = perVariant[vi].providers.apify ?? 0;
-      // Combined mode: skip Firecrawl search for the EAN variant (always),
-      // and skip when Apify returned >=1 result for the variant.
+      const apifyStatus = apifyStatusByVi[vi];
+      // Combined mode — status-aware Firecrawl fallback:
+      //   * EAN variant (kind "A") NEVER runs Firecrawl (FC index unreliable
+      //     for bare-numeric queries; Apify covers it).
+      //   * Name variants (B/C/D) run Firecrawl ONLY when the Apify status
+      //     is "error" or "quota_exhausted". Status "empty" (Google truly
+      //     had 0 results) does not trigger a fallback.
       if (searchProvider === "both") {
-        if (v.kind === "A" || apifyCount > 0) {
+        if (v.kind === "A") {
+          usage.fc_skipped_ean = (usage.fc_skipped_ean ?? 0) + 1;
           usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
           await emit(ctx, {
             level: "info",
-            message: `   ⏭ ${nazwa} — Firecrawl search [${v.kind}] pominięty (Apify: ${apifyCount} wyników${v.kind === "A" ? ", wariant EAN" : ""})`,
+            message: `   ⏭ ${nazwa} — Firecrawl search [A] pominięty (wariant EAN, Apify: ${apifyCount})`,
           });
           continue;
         }
+        const apifyUsable = apifyStatus === "ok" || apifyStatus === "empty";
+        if (apifyUsable) {
+          if (apifyStatus === "empty") {
+            usage.fc_skipped_apify_empty = (usage.fc_skipped_apify_empty ?? 0) + 1;
+          }
+          usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
+          await emit(ctx, {
+            level: "info",
+            message: apifyStatus === "empty"
+              ? `   ⏭ ${nazwa} — FC [${v.kind}] pominięty (Google: 0 wyników)`
+              : `   ⏭ ${nazwa} — FC [${v.kind}] pominięty (Apify: ${apifyCount} wyników)`,
+          });
+          continue;
+        }
+        // apifyStatus is "error" | "quota_exhausted" | "none" → fallback runs.
       }
       let hits: FirecrawlSearchHit[] = [];
       try {
