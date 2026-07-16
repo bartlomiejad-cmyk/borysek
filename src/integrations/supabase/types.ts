@@ -717,11 +717,13 @@ export type Database = {
           manual_lock: boolean
           matching_mode: string
           nazwa: string | null
+          parent_sku: string | null
           pipeline_status: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes: string | null
           project_id: string
           raw: Json
           review_status: Database["public"]["Enums"]["pim_review_status"]
+          row_kind: string
         }
         Insert: {
           approved_at?: string | null
@@ -738,11 +740,13 @@ export type Database = {
           manual_lock?: boolean
           matching_mode?: string
           nazwa?: string | null
+          parent_sku?: string | null
           pipeline_status?: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes?: string | null
           project_id: string
           raw?: Json
           review_status?: Database["public"]["Enums"]["pim_review_status"]
+          row_kind?: string
         }
         Update: {
           approved_at?: string | null
@@ -759,11 +763,13 @@ export type Database = {
           manual_lock?: boolean
           matching_mode?: string
           nazwa?: string | null
+          parent_sku?: string | null
           pipeline_status?: Database["public"]["Enums"]["pim_pipeline_status"]
           product_notes?: string | null
           project_id?: string
           raw?: Json
           review_status?: Database["public"]["Enums"]["pim_review_status"]
+          row_kind?: string
         }
         Relationships: [
           {

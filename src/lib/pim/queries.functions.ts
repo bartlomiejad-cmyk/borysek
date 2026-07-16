@@ -21,6 +21,7 @@ export type PipelineSummary = {
   audit_eligible: number;    // GOLDEN_READY + VISUALS_READY
   audit_completed: number;   // enrichments.audit is not null within eligible set
   excluded_count: number;    // products flagged out of pipeline (auto or manual)
+  variant_count: number;     // rows classified as product variants (row_kind='variant')
 };
 
 export const getPipelineSummary = createServerFn({ method: "GET" })
@@ -31,7 +32,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
     const [{ data: sp }, { data: en }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, pipeline_status, review_status, excluded")
+        .select("id, pipeline_status, review_status, excluded, excluded_reason, row_kind")
         .eq("project_id", data.projectId)
         .limit(20000),
       supabase
@@ -40,7 +41,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
         .eq("project_id", data.projectId)
         .limit(20000),
     ]);
-    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null; excluded?: boolean | null }>;
+    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null; excluded?: boolean | null; excluded_reason?: string | null; row_kind?: string | null }>;
     const s: PipelineSummary = {
       total: 0,
       imported: 0,
@@ -56,9 +57,11 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
       audit_eligible: 0,
       audit_completed: 0,
       excluded_count: 0,
+      variant_count: 0,
     };
     const eligibleIds = new Set<string>();
     for (const r of rows) {
+      if ((r.row_kind ?? "main") === "variant") { s.variant_count++; continue; }
       if (r.excluded) { s.excluded_count++; continue; }
       s.total++;
       const ps = r.pipeline_status ?? "IMPORTED";
@@ -94,7 +97,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode, excluded, excluded_reason")
+      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode, excluded, excluded_reason, row_kind, parent_sku")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);

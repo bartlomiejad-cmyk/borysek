@@ -11,6 +11,8 @@ const sourceProductSchema = z.object({
   has_images: z.boolean().optional(),
   main_image_url: z.string().nullable().optional(),
   gallery_urls: z.array(z.string()).optional(),
+  row_kind: z.enum(["main", "variant"]).optional(),
+  parent_sku: z.string().nullable().optional(),
   raw: z.record(z.unknown()),
 });
 
@@ -45,18 +47,45 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const payload = data.rows.map((r) => {
-      const { has_images: _hi, main_image_url: _mi, gallery_urls: _gu, category, ...rest } = r;
-      return { ...rest, category: category ?? null, project_id: data.projectId };
+      const {
+        has_images: _hi,
+        main_image_url: _mi,
+        gallery_urls: _gu,
+        category,
+        row_kind,
+        parent_sku,
+        ...rest
+      } = r;
+      const kind = row_kind ?? "main";
+      const base: Record<string, unknown> = {
+        ...rest,
+        category: category ?? null,
+        project_id: data.projectId,
+        row_kind: kind,
+        parent_sku: parent_sku ?? null,
+      };
+      // Variants are preserved for round-trip export but never processed by
+      // the pipeline. Flag them as excluded on import; the flag is NOT
+      // auto-cleared by re-running discovery (worker only clears
+      // reason='auto_no_sources').
+      if (kind === "variant") {
+        base.excluded = true;
+        base.excluded_reason = "variant";
+        base.excluded_at = new Date().toISOString();
+      }
+      return base;
     });
     const { error } = await supabase.from("source_products").insert(payload as never);
     if (error) throw new Error(error.message);
     // Create pending enrichments
     const { data: inserted } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean")
+      .select("id, ext_id, nazwa, kod, ean, row_kind")
       .eq("project_id", data.projectId);
     if (inserted) {
-      const enr = inserted.map((row) => ({
+      const enr = (inserted as Array<{ id: string; row_kind?: string | null }>)
+        .filter((row) => (row.row_kind ?? "main") !== "variant")
+        .map((row) => ({
         source_product_id: row.id,
         project_id: data.projectId,
         status: "PENDING" as const,
@@ -117,7 +146,8 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
         }
       }
     }
-    return { inserted: payload.length };
+    const variants = payload.filter((p) => (p as { row_kind?: string }).row_kind === "variant").length;
+    return { inserted: payload.length, mains: payload.length - variants, variants };
   });
 
 export const ingestSearchResults = createServerFn({ method: "POST" })

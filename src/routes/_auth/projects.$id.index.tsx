@@ -154,6 +154,7 @@ const searchSchema = z.object({
       "REVIEW",
       "LOCKED",
       "EXCLUDED",
+      "VARIANTS",
     ])
     .catch("ALL"),
   search: z.string().catch(""),
@@ -383,9 +384,15 @@ function ProjectPage() {
     const q = search.trim().toLowerCase();
     return products.filter((p) => {
       const isExcluded = !!(p as { excluded?: boolean }).excluded;
-      if (filter === "EXCLUDED") {
-        if (!isExcluded) return false;
-      } else if (isExcluded) {
+      const excludedReason = (p as { excluded_reason?: string | null }).excluded_reason ?? null;
+      const isVariant =
+        ((p as { row_kind?: string | null }).row_kind ?? "main") === "variant" ||
+        excludedReason === "variant";
+      if (filter === "VARIANTS") {
+        if (!isVariant) return false;
+      } else if (filter === "EXCLUDED") {
+        if (!isExcluded || isVariant) return false;
+      } else if (isExcluded || isVariant) {
         // Excluded rows are hidden from every other view so they don't
         // muddy stage-based lists or bulk actions.
         return false;
@@ -1200,6 +1207,7 @@ function ProjectPage() {
                 <SelectItem value="NO_IMAGES">Bez zdjęć</SelectItem>
                 <SelectItem value="LOCKED">🔒 Zablokowane ręcznie</SelectItem>
                 <SelectItem value="EXCLUDED">🚫 Wykluczone (poza procesem)</SelectItem>
+                <SelectItem value="VARIANTS">🧬 Warianty</SelectItem>
               </SelectContent>
             </Select>
             {categoryOptions.length > 0 && (
@@ -1379,7 +1387,7 @@ function ProjectPage() {
                 onClick={async () => {
                   const ids = [...selectedIds];
                   if (!ids.length) return;
-                  const restore = filter === "EXCLUDED";
+                   const restore = filter === "EXCLUDED" || filter === "VARIANTS";
                   try {
                     const res = await setProductsExcludedFn({
                       data: { projectId: id, productIds: ids, excluded: !restore },
@@ -1397,7 +1405,7 @@ function ProjectPage() {
                   }
                 }}
               >
-                {filter === "EXCLUDED" ? "↩ Przywróć do przetwarzania" : "🚫 Wyklucz z przetwarzania"}
+                {filter === "EXCLUDED" || filter === "VARIANTS" ? "↩ Przywróć do przetwarzania" : "🚫 Wyklucz z przetwarzania"}
               </Button>
               <Button
                 size="sm"
@@ -1564,6 +1572,34 @@ function ProjectPage() {
                             (((p as { pipeline_status?: string | null }).pipeline_status ?? "IMPORTED") as PimPipelineStatus)
                           ] ?? "Zaimportowany"}
                         </Badge>
+                        {(() => {
+                          const rk = (p as { row_kind?: string | null }).row_kind ?? "main";
+                          const reason = (p as { excluded_reason?: string | null }).excluded_reason;
+                          if (rk === "variant" || reason === "variant") {
+                            const parent = (p as { parent_sku?: string | null }).parent_sku;
+                            return (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 border-violet-500/60 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                                title={parent ? `Wariant produktu ${parent}` : "Wariant produktu — pomijany przez pipeline"}
+                              >
+                                🧬 Wariant{parent ? ` · ${parent}` : ""}
+                              </Badge>
+                            );
+                          }
+                          if ((p as { excluded?: boolean }).excluded) {
+                            return (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 border-zinc-500/60 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300"
+                                title="Produkt wyłączony z procesu"
+                              >
+                                🚫 Poza procesem
+                              </Badge>
+                            );
+                          }
+                          return null;
+                        })()}
                         <button
                           type="button"
                           className={

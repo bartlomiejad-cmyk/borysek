@@ -2320,8 +2320,18 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const mpn =
     (extracted?.kod_producenta ?? product.kod ?? null)?.toString().trim() || null;
 
+  // Parent products imported without an EAN of their own may carry
+  // `variant_eans` in raw (aggregated at import from child variant rows).
+  // Fall back to the first one so the high-priority EAN search still runs.
+  let eanForSearch: string | null = product.ean ?? null;
+  if (!eanForSearch) {
+    const ve = (rawObj as { variant_eans?: unknown }).variant_eans;
+    if (Array.isArray(ve) && typeof ve[0] === "string" && ve[0].trim()) {
+      eanForSearch = ve[0].trim();
+    }
+  }
   const variants = buildQueryVariants(
-    { nazwa, ean: product.ean ?? null, mpn, producent },
+    { nazwa, ean: eanForSearch, mpn, producent },
     strategy,
   );
   if (!variants.length) {
