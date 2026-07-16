@@ -45,6 +45,7 @@ import { FillMissingImagesDialog, type FillTarget } from "@/components/pim/FillM
 import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/GenerateVisualizationsDialog";
 import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
 import { ClientGuidelinesDialog } from "@/components/pim/ClientGuidelinesDialog";
+import { RoundtripExportDialog } from "@/components/pim/RoundtripExportDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
