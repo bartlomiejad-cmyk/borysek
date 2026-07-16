@@ -101,6 +101,13 @@ type DiscoveryUsage = {
   apify_runs?: number;
   apify_empty?: number;
   skipped_fc_searches?: number;
+  fc_skipped_ean?: number;
+  fc_skipped_apify_empty?: number;
+  apify_quota_exhausted?: number;
+  variant_errors?: number;
+  dedup_dropped_host?: number;
+  dedup_dropped_marketplace?: number;
+  preselect_kept?: number;
 };
 
 async function bumpJobUsage(bulkJobId: string | undefined, patch: DiscoveryUsage): Promise<void> {
