@@ -1944,12 +1944,8 @@ function ProjectPage() {
           } } } | undefined)?.settings?.import_meta) ?? null
         }
         savedMapping={
-          ((meta?.project as { settings?: { roundtrip_mapping?: {
-            updates?: Record<string, never>;
-            appended?: never;
-            propagateToVariants?: boolean;
-            approvedOnly?: boolean;
-          } } } | undefined)?.settings?.roundtrip_mapping) ?? null
+          ((meta?.project as { settings?: { roundtrip_mapping?: unknown } } | undefined)
+            ?.settings?.roundtrip_mapping as never) ?? null
         }
       />
       <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
