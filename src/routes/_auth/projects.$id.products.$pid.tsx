@@ -739,6 +739,8 @@ function ProductDetail() {
       </div>
 
       <Collapsible open={notesOpen} onOpenChange={setNotesOpen} className="mb-6">
+        {/* stub — see below */}
+      </Collapsible>
         <CollapsibleTrigger asChild>
           <Button variant="outline" size="sm" className="w-full justify-between">
             <span className="flex items-center gap-2">
