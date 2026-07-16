@@ -2327,12 +2327,40 @@ function SettingsCard({
                 search_provider: searchProvider,
                 scrape_cap: scrapeCap,
                 auto_rescrape: autoRescrape,
+                workflow,
               },
             })
           }
         >
           Zapisz
         </Button>
+        <div className="pt-4 border-t space-y-2">
+          <Label className="text-sm font-medium">Tryb projektu</Label>
+          <p className="text-xs text-muted-foreground">
+            Steruje widocznością etapów. „Tylko treści" pomija Wyszukiwanie i Dopasowanie — opis generowany jest wyłącznie z danych klienta. „Tylko media" pomija także generację treści.
+          </p>
+          <div className="flex flex-col gap-2">
+            {([
+              { v: "full", title: "Pełny proces", desc: "Wyszukiwanie → Dopasowanie → Treści → Media → Review." },
+              { v: "content_only", title: "Tylko treści (z danych klienta)", desc: "Pomija discovery i matching; opis generowany z RAW atrybutów klienta." },
+              { v: "media_only", title: "Tylko media", desc: "Pomija generację opisów — użyj gdy klient dostarcza własne treści." },
+            ] as const).map((o) => (
+              <label key={o.v} className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="workflow"
+                  className="mt-1"
+                  checked={workflow === o.v}
+                  onChange={() => setWorkflow(o.v)}
+                />
+                <span>
+                  <span className="font-medium">{o.title}</span>
+                  <span className="block text-xs text-muted-foreground">{o.desc}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
         <div className="pt-4 border-t space-y-2">
           <Label className="text-sm font-medium">Źródło wyszukiwania</Label>
           <p className="text-xs text-muted-foreground">
