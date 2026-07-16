@@ -713,6 +713,7 @@ export type Database = {
           excluded_reason: string | null
           ext_id: string | null
           id: string
+          import_row_index: number | null
           kod: string | null
           manual_lock: boolean
           matching_mode: string
@@ -736,6 +737,7 @@ export type Database = {
           excluded_reason?: string | null
           ext_id?: string | null
           id?: string
+          import_row_index?: number | null
           kod?: string | null
           manual_lock?: boolean
           matching_mode?: string
@@ -759,6 +761,7 @@ export type Database = {
           excluded_reason?: string | null
           ext_id?: string | null
           id?: string
+          import_row_index?: number | null
           kod?: string | null
           manual_lock?: boolean
           matching_mode?: string

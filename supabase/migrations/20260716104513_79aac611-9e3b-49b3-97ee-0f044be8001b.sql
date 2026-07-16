@@ -1,0 +1,2 @@
+ALTER TABLE public.source_products ADD COLUMN IF NOT EXISTS import_row_index integer;
+CREATE INDEX IF NOT EXISTS source_products_project_row_idx ON public.source_products (project_id, import_row_index);
