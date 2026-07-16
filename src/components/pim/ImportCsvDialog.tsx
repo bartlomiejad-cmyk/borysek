@@ -314,7 +314,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
           <input
             ref={fileRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="hidden"
             onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
           />
@@ -325,7 +325,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
             disabled={busy}
           >
             <Upload className="h-4 w-4 mr-2" />
-            {csv ? `Wczytano: ${csv.rows.length} wierszy` : "Wybierz CSV"}
+            {csv ? `Wczytano: ${csv.rows.length} wierszy` : "Wybierz plik (CSV lub XLSX)"}
           </Button>
         </div>
 
@@ -429,6 +429,18 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
                 Wyczyść poprzednie produkty przed importem (usuwa też wyniki AI)
               </Label>
             </div>
+            {!clearPrevious && (
+              <div className="flex items-center gap-2 ml-6">
+                <Checkbox
+                  id="overwrite-import-meta"
+                  checked={overwriteImportMeta}
+                  onCheckedChange={(v) => setOverwriteImportMeta(v === true)}
+                />
+                <Label htmlFor="overwrite-import-meta" className="text-xs cursor-pointer">
+                  Nadpisz strukturę pliku (nagłówki/nazwa) dla eksportu round-trip
+                </Label>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>
                 Anuluj
