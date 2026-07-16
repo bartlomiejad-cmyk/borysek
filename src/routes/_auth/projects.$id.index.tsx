@@ -894,6 +894,11 @@ function ProjectPage() {
               <DropdownMenuItem onSelect={() => exportFile("csv", false, "delivery", false)}>
                 <Download className="h-4 w-4 mr-2" /> CSV (bez kopiowania obrazów)
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Plik klienta (aktualizacja)</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setRoundtripOpen(true)}>
+                <Download className="h-4 w-4 mr-2" /> Round-trip (oryginalny układ)…
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button onClick={() => setShareOpen(true)}>
