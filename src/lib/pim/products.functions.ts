@@ -114,7 +114,15 @@ export const setProductsExcluded = createServerFn({ method: "POST" })
           excluded_reason: "manual",
           excluded_at: new Date().toISOString(),
         }
-      : { excluded: false, excluded_reason: null, excluded_at: null };
+      : {
+          excluded: false,
+          excluded_reason: null,
+          excluded_at: null,
+          // Restoring a variant treats it as a standalone product from now
+          // on (edge case where the client sells variants as separate
+          // listings). We flip row_kind so filters/badges show it in-flow.
+          row_kind: "main" as const,
+        };
     const { data: rows, error } = await supabase
       .from("source_products")
       .update(patch as never)
@@ -122,5 +130,19 @@ export const setProductsExcluded = createServerFn({ method: "POST" })
       .in("id", data.productIds)
       .select("id");
     if (error) throw new Error(error.message);
+
+    // When we just promoted variants to main, seed enrichments (idempotent
+    // upsert) so downstream jobs treat them like any imported product.
+    if (!data.excluded && (rows?.length ?? 0) > 0) {
+      const enr = rows!.map((r) => ({
+        source_product_id: r.id,
+        project_id: data.projectId,
+        status: "PENDING" as const,
+        match_type: "NO_MATCH" as const,
+      }));
+      await supabase
+        .from("enrichments")
+        .upsert(enr as never, { onConflict: "source_product_id", ignoreDuplicates: true });
+    }
     return { updated: (rows ?? []).length };
   });

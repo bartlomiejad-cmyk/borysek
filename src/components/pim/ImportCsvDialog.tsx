@@ -39,7 +39,10 @@ type Field =
   | "ean_column"
   | "category_column"
   | "main_image_column"
-  | "gallery_column";
+  | "gallery_column"
+  | "type_column"
+  | "parent_sku_column"
+  | "children_column";
 const FIELDS: Array<{ value: Field; label: string }> = [
   { value: "id_column", label: "ID (ext_id)" },
   { value: "name_column", label: "Nazwa" },
@@ -48,6 +51,9 @@ const FIELDS: Array<{ value: Field; label: string }> = [
   { value: "category_column", label: "Kategoria" },
   { value: "main_image_column", label: "Zdjęcie główne (URL)" },
   { value: "gallery_column", label: "Wszystkie zdjęcia (URL-e)" },
+  { value: "type_column", label: "Kolumna typu wiersza (opcjonalnie)" },
+  { value: "parent_sku_column", label: "Kolumna SKU rodzica (opcjonalnie)" },
+  { value: "children_column", label: "Kolumna z SKU wariantów (opcjonalnie)" },
 ];
 const SKIP = "__skip__";
 
@@ -70,6 +76,9 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
     category_column: SKIP,
     main_image_column: SKIP,
     gallery_column: SKIP,
+    type_column: SKIP,
+    parent_sku_column: SKIP,
+    children_column: SKIP,
   });
   const [clearPrevious, setClearPrevious] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -101,6 +110,9 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
       category_column: SKIP,
       main_image_column: SKIP,
       gallery_column: SKIP,
+      type_column: SKIP,
+      parent_sku_column: SKIP,
+      children_column: SKIP,
     });
     setClearPrevious(true);
     if (fileRef.current) fileRef.current.value = "";
@@ -140,6 +152,9 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         ]),
         main_image_column: find(defaults?.main_image_column),
         gallery_column: find(defaults?.gallery_column),
+        type_column: find(null, ["_type", "typ", "product_type", "type"]),
+        parent_sku_column: find(null, ["parent_sku", "_parent_sku", "_parent", "parent"]),
+        children_column: find(null, ["_children", "children", "variant_skus"]),
       });
     } catch (e) {
       toast.error(friendlyError(e, "Nie udało się wczytać CSV"));
@@ -168,6 +183,9 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
           mapping.main_image_column !== SKIP ? mapping.main_image_column : null,
         gallery_column:
           mapping.gallery_column !== SKIP ? mapping.gallery_column : null,
+        type_column: mapping.type_column !== SKIP ? mapping.type_column : null,
+        parent_sku_column: mapping.parent_sku_column !== SKIP ? mapping.parent_sku_column : null,
+        children_column: mapping.children_column !== SKIP ? mapping.children_column : null,
       };
       const rows = buildCsvRowsFromMapping(csv, explicit);
       if (!rows.length) {
@@ -178,11 +196,19 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
       if (clearPrevious) {
         await clearFn({ data: { projectId, scope: "source_products" } });
       }
+      let mains = 0;
+      let variants = 0;
       const batchSize = 1000;
       for (let i = 0; i < rows.length; i += batchSize) {
-        await ingestFn({ data: { projectId, rows: rows.slice(i, i + batchSize) } });
+        const res = await ingestFn({ data: { projectId, rows: rows.slice(i, i + batchSize) } });
+        mains += (res as { mains?: number }).mains ?? 0;
+        variants += (res as { variants?: number }).variants ?? 0;
       }
-      toast.success(`Wczytano ${rows.length} produktów`);
+      toast.success(
+        variants > 0
+          ? `Wczytano ${mains} produktów głównych i ${variants} wariantów`
+          : `Wczytano ${rows.length} produktów`,
+      );
       qc.invalidateQueries({ queryKey: ["project", projectId] });
       onDone?.();
       setOpen(false);

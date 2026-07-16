@@ -21,6 +21,7 @@ export type PipelineSummary = {
   audit_eligible: number;    // GOLDEN_READY + VISUALS_READY
   audit_completed: number;   // enrichments.audit is not null within eligible set
   excluded_count: number;    // products flagged out of pipeline (auto or manual)
+  variant_count: number;     // rows classified as product variants (row_kind='variant')
 };
 
 export const getPipelineSummary = createServerFn({ method: "GET" })
@@ -31,7 +32,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
     const [{ data: sp }, { data: en }] = await Promise.all([
       supabase
         .from("source_products")
-        .select("id, pipeline_status, review_status, excluded")
+        .select("id, pipeline_status, review_status, excluded, excluded_reason, row_kind")
         .eq("project_id", data.projectId)
         .limit(20000),
       supabase
@@ -40,7 +41,7 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
         .eq("project_id", data.projectId)
         .limit(20000),
     ]);
-    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null; excluded?: boolean | null }>;
+    const rows = (sp ?? []) as Array<{ id: string; pipeline_status?: string | null; review_status?: string | null; excluded?: boolean | null; excluded_reason?: string | null; row_kind?: string | null }>;
     const s: PipelineSummary = {
       total: 0,
       imported: 0,
@@ -56,9 +57,11 @@ export const getPipelineSummary = createServerFn({ method: "GET" })
       audit_eligible: 0,
       audit_completed: 0,
       excluded_count: 0,
+      variant_count: 0,
     };
     const eligibleIds = new Set<string>();
     for (const r of rows) {
+      if ((r.row_kind ?? "main") === "variant") { s.variant_count++; continue; }
       if (r.excluded) { s.excluded_count++; continue; }
       s.total++;
       const ps = r.pipeline_status ?? "IMPORTED";
@@ -94,7 +97,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
 
     const { data: products, error } = await supabase
       .from("source_products")
-      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode, excluded, excluded_reason")
+      .select("id, ext_id, nazwa, kod, ean, category, pipeline_status, review_status, manual_lock, matching_mode, excluded, excluded_reason, row_kind, parent_sku")
       .eq("project_id", data.projectId)
       .order("created_at", { ascending: true })
       .limit(1000);
@@ -351,6 +354,51 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const dead_images = Object.entries(scoresFull)
       .filter(([, s]) => s?.dead === true)
       .map(([u]) => u);
+
+    // For parent products, surface the linked variant rows so the editor
+    // can show a compact "Warianty" table (SKU, EAN, differing attribute
+    // values). Variant rows themselves also expose their parent.
+    let variants: Array<{
+      id: string;
+      kod: string | null;
+      ean: string | null;
+      nazwa: string | null;
+      attrs: Record<string, string>;
+    }> = [];
+    const productAny = product as {
+      kod?: string | null;
+      row_kind?: string | null;
+    };
+    if ((productAny.row_kind ?? "main") === "main" && productAny.kod) {
+      const { data: vRows } = await supabase
+        .from("source_products")
+        .select("id, kod, ean, nazwa, raw")
+        .eq("project_id", data.projectId)
+        .eq("parent_sku", productAny.kod)
+        .limit(200);
+      const isBoringKey = (k: string) =>
+        k.startsWith("_") ||
+        ["id", "sku", "ean", "name", "nazwa", "kod", "typ", "type", "parent", "parent_sku", "children", "kategoria", "category"].includes(k.toLowerCase());
+      variants = (vRows ?? []).map((r) => {
+        const raw = (r as { raw?: Record<string, unknown> }).raw ?? {};
+        const attrs: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (isBoringKey(k)) continue;
+          if (v == null || v === "") continue;
+          const s = String(v).trim();
+          if (!s || s.length > 80) continue;
+          attrs[k] = s;
+          if (Object.keys(attrs).length >= 6) break;
+        }
+        return {
+          id: (r as { id: string }).id,
+          kod: (r as { kod: string | null }).kod,
+          ean: (r as { ean: string | null }).ean,
+          nazwa: (r as { nazwa: string | null }).nazwa,
+          attrs,
+        };
+      });
+    }
     const matchingMode = (((product as { matching_mode?: string | null }).matching_mode) ?? "strict") as "strict" | "compatible";
     let other_equivalent_images: string[] = [];
     if (matchingMode === "compatible" && sources.length > 0) {
@@ -388,6 +436,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       dead_images,
       other_equivalent_images,
       pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
+      variants,
     };
   });
 

@@ -9,6 +9,8 @@ export type CsvRow = {
   has_images?: boolean;
   main_image_url?: string | null;
   gallery_urls?: string[];
+  row_kind?: "main" | "variant";
+  parent_sku?: string | null;
   raw: Record<string, unknown>;
 };
 
@@ -119,6 +121,9 @@ export type ExplicitCsvMapping = {
   category_column?: string | null;
   main_image_column?: string | null;
   gallery_column?: string | null;
+  type_column?: string | null;
+  parent_sku_column?: string | null;
+  children_column?: string | null;
 };
 
 /**
@@ -161,8 +166,94 @@ export const buildCsvRowsFromMapping = (
     }
     return { main, gallery: combined };
   };
-  const rows: CsvRow[] = raw.rows.map((r) => {
+  // Auto-detect hierarchy columns when not explicitly mapped. Common
+  // WooCommerce/CSV conventions: _type / typ / product_type; _children;
+  // parent_sku / _parent.
+  const findHeader = (candidates: string[]): string | null => {
+    const lc = raw.headers.map((h) => h.toLowerCase());
+    for (const c of candidates) {
+      const idx = lc.indexOf(c.toLowerCase());
+      if (idx >= 0) return raw.headers[idx];
+    }
+    return null;
+  };
+  const typeCol =
+    mapping.type_column ?? findHeader(["_type", "typ", "product_type", "type"]);
+  const childrenCol =
+    mapping.children_column ?? findHeader(["_children", "children", "variant_skus"]);
+  const parentSkuCol =
+    mapping.parent_sku_column ??
+    findHeader(["parent_sku", "_parent_sku", "_parent", "parent"]);
+
+  const classifyType = (v: string | null): "main" | "variant" | null => {
+    if (!v) return null;
+    const t = v.trim().toLowerCase();
+    if (!t) return null;
+    if (t.includes("variation") || t.includes("wariant")) return "variant";
+    // WooCommerce style: SIMPLE-PRODUCT is a child of VARIABLE-PRODUCT
+    // when a parent row references it via _children. We can't decide from
+    // type alone; leave classification to the child-lookup pass.
+    if (t === "variable" || t.includes("variable-product") || t === "variable_product")
+      return "main";
+    return null;
+  };
+
+  // First pass: collect SKU → parent_sku map from _children columns on
+  // parent rows, and gather variant EANs to bubble up to the parent row.
+  const childToParent = new Map<string, string>();
+  const variantEansByParent = new Map<string, string[]>();
+  const skuOfRow = (r: Record<string, string>) => get(r, mapping.code_column);
+  const eanOfRow = (r: Record<string, string>) => get(r, mapping.ean_column);
+  if (childrenCol) {
+    for (const r of raw.rows) {
+      const parentSku = skuOfRow(r);
+      const kidsRaw = get(r, childrenCol);
+      if (!parentSku || !kidsRaw) continue;
+      const kids = kidsRaw
+        .split(/[,;|\n\r\t]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const k of kids) childToParent.set(k, parentSku);
+    }
+  }
+
+  const rowKindByIndex: Array<"main" | "variant"> = [];
+  const parentByIndex: Array<string | null> = [];
+  raw.rows.forEach((r, i) => {
+    const sku = skuOfRow(r);
+    const t = classifyType(typeCol ? get(r, typeCol) : null);
+    const explicitParent = parentSkuCol ? get(r, parentSkuCol) : null;
+    const inheritedParent = sku ? (childToParent.get(sku) ?? null) : null;
+    let parent: string | null = explicitParent ?? inheritedParent ?? null;
+    let kind: "main" | "variant" = "main";
+    if (t === "variant" || parent) kind = "variant";
+    if (t === "main" && !parent) kind = "main";
+    // A row explicitly typed as parent/variable stays main even if it
+    // appears as a child of itself in a malformed file.
+    if (kind === "variant" && parent) {
+      const ean = eanOfRow(r);
+      if (ean) {
+        const list = variantEansByParent.get(parent) ?? [];
+        if (!list.includes(ean)) list.push(ean);
+        variantEansByParent.set(parent, list);
+      }
+    } else if (kind === "variant") {
+      parent = null; // variant with no discoverable parent → still mark, no link
+    }
+    rowKindByIndex[i] = kind;
+    parentByIndex[i] = parent;
+  });
+
+  const rows: CsvRow[] = raw.rows.map((r, i) => {
     const imgs = extractImages(r);
+    const kind = rowKindByIndex[i];
+    const parent_sku = parentByIndex[i];
+    const sku = skuOfRow(r);
+    const rawWithMeta: Record<string, unknown> = { ...r };
+    if (kind === "main" && sku) {
+      const eans = variantEansByParent.get(sku);
+      if (eans && eans.length) rawWithMeta.variant_eans = eans;
+    }
     return {
       ext_id: get(r, mapping.id_column),
       nazwa: get(r, mapping.name_column),
@@ -172,7 +263,9 @@ export const buildCsvRowsFromMapping = (
       has_images: !!imgs.main || imgs.gallery.length > 0,
       main_image_url: imgs.main,
       gallery_urls: imgs.gallery,
-      raw: r,
+      row_kind: kind,
+      parent_sku,
+      raw: rawWithMeta,
     };
   });
   return rows.filter((r) => r.nazwa || r.ean || r.kod || r.ext_id);

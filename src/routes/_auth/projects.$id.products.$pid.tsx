@@ -767,6 +767,48 @@ function ProductDetail() {
         </CollapsibleContent>
       </Collapsible>
 
+      {(() => {
+        const variants = (((data as { variants?: Array<{ id: string; kod: string | null; ean: string | null; nazwa: string | null; attrs: Record<string, string> }> } | undefined)?.variants) ?? []);
+        if (!variants.length) return null;
+        const attrKeys = Array.from(
+          new Set(variants.flatMap((v) => Object.keys(v.attrs))),
+        ).slice(0, 6);
+        return (
+          <div className="mb-6 rounded-lg border bg-card p-3">
+            <div className="mb-2 text-sm font-medium">
+              Warianty tego produktu <span className="text-muted-foreground">({variants.length})</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              Warianty są pomijane w pipeline (wykluczone z powodem „variant”) i eksportowane razem z rodzicem.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="text-left py-1 pr-3">SKU</th>
+                    <th className="text-left py-1 pr-3">EAN</th>
+                    {attrKeys.map((k) => (
+                      <th key={k} className="text-left py-1 pr-3">{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {variants.map((v) => (
+                    <tr key={v.id} className="border-b last:border-b-0">
+                      <td className="py-1 pr-3 font-mono">{v.kod ?? "—"}</td>
+                      <td className="py-1 pr-3 font-mono">{v.ean ?? "—"}</td>
+                      {attrKeys.map((k) => (
+                        <td key={k} className="py-1 pr-3">{v.attrs[k] ?? "—"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
       <ProductSearchResults projectId={id} productId={pid} productName={product.nazwa ?? ""} />
 
       <ProductTimeline productId={pid} />
