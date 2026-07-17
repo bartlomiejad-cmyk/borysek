@@ -1071,7 +1071,7 @@ function ProductDetail() {
                 if (!sorted.length) {
                   return (
                     <p className="text-[11px] text-muted-foreground italic">
-                      Brak zdjęć z dopasowanych źródeł.
+                      Brak zdjęć — dodaj plik CSV ze zdjęciami lub dopasuj źródła.
                     </p>
                   );
                 }
