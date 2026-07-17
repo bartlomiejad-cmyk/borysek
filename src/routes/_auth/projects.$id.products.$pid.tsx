@@ -295,6 +295,13 @@ function ProductDetail() {
     (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null,
   );
   if (regenUrlEarly) allVisible.push(regenUrlEarly);
+  // Client-imported images (from CSV/XLSX) are tier-0 gallery entries —
+  // always visible, never subject to AI banner/identity verdicts. They
+  // appear before any source-derived images so an imported-only product
+  // still has a populated gallery + main image for regen/visualization.
+  const importedImages = (((data as { imported_images?: string[] } | undefined)?.imported_images) ?? []) as string[];
+  const importedSet = new Set(importedImages);
+  for (const u of importedImages) if (u && !allVisible.includes(u)) allVisible.push(u);
   if (data?.sources) {
     for (const s of data.sources) {
       for (const u of s.images) if (!allVisible.includes(u)) allVisible.push(u);
@@ -368,7 +375,7 @@ function ProductDetail() {
     allVisible.find((u) => !hiddenSet.has(u)) ??
     null;
   const mainUrl =
-    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && (allVisible.includes(pinnedMainUrl) || pinnedMainUrl === regeneratedMainUrl))
+    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && (allVisible.includes(pinnedMainUrl) || pinnedMainUrl === regeneratedMainUrl || importedSet.has(pinnedMainUrl)))
       ? pinnedMainUrl
       : autoMainUrl;
 
