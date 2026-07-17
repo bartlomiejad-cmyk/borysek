@@ -5139,7 +5139,7 @@ export async function runPimImageVerify(
   productId: string,
   ctx?: WorkerCtx,
   opts?: { force?: boolean },
-): Promise<void> {
+): Promise<{ scored: number; dead: number; skipped: number; failed: number }> {
   const force = opts?.force === true;
   const { scoreOneImage, filterAliveImages, IDENTITY_VERSION, type: _t } = await import("./ai.functions").then(
     (m) => ({
@@ -5190,7 +5190,7 @@ export async function runPimImageVerify(
   const pickedUrls = (enRow.picked_urls ?? []) as string[];
   if (!pickedUrls.length) {
     await emit(ctx, { level: "info", message: "Brak źródeł do weryfikacji" });
-    return;
+    return { scored: 0, dead: 0, skipped: 0, failed: 0 };
   }
   const { data: sources } = await supabaseAdmin
     .from("product_sources")
@@ -5209,7 +5209,7 @@ export async function runPimImageVerify(
   const uniq = Array.from(new Set(allUrls.filter((u) => !hidden.has(u))));
   if (!uniq.length) {
     await emit(ctx, { level: "info", message: "Brak zdjęć do weryfikacji" });
-    return;
+    return { scored: 0, dead: 0, skipped: 0, failed: 0 };
   }
 
   // HEAD-probe EVERY visible URL (not just those failing needsCheck) so dead
@@ -5251,13 +5251,23 @@ export async function runPimImageVerify(
     return (prev.identity_v ?? 0) < IDENTITY_VERSION;
   };
   let toScore = uniq.filter((u) => aliveSet.has(u) && needsCheck(u));
+  // Coverage priority: URLs never scored come FIRST, then stale-schema
+  // entries, then force-rechecked ones. If any cap/timeout truncates a
+  // large product, the gap (unscored tail) closes before well-known items.
+  const priority = (u: string): number => {
+    const prev = existing[u];
+    if (!prev) return 0; // unscored — highest priority
+    if ((prev.identity_v ?? 0) < IDENTITY_VERSION) return 1; // stale schema
+    return 2; // force-recheck of an already-current entry
+  };
+  toScore = toScore.slice().sort((a, b) => priority(a) - priority(b));
 
   if (!toScore.length) {
     await emit(ctx, {
       level: "info",
       message: 'Wszystkie zdjęcia mają już aktualną weryfikację (użyj „wymuś", aby powtórzyć)',
     });
-    return;
+    return { scored: 0, dead: preAlive.dead.length, skipped: uniq.length - preAlive.dead.length, failed: 0 };
   }
 
   // Anchor picking — mirror analyzeProductImages exactly.
@@ -5285,7 +5295,7 @@ export async function runPimImageVerify(
 
   if (!toScore.length) {
     await emit(ctx, { level: "info", message: "Brak żywych zdjęć do weryfikacji" });
-    return;
+    return { scored: 0, dead: preAlive.dead.length, skipped: uniq.length - preAlive.dead.length, failed: 0 };
   }
 
   await emit(ctx, {
@@ -5389,6 +5399,12 @@ export async function runPimImageVerify(
       });
     }
   } catch { /* best-effort */ }
+  return {
+    scored: succeeded,
+    dead: preAlive.dead.length,
+    skipped: Math.max(0, uniq.length - preAlive.dead.length - toScore.length),
+    failed,
+  };
 }
 
 // ---------------------------------------------------------------------------
