@@ -518,5 +518,13 @@ export const updateSourceProductsFromCsv = createServerFn({ method: "POST" })
       updated++;
     }
 
-    return { matched, unmatched, updated, skipped, total: data.rows.length };
+    // Reclassify variants using the (now possibly refreshed) raw payloads.
+    // No-op when the original import lacked hierarchy columns.
+    let reclassify: Awaited<ReturnType<typeof reclassifyVariantsCore>> | null = null;
+    try {
+      reclassify = await reclassifyVariantsCore(supabase as never, data.projectId);
+    } catch (e) {
+      console.warn("[updateSourceProductsFromCsv] reclassify failed:", e instanceof Error ? e.message : String(e));
+    }
+    return { matched, unmatched, updated, skipped, total: data.rows.length, reclassify };
   });
