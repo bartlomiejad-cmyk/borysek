@@ -47,6 +47,8 @@ import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/G
 import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
 import { ClientGuidelinesDialog } from "@/components/pim/ClientGuidelinesDialog";
 import { RoundtripExportDialog } from "@/components/pim/RoundtripExportDialog";
+import { DetectVariantsDialog } from "@/components/pim/DetectVariantsDialog";
+import { MarkAsVariantsDialog } from "@/components/pim/MarkAsVariantsDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
