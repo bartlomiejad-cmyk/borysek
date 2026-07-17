@@ -168,9 +168,34 @@ export const ingestSourceProducts = createServerFn({ method: "POST" })
           // imported photos appear in the "Wizualizacje AI" section.
           const mainUrl = imgs.main ?? imgs.gallery[0] ?? null;
           if (!mainUrl) continue;
+          // Ordered list of client-imported image URLs (main first, then
+          // gallery), deduped. Persist alongside the pinned-main sentinel so
+          // getVisibleGallery can surface them as tier-0 "client_owned"
+          // images independent of matched sources.
+          const importedImages: string[] = [];
+          const importedSeen = new Set<string>();
+          const pushIfNew = (u: string | null | undefined) => {
+            if (!u || typeof u !== "string") return;
+            const t = u.trim();
+            if (!t || !/^https?:\/\//i.test(t)) return;
+            if (importedSeen.has(t)) return;
+            importedSeen.add(t);
+            importedImages.push(t);
+          };
+          pushIfNew(imgs.main);
+          for (const g of imgs.gallery) pushIfNew(g);
+          // Merge with any existing image_meta to preserve prior probes.
+          const { data: exEnr } = await supabase
+            .from("enrichments")
+            .select("image_meta")
+            .eq("source_product_id", p.id)
+            .maybeSingle();
+          const prevMeta = (((exEnr as { image_meta?: Record<string, unknown> } | null)?.image_meta) ?? {}) as Record<string, unknown>;
+          const nextMeta = { ...prevMeta, imported_images: importedImages };
           const patch: Record<string, unknown> = {
             regenerated_main_image: "__imported__",
             pinned_main_url: mainUrl,
+            image_meta: nextMeta,
           };
           const { error: mErr } = await supabase
             .from("enrichments")
