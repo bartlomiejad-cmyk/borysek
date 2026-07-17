@@ -695,12 +695,14 @@ export const runMatching = createServerFn({ method: "POST" })
         });
         const positive = scored.filter((x) => x.total > 0);
         const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+        const eanConfirmedByUrl = new Map(positive.map((x) => [x.url, !!x.ean_confirmed]));
         const dedup = applyClusterDedup(
           positive.map((x) => x.url),
           scoreByUrl,
           clustersByUrl,
           confidenceMap,
           descLenMap,
+          eanConfirmedByUrl,
         );
         const rankedFull = positive
           .filter((x) => dedup.keptUrls.has(x.url))
@@ -1110,12 +1112,14 @@ export async function scoreAndCapForProduct(
   });
   const positive = scored.filter((x) => x.total > 0);
   const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+  const eanConfirmedByUrl = new Map(positive.map((x) => [x.url, !!x.ean_confirmed]));
   const dedup = applyClusterDedup(
     positive.map((x) => x.url),
     scoreByUrl,
     clustersByUrl,
     confidenceByUrl,
     descLenByUrl,
+    eanConfirmedByUrl,
   );
   const rankedFull = positive
     .filter((x) => dedup.keptUrls.has(x.url))
