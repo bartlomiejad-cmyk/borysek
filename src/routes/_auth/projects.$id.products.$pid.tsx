@@ -1917,7 +1917,7 @@ function ProductDetail() {
           )}
           {dedupedCount > 0 && (
             <div className="text-xs text-muted-foreground -mt-1">
-              Zduplikowane warianty zostały odfiltrowane ({dedupedCount})
+              Odfiltrowano źródła innych wariantów ({dedupedCount})
             </div>
           )}
           {sources.map((s, i) => {
