@@ -1457,6 +1457,16 @@ function ProjectPage() {
               >
                 {filter === "EXCLUDED" || filter === "VARIANTS" ? "↩ Przywróć do przetwarzania" : "🚫 Wyklucz z przetwarzania"}
               </Button>
+              {filter !== "EXCLUDED" && filter !== "VARIANTS" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setMarkVariantsOpen(true)}
+                  disabled={selectedIds.size === 0}
+                >
+                  Oznacz jako warianty produktu…
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="destructive"
