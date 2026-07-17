@@ -847,6 +847,9 @@ function ProjectPage() {
               <DropdownMenuItem onSelect={() => setRemapOpen(true)}>
                 <Wand2 className="h-4 w-4 mr-2" /> Uzupełnij dane z CSV
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void runReclassify()}>
+                <Wand2 className="h-4 w-4 mr-2" /> Wykryj warianty (ponownie)
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => void auditAll()}
