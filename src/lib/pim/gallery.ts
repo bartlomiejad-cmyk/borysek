@@ -38,6 +38,14 @@ export type GalleryEnrichment = {
   hidden_images?: string[] | null;
   image_scores?: Record<string, GalleryImageScore | undefined> | null;
   pinned_main_url?: string | null;
+  /**
+   * Ordered list of image URLs sourced from the client's imported file
+   * (CSV/XLSX). Tier 0: always accepted (client file is ground truth), never
+   * subject to AI banner/identity verdicts, only excluded by explicit
+   * `hidden_images` or `image_scores[u].dead === true`. Preserved before any
+   * source-derived images in `accepted`.
+   */
+  imported_images?: string[] | null;
 };
 
 export type VisibleGallery = {
@@ -88,12 +96,25 @@ export function getVisibleGallery(
   const hidden = new Set((enrichment?.hidden_images ?? []) as string[]);
   const scores = (enrichment?.image_scores ?? {}) as Record<string, GalleryImageScore | undefined>;
   const pinned = (enrichment?.pinned_main_url ?? null) as string | null;
+  const importedList = (enrichment?.imported_images ?? []) as string[];
+  const importedSet = new Set<string>(importedList);
 
   const accepted: string[] = [];
   const unsure: string[] = [];
   const rejected: string[] = [];
   const dead: string[] = [];
   const seen = new Set<string>();
+
+  // Tier 0: client-owned imported images. Always accepted, bypassing AI
+  // banner/identity verdicts. Only hidden_images and dead-probe apply.
+  for (const u of importedList) {
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    if (hidden.has(u)) continue;
+    const s = scores[u];
+    if (s?.dead === true) { dead.push(u); continue; }
+    accepted.push(u);
+  }
 
   for (const u of urls) {
     if (!u || seen.has(u)) continue;
@@ -120,6 +141,8 @@ export function getVisibleGallery(
   // canonical form, keep only the largest by pixel area. Others become
   // hidden duplicates (not surfaced in unsure/rejected). Pinned always
   // survives even if a larger sibling exists — user's explicit choice.
+  // Imported (client-owned) URLs also always survive dedup: the client
+  // file is ground truth.
   if (accepted.length > 1) {
     const groups = new Map<string, string[]>();
     for (const u of accepted) {
@@ -135,7 +158,8 @@ export function getVisibleGallery(
         continue;
       }
       const withPinned = pinned && arr.includes(pinned) ? pinned : null;
-      let bestUrl = withPinned ?? arr[0];
+      const withImported = arr.find((u) => importedSet.has(u)) ?? null;
+      let bestUrl = withPinned ?? withImported ?? arr[0];
       let bestArea = -1;
       for (const u of arr) {
         const s = scores[u];
@@ -145,8 +169,8 @@ export function getVisibleGallery(
           bestUrl = u;
         }
       }
-      // Honour explicit pin
-      keep.add(withPinned ?? bestUrl);
+      // Honour explicit pin and imported (client-owned) URLs.
+      keep.add(withPinned ?? withImported ?? bestUrl);
     }
     // Preserve original order
     const filtered = accepted.filter((u) => keep.has(u));
@@ -174,6 +198,9 @@ export function getVisibleGallery(
     const finalAccepted: string[] = [];
     for (const u of accepted) {
       const s = scores[u];
+      // Client-owned imported images are always accepted, never demoted
+      // to equivalent-source overflow.
+      if (importedSet.has(u)) { finalAccepted.push(u); continue; }
       if (s?.manual_keep === true) { finalAccepted.push(u); continue; }
       if (pinned && u === pinned) { finalAccepted.push(u); continue; }
       if (bestImages.has(u)) { finalAccepted.push(u); continue; }
