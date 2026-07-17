@@ -564,6 +564,7 @@ function ProductDetail() {
     const s = imageScores[u];
     const isMain = u === mainUrl;
     const isPinned = u === pinnedMainUrl;
+    const isImported = importedSet.has(u);
     const m = imageMeta[u];
     const w = s?.w ?? m?.w ?? 0;
     const h = s?.h ?? m?.h ?? 0;
@@ -601,6 +602,15 @@ function ProductDetail() {
           </span>
         )}
         {extra && <Badge variant="outline" className="absolute top-0 left-0 text-[10px] px-1 py-0">extra</Badge>}
+        {isImported && (
+          <Badge
+            variant="outline"
+            className="absolute top-0 left-0 text-[10px] px-1 py-0 bg-sky-500/10 text-sky-700 border-sky-500/40"
+            title="Zdjęcie zaimportowane z pliku klienta (CSV/XLSX). Nie podlega weryfikacji AI."
+          >
+            Z pliku klienta
+          </Badge>
+        )}
         {enrichment && (
           <button
             onClick={() =>
