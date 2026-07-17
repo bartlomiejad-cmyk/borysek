@@ -3958,6 +3958,16 @@ export async function runPimVisualization(
   if (e.regenerated_main_image && e.regenerated_main_image !== "__imported__") {
     analysisCandidates.push(e.regenerated_main_image);
   }
+  // Client-imported gallery images (from CSV/XLSX) are ground truth — they
+  // must feed vision analysis even when there are no matched sources.
+  const importedFromMeta = ((e.image_meta ?? {}) as { imported_images?: unknown }).imported_images;
+  if (Array.isArray(importedFromMeta)) {
+    for (const u of importedFromMeta) {
+      if (typeof u === "string" && u && !analysisCandidates.includes(u)) {
+        analysisCandidates.push(u);
+      }
+    }
+  }
   const pickedPageUrls = (e.picked_urls ?? []).filter((u) => u && u !== "__imported__");
   if (pickedPageUrls.length) {
     const { data: projForImgs } = await supabaseAdmin
