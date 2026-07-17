@@ -1975,6 +1975,28 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <DetectVariantsDialog
+        projectId={id}
+        open={detectVariantsOpen}
+        onOpenChange={setDetectVariantsOpen}
+        productsById={new Map(products.map((p) => [p.id, { id: p.id, nazwa: p.nazwa ?? null, kod: p.kod ?? null }]))}
+        onDone={() => {
+          refetchProducts();
+          qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+        }}
+      />
+      <MarkAsVariantsDialog
+        projectId={id}
+        open={markVariantsOpen}
+        onOpenChange={setMarkVariantsOpen}
+        selectedIds={[...selectedIds]}
+        allProducts={products.map((p) => ({ id: p.id, nazwa: p.nazwa ?? null, kod: p.kod ?? null }))}
+        onDone={() => {
+          clearSelected();
+          refetchProducts();
+          qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+        }}
+      />
       <RoundtripExportDialog
         open={roundtripOpen}
         onOpenChange={setRoundtripOpen}
