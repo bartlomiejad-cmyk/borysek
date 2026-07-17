@@ -47,6 +47,8 @@ import { GenerateVisualizationsDialog, type VizTarget } from "@/components/pim/G
 import { ShareProjectDialog } from "@/components/pim/ShareProjectDialog";
 import { ClientGuidelinesDialog } from "@/components/pim/ClientGuidelinesDialog";
 import { RoundtripExportDialog } from "@/components/pim/RoundtripExportDialog";
+import { DetectVariantsDialog } from "@/components/pim/DetectVariantsDialog";
+import { MarkAsVariantsDialog } from "@/components/pim/MarkAsVariantsDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -211,13 +213,16 @@ function ProjectPage() {
     try {
       const res = await reclassifyFn({ data: { projectId: id } });
       if (!res.ok) {
-        toast.info("Brak kolumn hierarchii w danych importu — nic do wykrycia.");
+        // No column-based hierarchy — fall back to pattern-based detection.
+        toast.info("Brak kolumn hierarchii — uruchamiam wykrywanie po wzorcu…");
+        setDetectVariantsOpen(true);
         return;
       }
       if (res.reclassified === 0) {
         toast.success(
-          `Sklasyfikowano: ${res.mains} głównych, ${res.variants} wariantów. Nic nowego do zmiany.`,
+          `Kolumny hierarchii: ${res.mains} głównych, ${res.variants} wariantów. Sprawdzę też wzorce…`,
         );
+        setDetectVariantsOpen(true);
       } else {
         toast.success(
           `Sklasyfikowano: ${res.mains} głównych, ${res.variants} wariantów — przeniesiono ${res.reclassified} do wariantów${res.skippedLocked ? ` (pominięto ${res.skippedLocked} zablokowanych)` : ""}.`,
@@ -266,6 +271,8 @@ function ProjectPage() {
   const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [remapOpen, setRemapOpen] = useState(false);
   const [roundtripOpen, setRoundtripOpen] = useState(false);
+  const [detectVariantsOpen, setDetectVariantsOpen] = useState(false);
+  const [markVariantsOpen, setMarkVariantsOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
@@ -1450,6 +1457,16 @@ function ProjectPage() {
               >
                 {filter === "EXCLUDED" || filter === "VARIANTS" ? "↩ Przywróć do przetwarzania" : "🚫 Wyklucz z przetwarzania"}
               </Button>
+              {filter !== "EXCLUDED" && filter !== "VARIANTS" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setMarkVariantsOpen(true)}
+                  disabled={selectedIds.size === 0}
+                >
+                  Oznacz jako warianty produktu…
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="destructive"
@@ -1958,6 +1975,28 @@ function ProjectPage() {
         }
       />
       <ShareProjectDialog open={shareOpen} onOpenChange={setShareOpen} projectId={id} />
+      <DetectVariantsDialog
+        projectId={id}
+        open={detectVariantsOpen}
+        onOpenChange={setDetectVariantsOpen}
+        productsById={new Map(products.map((p) => [p.id, { id: p.id, nazwa: p.nazwa ?? null, kod: p.kod ?? null }]))}
+        onDone={() => {
+          refetchProducts();
+          qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+        }}
+      />
+      <MarkAsVariantsDialog
+        projectId={id}
+        open={markVariantsOpen}
+        onOpenChange={setMarkVariantsOpen}
+        selectedIds={[...selectedIds]}
+        allProducts={products.map((p) => ({ id: p.id, nazwa: p.nazwa ?? null, kod: p.kod ?? null }))}
+        onDone={() => {
+          clearSelected();
+          refetchProducts();
+          qc.invalidateQueries({ queryKey: ["project", id, "pipeline-summary"] });
+        }}
+      />
       <RoundtripExportDialog
         open={roundtripOpen}
         onOpenChange={setRoundtripOpen}
