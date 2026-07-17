@@ -5175,7 +5175,7 @@ export async function runPimImageVerify(
   if (eErr) throw new Error(eErr.message);
   if (!enrichment) {
     await emit(ctx, { level: "warn", message: "Pominięto: brak rekordu enrichment (uruchom Dopasowanie)" });
-    return;
+    return { scored: 0, dead: 0, skipped: 0, failed: 0 };
   }
   const enRow = enrichment as unknown as {
     id: string;
