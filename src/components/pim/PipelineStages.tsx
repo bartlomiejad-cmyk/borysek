@@ -300,6 +300,32 @@ export function PipelineStages({
           )}
         </div>
       )}
+
+      {/* Secondary actions: one compact button per stage with a non-empty
+          eligible set, in pipeline order. Lets the user run stage N on its
+          eligible subset even when earlier stages are incomplete. */}
+      {(() => {
+        const secondary = numbered
+          .filter((s) => s.key !== "IMPORT")
+          .map((s) => ({ stage: s, pending: s.pending(summary) }))
+          .filter((x) => x.pending > 0 && (!best || x.stage.key !== best.key));
+        if (!secondary.length) return null;
+        return (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Uruchom etap:</span>
+            {secondary.map(({ stage, pending }) => (
+              <Button
+                key={stage.key}
+                size="sm"
+                variant="outline"
+                onClick={() => onPrimaryAction(stage.key)}
+              >
+                {stage.ctaLabel} ({pending})
+              </Button>
+            ))}
+          </div>
+        );
+      })()}
     </section>
   );
 }
