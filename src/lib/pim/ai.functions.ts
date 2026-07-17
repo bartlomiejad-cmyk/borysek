@@ -935,6 +935,14 @@ export const analyzeProductImages = createServerFn({ method: "POST" })
       revalidate: z.boolean().optional(),
     }).parse(i),
   )
+  // NOTE: This server fn caps input at 8 URLs — kept for auto-analyze on
+  // load and for the visualization-prep flow that intentionally scores a
+  // small subset. The editor "Zweryfikuj zdjęcia ponownie" button MUST use
+  // `reverifyProductImages` (audit.functions.ts) instead, which delegates
+  // to `runPimImageVerify` and covers every visible URL. If a future caller
+  // legitimately passes more than 8 URLs, order them unscored-first so any
+  // cap that truncates the list closes coverage gaps before re-scoring
+  // already-known entries.
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const apiKey = process.env.LOVABLE_API_KEY;

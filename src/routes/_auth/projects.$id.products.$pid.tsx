@@ -8,7 +8,7 @@ import { getProductDetail, updateGoldenRecord, setImageManualKeep } from "@/lib/
 import { getActiveBulkJob } from "@/lib/pim/bulk-jobs.functions";
 import { generateGoldenRecord, generateFeatures, verifyProduct, analyzeProductImages, analyzeProductImagesForPrompt, probeVisibleImagesAlive } from "@/lib/pim/ai.functions";
 import { generateAllegroDescription } from "@/lib/pim/ai.functions";
-import { runAuditForProduct } from "@/lib/pim/audit.functions";
+import { runAuditForProduct, reverifyProductImages } from "@/lib/pim/audit.functions";
 import { approveProduct, unapproveProduct } from "@/lib/pim/review.functions";
 import { hideImage, unhideImage, updateFeatures } from "@/lib/pim/enrichments.functions";
 import { setPinnedMainImage, removeGalleryUrl } from "@/lib/pim/enrichments.functions";
@@ -87,6 +87,7 @@ function ProductDetail() {
   const updFeatFn = useServerFn(updateFeatures);
   const analyzeFn = useServerFn(analyzeProductImages);
   const probeAliveFn = useServerFn(probeVisibleImagesAlive);
+  const reverifyImagesFn = useServerFn(reverifyProductImages);
   const restoreIdentityFn = useServerFn(setImageManualKeep);
   const genAllegroFn = useServerFn(generateAllegroDescription);
   const auditFn = useServerFn(runAuditForProduct);
@@ -264,19 +265,16 @@ function ProductDetail() {
     setRevalidating(true);
     try {
       analyzedKeyRef.current = "revalidated"; // stop the auto-analyze effect from firing again
-      // 1) Cheap HEAD-probe over EVERY visible URL — flags dead ones so the
-      //    gallery hides them. Not bounded by the 8-URL AI cap.
-      const probe = await probeAliveFn({ data: { productId: pid, revalidate: true } });
-      // 2) AI identity re-scoring on the alive subset (capped at 8).
-      const aliveUrls = (probe?.alive ?? visible.filter((u) => !new Set(probe?.dead ?? []).has(u))).slice(0, 8);
-      if (aliveUrls.length) {
-        await analyzeFn({ data: { productId: pid, urls: aliveUrls, revalidate: true } });
-      }
-      const deadCount = probe?.dead?.length ?? 0;
+      // Server path probes ALL URLs, then re-scores every one needing check —
+      // no client-side 8-URL cap. Unscored images are prioritized first.
+      const res = await reverifyImagesFn({ data: { productId: pid, force: true } });
+      const scored = res?.scored ?? 0;
+      const dead = res?.dead ?? 0;
+      // "nowe" = newly-scored images (had no prior verdict).
+      const prevScored = new Set(Object.keys(imageScores ?? {}));
+      const newlyScored = visible.filter((u) => !prevScored.has(u)).length;
       toast.success(
-        deadCount
-          ? `Zweryfikowano ${aliveUrls.length} zdjęć · ${deadCount} martwych`
-          : `Zweryfikowano ${aliveUrls.length} zdjęć`,
+        `Zweryfikowano ${scored} zdjęć (${newlyScored} nowych, ${dead} martwych)`,
       );
       invalidate();
     } catch (e) {
