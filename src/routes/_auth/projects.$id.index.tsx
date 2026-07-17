@@ -213,13 +213,16 @@ function ProjectPage() {
     try {
       const res = await reclassifyFn({ data: { projectId: id } });
       if (!res.ok) {
-        toast.info("Brak kolumn hierarchii w danych importu — nic do wykrycia.");
+        // No column-based hierarchy — fall back to pattern-based detection.
+        toast.info("Brak kolumn hierarchii — uruchamiam wykrywanie po wzorcu…");
+        setDetectVariantsOpen(true);
         return;
       }
       if (res.reclassified === 0) {
         toast.success(
-          `Sklasyfikowano: ${res.mains} głównych, ${res.variants} wariantów. Nic nowego do zmiany.`,
+          `Kolumny hierarchii: ${res.mains} głównych, ${res.variants} wariantów. Sprawdzę też wzorce…`,
         );
+        setDetectVariantsOpen(true);
       } else {
         toast.success(
           `Sklasyfikowano: ${res.mains} głównych, ${res.variants} wariantów — przeniesiono ${res.reclassified} do wariantów${res.skippedLocked ? ` (pominięto ${res.skippedLocked} zablokowanych)` : ""}.`,
