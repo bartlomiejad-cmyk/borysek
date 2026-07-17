@@ -164,6 +164,10 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
       const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
       const scores = (((e as unknown as { image_scores?: Record<string, GalleryImageScore> } | undefined)?.image_scores) ?? {}) as Record<string, GalleryImageScore>;
+      const importedImages = (((e as unknown as { image_meta?: { imported_images?: unknown } } | undefined)?.image_meta?.imported_images) ?? []) as unknown;
+      const importedList = Array.isArray(importedImages)
+        ? (importedImages as unknown[]).filter((u): u is string => typeof u === "string")
+        : [];
       const allFromSources: string[] = [];
       for (const u of picked) {
         for (const img of imgMap.get(u) ?? []) {
@@ -187,6 +191,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         hidden_images: Array.from(hidden),
         image_scores: scores,
         pinned_main_url: pinned,
+        imported_images: importedList,
       }, { matchingMode, sources: compatSources });
       const images = pickThumbsForList(accepted, meta, hidden, pinned, 12);
       const acceptedTotal = accepted.length;
