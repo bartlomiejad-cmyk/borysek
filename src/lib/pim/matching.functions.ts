@@ -1153,6 +1153,22 @@ export async function scoreAndCapForProduct(
     }));
   const breakdown: BreakdownEntry[] = [...winners, ...dropped];
 
+  // One-time log: when a re-run keeps sources that were previously marked
+  // as same-variant duplicates (before the cross-variant-only dedup fix).
+  try {
+    const prevDeduped = new Set(
+      prevBd.filter((b) => (b as { deduped?: boolean }).deduped === true).map((b) => b.url),
+    );
+    const restored = breakdown.filter((b) => !b.deduped && prevDeduped.has(b.url)).length;
+    if (restored > 0) {
+      console.log(
+        `[matching] product ${productId}: przywrócono ${restored} źródeł tego samego wariantu`,
+      );
+    }
+  } catch {
+    /* non-fatal */
+  }
+
   // Re-inject manual entries so their manual flag survives.
   const bdUrls = new Set(breakdown.map((b) => b.url));
   for (const m of manualEntries) {
