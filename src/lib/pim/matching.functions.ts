@@ -100,17 +100,23 @@ export function isLikelyCompatProduct(name: string | null | undefined): boolean 
 }
 
 /**
- * Given a set of URLs allowed to be picked, apply variant-cluster dedup.
- * Within each cluster keep only the best URL (score, then cleaning confidence,
- * then description length). Returns dedup outcome per URL.
+ * Given a set of URLs allowed to be picked, drop sources belonging to a
+ * DIFFERENT product variant than the target one.
+ *
+ * Target-variant resolution: the cluster containing the highest-scored
+ * ean_confirmed source wins; otherwise the cluster of the highest-scored
+ * source. All URLs in the target cluster (plus URLs without any cluster
+ * assignment) are kept — multiple shops selling the SAME variant
+ * corroborate each other. Only URLs in OTHER clusters are dropped.
  */
 function applyClusterDedup(
   urls: string[],
   scoreByUrl: Map<string, number>,
   clustersByUrl: Map<string, string>,
-  confidenceByUrl: Map<string, number | null>,
-  descLenByUrl: Map<string, number>,
-): { keptUrls: Set<string>; deduped: Set<string>; keyByUrl: Map<string, string | null> } {
+  _confidenceByUrl: Map<string, number | null>,
+  _descLenByUrl: Map<string, number>,
+  eanConfirmedByUrl?: Map<string, boolean>,
+): { keptUrls: Set<string>; deduped: Set<string>; keyByUrl: Map<string, string | null>; targetKey: string | null } {
   const buckets = new Map<string, string[]>();
   const keyByUrl = new Map<string, string | null>();
   const unclustered: string[] = [];
@@ -128,21 +134,27 @@ function applyClusterDedup(
   }
   const keptUrls = new Set<string>(unclustered);
   const deduped = new Set<string>();
-  for (const [, arr] of buckets) {
-    if (arr.length === 1) { keptUrls.add(arr[0]); continue; }
-    const winner = arr.slice().sort((a, b) => {
-      const sa = scoreByUrl.get(a) ?? 0;
-      const sb = scoreByUrl.get(b) ?? 0;
-      if (sb !== sa) return sb - sa;
-      const ca = confidenceByUrl.get(a) ?? -1;
-      const cb = confidenceByUrl.get(b) ?? -1;
-      if ((cb ?? -1) !== (ca ?? -1)) return (cb ?? -1) - (ca ?? -1);
-      return (descLenByUrl.get(b) ?? 0) - (descLenByUrl.get(a) ?? 0);
-    })[0];
-    keptUrls.add(winner);
-    for (const u of arr) if (u !== winner) deduped.add(u);
+  if (buckets.size === 0) {
+    return { keptUrls, deduped, keyByUrl, targetKey: null };
   }
-  return { keptUrls, deduped, keyByUrl };
+  // Pick the target cluster: highest-scored ean_confirmed URL wins; else
+  // fall back to the highest-scored URL overall.
+  const clustered = urls.filter((u) => clustersByUrl.get(u));
+  const rank = (u: string) => scoreByUrl.get(u) ?? 0;
+  const eanRanked = clustered
+    .filter((u) => eanConfirmedByUrl?.get(u))
+    .sort((a, b) => rank(b) - rank(a));
+  const anchor =
+    eanRanked[0] ?? clustered.slice().sort((a, b) => rank(b) - rank(a))[0] ?? null;
+  const targetKey = anchor ? clustersByUrl.get(anchor) ?? null : null;
+  for (const [k, arr] of buckets) {
+    if (k === targetKey) {
+      for (const u of arr) keptUrls.add(u);
+    } else {
+      for (const u of arr) deduped.add(u);
+    }
+  }
+  return { keptUrls, deduped, keyByUrl, targetKey };
 }
 
 function scoreSource(
@@ -683,12 +695,14 @@ export const runMatching = createServerFn({ method: "POST" })
         });
         const positive = scored.filter((x) => x.total > 0);
         const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+        const eanConfirmedByUrl = new Map(positive.map((x) => [x.url, !!x.ean_confirmed]));
         const dedup = applyClusterDedup(
           positive.map((x) => x.url),
           scoreByUrl,
           clustersByUrl,
           confidenceMap,
           descLenMap,
+          eanConfirmedByUrl,
         );
         const rankedFull = positive
           .filter((x) => dedup.keptUrls.has(x.url))
@@ -1098,12 +1112,14 @@ export async function scoreAndCapForProduct(
   });
   const positive = scored.filter((x) => x.total > 0);
   const scoreByUrl = new Map(positive.map((x) => [x.url, x.total]));
+  const eanConfirmedByUrl = new Map(positive.map((x) => [x.url, !!x.ean_confirmed]));
   const dedup = applyClusterDedup(
     positive.map((x) => x.url),
     scoreByUrl,
     clustersByUrl,
     confidenceByUrl,
     descLenByUrl,
+    eanConfirmedByUrl,
   );
   const rankedFull = positive
     .filter((x) => dedup.keptUrls.has(x.url))
@@ -1136,6 +1152,22 @@ export async function scoreAndCapForProduct(
       ean_confirmed: x.ean_confirmed,
     }));
   const breakdown: BreakdownEntry[] = [...winners, ...dropped];
+
+  // One-time log: when a re-run keeps sources that were previously marked
+  // as same-variant duplicates (before the cross-variant-only dedup fix).
+  try {
+    const prevDeduped = new Set(
+      prevBd.filter((b) => (b as { deduped?: boolean }).deduped === true).map((b) => b.url),
+    );
+    const restored = breakdown.filter((b) => !b.deduped && prevDeduped.has(b.url)).length;
+    if (restored > 0) {
+      console.log(
+        `[matching] product ${productId}: przywrócono ${restored} źródeł tego samego wariantu`,
+      );
+    }
+  } catch {
+    /* non-fatal */
+  }
 
   // Re-inject manual entries so their manual flag survives.
   const bdUrls = new Set(breakdown.map((b) => b.url));
