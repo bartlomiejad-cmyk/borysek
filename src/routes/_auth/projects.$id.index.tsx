@@ -12,6 +12,7 @@ import {
   ingestSearchResults,
   ingestProductSources,
   clearProjectData,
+  reclassifyVariants,
 } from "@/lib/pim/ingest.functions";
 import { runMatching } from "@/lib/pim/matching.functions";
 import { listProductsWithEnrichment, getPipelineSummary } from "@/lib/pim/queries.functions";
@@ -204,6 +205,30 @@ function ProjectPage() {
   const approveFn = useServerFn(approveProduct);
   const unapproveFn = useServerFn(unapproveProduct);
   const bulkApprovePassFn = useServerFn(bulkApprovePass);
+  const reclassifyFn = useServerFn(reclassifyVariants);
+
+  const runReclassify = async () => {
+    try {
+      const res = await reclassifyFn({ data: { projectId: id } });
+      if (!res.ok) {
+        toast.info("Brak kolumn hierarchii w danych importu — nic do wykrycia.");
+        return;
+      }
+      if (res.reclassified === 0) {
+        toast.success(
+          `Sklasyfikowano: ${res.mains} głównych, ${res.variants} wariantów. Nic nowego do zmiany.`,
+        );
+      } else {
+        toast.success(
+          `Sklasyfikowano: ${res.mains} głównych, ${res.variants} wariantów — przeniesiono ${res.reclassified} do wariantów${res.skippedLocked ? ` (pominięto ${res.skippedLocked} zablokowanych)` : ""}.`,
+        );
+      }
+      qc.invalidateQueries({ queryKey: ["project", id] });
+      refetchProducts();
+    } catch (e) {
+      toast.error(friendlyError(e, "Nie udało się wykryć wariantów"));
+    }
+  };
 
   const { data: meta } = useQuery({
     queryKey: ["project", id],
@@ -821,6 +846,9 @@ function ProjectPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setRemapOpen(true)}>
                 <Wand2 className="h-4 w-4 mr-2" /> Uzupełnij dane z CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void runReclassify()}>
+                <Wand2 className="h-4 w-4 mr-2" /> Wykryj warianty (ponownie)
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
