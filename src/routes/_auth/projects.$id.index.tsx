@@ -268,6 +268,8 @@ function ProjectPage() {
   const [guidelinesOpen, setGuidelinesOpen] = useState(false);
   const [remapOpen, setRemapOpen] = useState(false);
   const [roundtripOpen, setRoundtripOpen] = useState(false);
+  const [detectVariantsOpen, setDetectVariantsOpen] = useState(false);
+  const [markVariantsOpen, setMarkVariantsOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "one"; id: string; name: string }
     | { kind: "bulk"; ids: string[]; names: string[] }
