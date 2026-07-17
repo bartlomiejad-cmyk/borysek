@@ -295,6 +295,13 @@ function ProductDetail() {
     (((data as { enrichment?: { regenerated_main_image?: string | null } } | undefined)?.enrichment?.regenerated_main_image) ?? null) as string | null,
   );
   if (regenUrlEarly) allVisible.push(regenUrlEarly);
+  // Client-imported images (from CSV/XLSX) are tier-0 gallery entries —
+  // always visible, never subject to AI banner/identity verdicts. They
+  // appear before any source-derived images so an imported-only product
+  // still has a populated gallery + main image for regen/visualization.
+  const importedImages = (((data as { imported_images?: string[] } | undefined)?.imported_images) ?? []) as string[];
+  const importedSet = new Set(importedImages);
+  for (const u of importedImages) if (u && !allVisible.includes(u)) allVisible.push(u);
   if (data?.sources) {
     for (const s of data.sources) {
       for (const u of s.images) if (!allVisible.includes(u)) allVisible.push(u);
@@ -368,7 +375,7 @@ function ProductDetail() {
     allVisible.find((u) => !hiddenSet.has(u)) ??
     null;
   const mainUrl =
-    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && (allVisible.includes(pinnedMainUrl) || pinnedMainUrl === regeneratedMainUrl))
+    (pinnedMainUrl && !hiddenSet.has(pinnedMainUrl) && (allVisible.includes(pinnedMainUrl) || pinnedMainUrl === regeneratedMainUrl || importedSet.has(pinnedMainUrl)))
       ? pinnedMainUrl
       : autoMainUrl;
 
@@ -557,6 +564,7 @@ function ProductDetail() {
     const s = imageScores[u];
     const isMain = u === mainUrl;
     const isPinned = u === pinnedMainUrl;
+    const isImported = importedSet.has(u);
     const m = imageMeta[u];
     const w = s?.w ?? m?.w ?? 0;
     const h = s?.h ?? m?.h ?? 0;
@@ -594,6 +602,15 @@ function ProductDetail() {
           </span>
         )}
         {extra && <Badge variant="outline" className="absolute top-0 left-0 text-[10px] px-1 py-0">extra</Badge>}
+        {isImported && (
+          <Badge
+            variant="outline"
+            className="absolute top-0 left-0 text-[10px] px-1 py-0 bg-sky-500/10 text-sky-700 border-sky-500/40"
+            title="Zdjęcie zaimportowane z pliku klienta (CSV/XLSX). Nie podlega weryfikacji AI."
+          >
+            Z pliku klienta
+          </Badge>
+        )}
         {enrichment && (
           <button
             onClick={() =>
@@ -1054,7 +1071,7 @@ function ProductDetail() {
                 if (!sorted.length) {
                   return (
                     <p className="text-[11px] text-muted-foreground italic">
-                      Brak zdjęć z dopasowanych źródeł.
+                      Brak zdjęć — dodaj plik CSV ze zdjęciami lub dopasuj źródła.
                     </p>
                   );
                 }

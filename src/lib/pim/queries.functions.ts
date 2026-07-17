@@ -164,6 +164,10 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
       const meta = ((e as unknown as { image_meta?: ImageMeta } | undefined)?.image_meta ?? {}) as ImageMeta;
       const pinned = ((e as { pinned_main_url?: string | null } | undefined)?.pinned_main_url ?? null) as string | null;
       const scores = (((e as unknown as { image_scores?: Record<string, GalleryImageScore> } | undefined)?.image_scores) ?? {}) as Record<string, GalleryImageScore>;
+      const importedImages = (((e as unknown as { image_meta?: { imported_images?: unknown } } | undefined)?.image_meta?.imported_images) ?? []) as unknown;
+      const importedList = Array.isArray(importedImages)
+        ? (importedImages as unknown[]).filter((u): u is string => typeof u === "string")
+        : [];
       const allFromSources: string[] = [];
       for (const u of picked) {
         for (const img of imgMap.get(u) ?? []) {
@@ -187,6 +191,7 @@ export const listProductsWithEnrichment = createServerFn({ method: "GET" })
         hidden_images: Array.from(hidden),
         image_scores: scores,
         pinned_main_url: pinned,
+        imported_images: importedList,
       }, { matchingMode, sources: compatSources });
       const images = pickThumbsForList(accepted, meta, hidden, pinned, 12);
       const acceptedTotal = accepted.length;
@@ -283,6 +288,10 @@ export const getProductDetail = createServerFn({ method: "GET" })
     const picked = ((enrichment?.picked_urls as string[] | null) ?? []);
     const hidden = new Set(((enrichment as { hidden_images?: string[] } | null)?.hidden_images ?? []) as string[]);
     const meta = ((enrichment as unknown as { image_meta?: ImageMeta } | null)?.image_meta ?? {}) as ImageMeta;
+    const importedRaw = ((enrichment as unknown as { image_meta?: { imported_images?: unknown } } | null)?.image_meta?.imported_images) as unknown;
+    const imported_images = Array.isArray(importedRaw)
+      ? (importedRaw as unknown[]).filter((u): u is string => typeof u === "string")
+      : [];
     const scoresEarly = ((enrichment as unknown as { image_scores?: Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }> } | null)?.image_scores ?? {}) as Record<string, { is_banner_or_trash?: boolean; identity?: string; manual_keep?: boolean }>;
     const trash = new Set<string>(
       Object.entries(scoresEarly)
@@ -299,6 +308,10 @@ export const getProductDetail = createServerFn({ method: "GET" })
         })
         .map(([u]) => u),
     );
+    // Imported (client-owned) images are ground truth: they must never be
+    // pulled into the AI-verdict "trash" set even if a stale score row
+    // marks them banner/unsure/different.
+    for (const u of imported_images) trash.delete(u);
     let sources: Array<{
       url: string;
       title: string | null;
@@ -448,6 +461,7 @@ export const getProductDetail = createServerFn({ method: "GET" })
       dead_images,
       other_equivalent_images,
       pinned_main_url: ((enrichment as { pinned_main_url?: string | null } | null)?.pinned_main_url ?? null) as string | null,
+      imported_images,
       variants,
     };
   });
