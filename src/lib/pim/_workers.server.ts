@@ -1578,6 +1578,16 @@ export async function runRegenerateMedia(
       await supabaseAdmin.storage.from("regenerated-images").remove([`gallery/${enrichment.id}-${i}.jpg`]).catch(() => undefined);
     }
 
+    // Preserve paid visualizations that live in the same ai_gallery_urls array.
+    // A gallery URL is a visualization iff image_meta.viz_qc has an entry keyed by that URL.
+    const prevGallery = Array.isArray(enrichment.ai_gallery_urls)
+      ? (enrichment.ai_gallery_urls as string[])
+      : [];
+    const vizQcMap = (((enrichment as { image_meta?: Record<string, unknown> }).image_meta
+      ?? {}).viz_qc ?? {}) as Record<string, unknown>;
+    const preservedViz = prevGallery.filter((u) => u in vizQcMap);
+    const mergedGallery = [...galleryUrls, ...preservedViz.filter((u) => !galleryUrls.includes(u))];
+
     const { error: dbErr } = await supabaseAdmin
       .from("enrichments")
       .update({
@@ -1585,7 +1595,7 @@ export async function runRegenerateMedia(
         ...(mainPublic ? { regenerated_main_image: mainPublic } : {}),
         // Never overwrite a manually-pinned main image on a locked product.
         ...(mainPublic && !productLocked ? { pinned_main_url: mainPublic } : {}),
-        ai_gallery_urls: galleryUrls as never,
+        ai_gallery_urls: mergedGallery as never,
         image_meta: mergedImageMeta as never,
       } as never)
       .eq("id", enrichment.id);
