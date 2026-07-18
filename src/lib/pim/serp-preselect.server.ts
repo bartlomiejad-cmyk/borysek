@@ -16,6 +16,7 @@ export type PreselectInput = {
     kod_producenta?: string | null;
   };
   items: Array<{ i: number; title: string; snippet: string; domain: string }>;
+  mode?: "strict" | "compatible";
 };
 
 export type PreselectPick = { i: number; why: string };
@@ -33,12 +34,24 @@ const SYSTEM_PROMPT =
   "tylko w danych strukturalnych. Odrzucaj: kategorie, poradniki, agregatory, inne warianty produktu. " +
   'Zwróć JSON {"picks": [{"i": number, "why": string(krótko)}]} — posortowane od najlepszej.';
 
+const SYSTEM_PROMPT_COMPATIBLE =
+  "Tryb KOMPATYBILNY: szukamy również produktów zamiennych/substytutów. Wybierz maksymalnie 8 adresów. " +
+  "Najwyższy priorytet: strony z dokładnym EAN produktu w tytule lub snippecie. " +
+  "Następnie: wysoko rankowane wyniki, których tytuł/snippet wskazuje na konkretną kartę produktu z parametrami " +
+  "(nie stronę kategorii, nie blog, nie agregator) — przepuszczaj je także bez widocznego EAN, sklepy często trzymają EAN " +
+  "tylko w danych strukturalnych. DOPUSZCZAJ produkty zamienne/kompatybilne: inne kody, inne nazwy, inne marki są " +
+  "prawidłowymi trafieniami, o ile to konkretna karta produktu tej samej kategorii/funkcji. " +
+  "Odrzucaj: kategorie, poradniki, agregatory. " +
+  'Zwróć JSON {"picks": [{"i": number, "why": string(krótko)}]} — posortowane od najlepszej.';
+
 export async function preselectSerpResults(input: PreselectInput): Promise<PreselectResult> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) return { ok: false, picks: [], error: "Brak LOVABLE_API_KEY" };
 
   const capped = input.items.slice(0, 40);
   if (!capped.length) return { ok: true, picks: [] };
+
+  const systemPrompt = input.mode === "compatible" ? SYSTEM_PROMPT_COMPATIBLE : SYSTEM_PROMPT;
 
   const productBlock = [
     `Nazwa: ${input.product.nazwa ?? "-"}`,
@@ -65,7 +78,7 @@ export async function preselectSerpResults(input: PreselectInput): Promise<Prese
         model: MODEL,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: user },
         ],
       }),
