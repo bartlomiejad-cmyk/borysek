@@ -699,7 +699,11 @@ function ProjectPage() {
   const regenerateAll = async (productIds?: string[]) => {
     const idSet = productIds ? new Set(productIds) : null;
     const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
-    const targets = source.filter((p) => !!(p as { enrichment_id?: string | null }).enrichment_id);
+    const targets = source.filter(
+      (p) =>
+        !!(p as { enrichment_id?: string | null }).enrichment_id &&
+        (p as { regenerated_main_image?: string | null }).regenerated_main_image !== "__imported__",
+    );
     if (!targets.length) {
       toast.info("Brak produktów do regeneracji");
       return;
