@@ -1693,7 +1693,7 @@ function inferMinDimensionFromUrl(url: string): number | null {
 const PRODUCT_PATH_HINTS = [
   "/product", "/products", "/galeria", "/gallery", "/media/catalog/product",
   "/zdjecia", "/zdjęcia", "/upload/product", "/uploads/product", "/produkty",
-  "/_data/products", "/photos/products",
+  "/_data/products", "/photos/products", "/img/p/",
 ];
 
 function looksLikeProductPath(url: string): boolean {
@@ -1932,6 +1932,15 @@ export function pickImagesFromScrape(res: unknown): PickedImages {
 
   const r = res as Record<string, unknown> | null;
   if (!r) return { urls: out, tiers };
+
+  // Tier 0: pre-extracted URL list supplied by callers that reconstruct a
+  // scrape from cache (see scrapeAndStoreSource shared-cache branch). Fresh
+  // Firecrawl scrapes never populate `.images`, so this path only fires on
+  // cache-hits. Candidates still flow through the same isJunkImageUrl /
+  // minDim gates as every other tier via push().
+  if (Array.isArray(r.images)) {
+    for (const u of r.images) push(u, 1);
+  }
 
   const rawHtml = typeof r.rawHtml === "string" ? r.rawHtml : (typeof r.html === "string" ? r.html : "");
   // 1) usuń całe chrome sklepu (nav/header/footer/aside/script/style)
@@ -3139,7 +3148,8 @@ export async function scrapeAndStoreSource(
       scrape = {
         markdown: cachedRow.markdown,
         metadata: { title: cachedRow.title ?? null },
-        // pickImagesFromScrape reads several shapes; give it the raw urls array
+        // Cache doesn't store rawHtml — supply the pre-extracted image URLs
+        // as Tier 0 so pickImagesFromScrape can recover the gallery on hit.
         images: imgs,
       } as Record<string, unknown>;
       await emit(ctx, { level: "info", message: `   ♻️ ${host} — shared cache hit (<14d)`, details: { url } });
