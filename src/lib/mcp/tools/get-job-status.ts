@@ -28,7 +28,7 @@ export default defineTool({
     let q = sb
       .from("bulk_jobs")
       .select(
-        "id, project_id, kind, status, total, processed_count, failed_count, cancel_requested, last_error, started_at, finished_at, created_at, updated_at",
+        "id, project_id, kind, status, total, processed_count, failed_count, cancel_requested, last_error, started_at, finished_at, created_at, updated_at, usage",
       );
     if (jobId) q = q.eq("id", jobId);
     else {
