@@ -789,6 +789,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_variant_groups_tx: {
+        Args: { p_groups: Json; p_project_id: string }
+        Returns: Json
+      }
       claim_next_bulk_job: {
         Args: { p_stale_seconds?: number }
         Returns: {
