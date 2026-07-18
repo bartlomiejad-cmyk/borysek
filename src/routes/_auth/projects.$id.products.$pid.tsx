@@ -690,6 +690,19 @@ function ProductDetail() {
               {enrichment.model && (
                 <span className="text-xs text-muted-foreground self-center">{enrichment.model}</span>
               )}
+              {(() => {
+                const err = (((enrichment as { error?: string | null }).error) ?? "").trim();
+                if (!err) return null;
+                return (
+                  <Badge
+                    variant="outline"
+                    className="border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
+                    title={err}
+                  >
+                    ⚠ Błąd regeneracji
+                  </Badge>
+                );
+              })()}
             </div>
           )}
         </div>

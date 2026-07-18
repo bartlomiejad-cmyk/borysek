@@ -161,6 +161,10 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
       .maybeSingle();
     const locked = !!(prodGuard as { manual_lock?: boolean } | null)?.manual_lock;
 
+    // Wrap the paid FAL + upload pipeline in a try/catch so that any thrown
+    // error is persisted to enrichments.error before rethrowing. This turns
+    // the ephemeral toast into a durable badge on the product row.
+    try {
     // Step 1 — bytedance/seedream v4 edit: biały seamless background,
     // miękki cień, produkt ~70% kadru, kwadrat 2560x2560.
     const sourceForFal = await prepareFalSourceImage(data.enrichmentId, sourceUrl);
@@ -231,7 +235,7 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     const { error: dbErr } = await context.supabase
       .from("enrichments")
       .update((() => {
-        const patch: Record<string, unknown> = { regenerated_main_image: publicUrl };
+        const patch: Record<string, unknown> = { regenerated_main_image: publicUrl, error: null };
         if (!locked) patch.pinned_main_url = publicUrl;
         return patch;
       })() as never)
@@ -239,6 +243,19 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
     if (dbErr) throw new Error(dbErr.message);
 
     return { url: publicUrl };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Persist error so the row/editor can show a durable badge. Use admin
+      // client — the failure path may happen after RLS-relevant reads but
+      // is scoped to a single enrichment id we already validated above.
+      try {
+        await supabaseAdmin
+          .from("enrichments")
+          .update({ error: msg } as never)
+          .eq("id", data.enrichmentId);
+      } catch { /* best-effort */ }
+      throw e;
+    }
   });
 
 export const clearRegeneratedImage = createServerFn({ method: "POST" })

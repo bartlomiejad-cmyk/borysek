@@ -1025,6 +1025,19 @@ function ProjectPage() {
         </Card>
       )}
 
+      {!regenActive && regenJob && regenJob.status === "FAILED" && regenJob.last_error && (
+        <Card className="mb-4 border-red-500/60">
+          <CardContent className="py-3 text-sm">
+            <div className="font-medium text-red-700 dark:text-red-300">
+              Regeneracja zdjęć — ostatnie uruchomienie nie powiodło się
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {regenJob.last_error}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {discActive && discJob && (
         <Card className="mb-4">
           <CardContent className="py-3">
@@ -1712,6 +1725,19 @@ function ProjectPage() {
                               title={audit.at ? `Audyt AI: ${new Date(audit.at).toLocaleString("pl-PL")}` : "Audyt AI"}
                             >
                               <ClipboardCheck className="h-3 w-3 mr-1" /> {label}
+                            </Badge>
+                          );
+                        })()}
+                        {(() => {
+                          const err = ((p as { error?: string | null }).error ?? "").trim();
+                          if (!err) return null;
+                          return (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0 border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
+                              title={err}
+                            >
+                              ⚠ Błąd regeneracji
                             </Badge>
                           );
                         })()}
