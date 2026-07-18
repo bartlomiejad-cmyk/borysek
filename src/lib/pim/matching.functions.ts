@@ -987,10 +987,22 @@ export async function scoreAndCapForProduct(
 
   const { data: productRow } = await supabaseAdmin
     .from("source_products")
-    .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
+    .select("id, nazwa, ean, category, raw, manual_lock, matching_mode, excluded, excluded_reason, row_kind")
     .eq("id", productId)
     .single();
   if (!productRow) return { count: 0, strong: 0 };
+  // Never rescore variants or excluded rows (manual/variant). auto_no_sources
+  // rows are auto-cleared by explicit re-runs upstream — safe to rescore.
+  {
+    const r = productRow as {
+      row_kind?: string | null;
+      excluded?: boolean | null;
+      excluded_reason?: string | null;
+    };
+    const isVariant = (r.row_kind ?? "main") === "variant";
+    const isBlockedExcluded = r.excluded === true && r.excluded_reason !== "auto_no_sources";
+    if (isVariant || isBlockedExcluded) return { count: 0, strong: 0 };
+  }
   if ((productRow as { manual_lock?: boolean }).manual_lock && !opts?.force) {
     // Manually locked — do not rescore/overwrite picked_urls.
     return { count: 0, strong: 0 };
