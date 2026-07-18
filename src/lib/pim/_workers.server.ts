@@ -2,7 +2,7 @@
  * Server-only helpers used by the background bulk-job worker (and only there).
  *
  * Mirrors the logic of the user-facing serverFns (`verifySources`,
- * `generateGoldenRecord`, `regenerateMedia`) but operates with `supabaseAdmin`
+ * `generateGoldenRecord`) but operates with `supabaseAdmin`
  * because the cron-driven worker has no end-user JWT. Ownership is verified at
  * job creation time via RLS on `bulk_jobs`.
  *
