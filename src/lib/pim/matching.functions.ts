@@ -9,6 +9,7 @@ import {
 } from "./source-cleanup";
 import { llmCleanDescription, type CleaningMeta } from "./llm-cleaner.server";
 import { advancePipelineStatus } from "./pipeline-status";
+import { applyEligibilityFilter } from "./eligibility";
 
 const LLM_CLEAN_MIN_CHARS = 200;
 
@@ -365,7 +366,6 @@ export const runMatching = createServerFn({ method: "POST" })
     // Exclude rows outside the pipeline (excluded=true or row_kind='variant')
     // via the shared eligibility predicate. Locked products are still loaded
     // — manual_lock is a downstream skip inside the scorer, not upstream.
-    const { applyEligibilityFilter } = await import("./eligibility");
     const [{ data: products }, { data: searches }] = await Promise.all([
       applyEligibilityFilter(
         supabase
