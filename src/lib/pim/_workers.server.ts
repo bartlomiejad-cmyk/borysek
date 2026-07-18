@@ -109,6 +109,11 @@ type DiscoveryUsage = {
   dedup_dropped_host?: number;
   dedup_dropped_marketplace?: number;
   preselect_kept?: number;
+  // Paid worker telemetry — additive per-call counters (RMW-safe).
+  // Bumped from runRegenerateMedia / runPimVisualization (FAL) and
+  // runGenerateGoldenRecord / runPimAudit (LLM).
+  fal_renders?: number;
+  llm_calls?: number;
 };
 
 async function bumpJobUsage(bulkJobId: string | undefined, patch: DiscoveryUsage): Promise<void> {
@@ -180,7 +185,7 @@ const VerifySourcesSchema = z.object({
   notes: z.string().default(""),
 });
 
-async function callGatewayJson(apiKey: string, model: string, messages: unknown[]): Promise<unknown> {
+async function callGatewayJson(apiKey: string, model: string, messages: unknown[], bulkJobId?: string): Promise<unknown> {
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -191,6 +196,8 @@ async function callGatewayJson(apiKey: string, model: string, messages: unknown[
     body: JSON.stringify({ model, response_format: { type: "json_object" }, messages }),
   });
   if (!res.ok) throw new Error(`AI gateway ${res.status}: ${await res.text().catch(() => "")}`);
+  // Additive LLM telemetry — only recorded when caller passed a bulkJobId.
+  if (bulkJobId) void bumpJobUsage(bulkJobId, { llm_calls: 1 });
   const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const content = j.choices?.[0]?.message?.content ?? "{}";
   try {
@@ -528,7 +535,7 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function callFal(path: string, body: unknown, apiKey: string): Promise<FalResp> {
+async function callFal(path: string, body: unknown, apiKey: string, bulkJobId?: string): Promise<FalResp> {
   const res = await fetch(`${FAL_BASE}/${path}`, {
     method: "POST",
     headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
@@ -543,6 +550,8 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
     err.status = res.status;
     throw err;
   }
+  // Additive FAL render telemetry — only recorded when caller passed a bulkJobId.
+  if (bulkJobId) void bumpJobUsage(bulkJobId, { fal_renders: 1 });
   return (await res.json()) as FalResp;
 }
 
@@ -559,6 +568,7 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
 export async function flattenToWhiteBackground(
   publicImageUrl: string,
   apiKey: string,
+  bulkJobId?: string,
 ): Promise<Uint8Array> {
   // Step 1 — background removal. bria/background/remove returns { image: { url } }
   // with a transparent PNG. If it errors, fall back to imageutils/rembg.
@@ -568,6 +578,7 @@ export async function flattenToWhiteBackground(
       "fal-ai/bria/background/remove",
       { image_url: publicImageUrl },
       apiKey,
+      bulkJobId,
     );
     cutoutUrl = removed.image?.url ?? removed.images?.[0]?.url;
   } catch (e) {
@@ -578,6 +589,7 @@ export async function flattenToWhiteBackground(
       "fal-ai/imageutils/rembg",
       { image_url: publicImageUrl },
       apiKey,
+      bulkJobId,
     );
     cutoutUrl = removed2.image?.url ?? removed2.images?.[0]?.url;
   }
@@ -654,7 +666,7 @@ function errorStatus(err: unknown): number | undefined {
   return (err as { status?: number } | null)?.status;
 }
 
-async function submitFalQueue(path: string, body: unknown, apiKey: string): Promise<FalQueueRequest> {
+async function submitFalQueue(path: string, body: unknown, apiKey: string, bulkJobId?: string): Promise<FalQueueRequest> {
   const res = await fetch(`${FAL_QUEUE_BASE}/${path}`, {
     method: "POST",
     headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
@@ -668,6 +680,9 @@ async function submitFalQueue(path: string, body: unknown, apiKey: string): Prom
   if (!data.request_id || !data.status_url || !data.response_url) {
     throw new Error("FAL queue: brak request_id/status_url/response_url");
   }
+  // Additive FAL render telemetry — counted at submission time so
+  // cancelled/timed-out polls still record what we paid to enqueue.
+  if (bulkJobId) void bumpJobUsage(bulkJobId, { fal_renders: 1 });
   return {
     request_id: data.request_id,
     status_url: data.status_url,
@@ -982,7 +997,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const parsed = await callGatewayJson(apiKey, GOLDEN_MODEL, [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
-    ]);
+    ], ctx?.bulkJobId);
     // Model sometimes returns `features` as strings ("Kolor: biały") instead
     // of {key,value} objects. Coerce before Zod validation so a stylistic
     // shape mismatch does not fail the whole generation.
@@ -1023,7 +1038,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       const shortened = await callGatewayJson(apiKey, GOLDEN_MODEL, [
         { role: "system", content: SHORTEN_META_SYSTEM_PROMPT },
         { role: "user", content: text },
-      ]);
+      ], ctx?.bulkJobId);
       return (shortened as { meta_description?: string }).meta_description ?? "";
     });
     const dataSufficiency = out.data_sufficiency ?? null;
@@ -1190,7 +1205,7 @@ async function collectScrapedUrls(projectId: string, pickedUrls: string[], inclu
   return out;
 }
 
-async function classifyOneImage(apiKey: string, url: string, a: string, b: string | null, timeoutMs = 15000): Promise<Classification> {
+async function classifyOneImage(apiKey: string, url: string, a: string, b: string | null, timeoutMs = 15000, bulkJobId?: string): Promise<Classification> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1221,6 +1236,7 @@ async function classifyOneImage(apiKey: string, url: string, a: string, b: strin
       }),
     });
     if (!res.ok) throw new Error(`classify ${res.status}`);
+    if (bulkJobId) void bumpJobUsage(bulkJobId, { llm_calls: 1 });
     const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = j.choices?.[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as { has_a?: boolean; has_b?: boolean; is_trash?: boolean };
@@ -1235,7 +1251,7 @@ async function classifyOneImage(apiKey: string, url: string, a: string, b: strin
   }
 }
 
-async function classifyBatch(apiKey: string, urls: string[], a: string, b: string | null): Promise<Record<string, Classification>> {
+async function classifyBatch(apiKey: string, urls: string[], a: string, b: string | null, bulkJobId?: string): Promise<Record<string, Classification>> {
   const out: Record<string, Classification> = {};
   let idx = 0;
   const worker = async () => {
@@ -1243,7 +1259,7 @@ async function classifyBatch(apiKey: string, urls: string[], a: string, b: strin
       const myIdx = idx++;
       const u = urls[myIdx];
       try {
-        out[u] = await classifyOneImage(apiKey, u, a, b);
+        out[u] = await classifyOneImage(apiKey, u, a, b, 15000, bulkJobId);
       } catch {
         out[u] = { has_a: false, has_b: false, is_trash: false, scored_at: new Date().toISOString() };
       }
@@ -1355,7 +1371,7 @@ export async function runRegenerateMedia(
 
   const cached = (((enrichment as unknown as { media_classification?: Record<string, Classification> }).media_classification) ?? {});
   const toClassify = urls.filter((u) => !cached[u]);
-  const fresh = toClassify.length ? await classifyBatch(apiKey, toClassify, settings.component_a, settings.component_b) : {};
+  const fresh = toClassify.length ? await classifyBatch(apiKey, toClassify, settings.component_a, settings.component_b, ctx?.bulkJobId) : {};
   const classification: Record<string, Classification> = { ...cached, ...fresh };
   if (Object.keys(fresh).length) {
     await supabaseAdmin
@@ -1425,11 +1441,12 @@ export async function runRegenerateMedia(
           output_format: "jpeg",
         },
         FAL_KEY,
+        ctx?.bulkJobId,
       );
       const mainUrl = mainResp.images?.[0]?.url;
       if (!mainUrl) throw new Error("FAL nie zwróciło głównego zdjęcia");
 
-      const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY);
+      const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY, ctx?.bulkJobId);
       const { error: candErr } = await supabaseAdmin.storage
         .from("regenerated-images")
         .upload(candidatePath, mainBytes, { contentType: "image/png", upsert: true });
@@ -1555,6 +1572,7 @@ export async function runRegenerateMedia(
             output_format: "jpeg",
           },
           FAL_KEY,
+          ctx?.bulkJobId,
         );
         const genUrl = resp.images?.[0]?.url;
         if (!genUrl) throw new Error("brak url");
@@ -4859,7 +4877,7 @@ export async function runPimVisualization(
               : [];
         }
         try {
-          const queued = await submitFalQueue(req.path, req.body, FAL_KEY);
+          const queued = await submitFalQueue(req.path, req.body, FAL_KEY, ctx?.bulkJobId);
           slotState = { ...slotState, request: queued };
           await saveProgress(slotState);
           await emit(ctx, {
@@ -5666,6 +5684,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<P
       if (res.status === 429) throw new Error("RATE_LIMIT");
       if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
       if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+      if (ctx?.bulkJobId) void bumpJobUsage(ctx.bulkJobId, { llm_calls: 1 });
       const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       const raw = json.choices?.[0]?.message?.content ?? "{}";
       const parsed = JSON.parse(raw) as Partial<AuditLlmResult>;
