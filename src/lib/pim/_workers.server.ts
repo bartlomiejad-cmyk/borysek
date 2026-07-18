@@ -4877,7 +4877,7 @@ export async function runPimVisualization(
               : [];
         }
         try {
-          const queued = await submitFalQueue(req.path, req.body, FAL_KEY);
+          const queued = await submitFalQueue(req.path, req.body, FAL_KEY, ctx?.bulkJobId);
           slotState = { ...slotState, request: queued };
           await saveProgress(slotState);
           await emit(ctx, {
