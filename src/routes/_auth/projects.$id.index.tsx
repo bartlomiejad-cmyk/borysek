@@ -1966,7 +1966,11 @@ function ProjectPage() {
         onOpenChange={setVizOpen}
         projectId={id}
         selectedIds={selectedIds}
-        allProducts={products.map<VizTarget>((p) => ({
+        allProducts={products
+          .filter((p) =>
+            isPipelineEligible(p as { excluded?: boolean | null; row_kind?: string | null }),
+          )
+          .map<VizTarget>((p) => ({
           id: p.id,
           picked_urls: (p as { picked_urls?: string[] }).picked_urls ?? [],
           regenerated_main_image:
