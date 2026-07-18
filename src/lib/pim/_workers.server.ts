@@ -2364,13 +2364,28 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw, matching_mode")
+    .select("id, project_id, nazwa, kod, ean, raw, matching_mode, excluded, excluded_reason, row_kind")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
 
   const nazwa = (product.nazwa ?? "").trim();
   if (!nazwa) throw new Error("Produkt nie ma nazwy");
+
+  // Skip variants and manually-excluded products. auto_no_sources is
+  // explicitly re-eligible here (a re-run clears it just below), but
+  // manual/variant exclusions must never consume paid discovery budget.
+  const _row_kind = (product as { row_kind?: string | null }).row_kind ?? "main";
+  const _excluded = (product as { excluded?: boolean | null }).excluded === true;
+  const _excludedReason = ((product as { excluded_reason?: string | null }).excluded_reason ?? null) as
+    | "auto_no_sources" | "manual" | "variant" | null;
+  if (_row_kind === "variant" || (_excluded && _excludedReason !== "auto_no_sources")) {
+    await emit(ctx, {
+      level: "info",
+      message: `⏭ ${nazwa} — pominięto (${_row_kind === "variant" ? "wariant" : `wykluczony: ${_excludedReason ?? "manual"}`})`,
+    });
+    return;
+  }
 
   // Any explicit re-run clears an auto-exclusion so counters and stage
   // cards start including this product again. Manual exclusion is never
