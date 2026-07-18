@@ -22,6 +22,7 @@ import { parseSearchJson, parseProductJson } from "@/lib/pim/parsers";
 import { hideImageByProduct } from "@/lib/pim/enrichments.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { setPinnedMainImage } from "@/lib/pim/enrichments.functions";
+import { isPipelineEligible } from "@/lib/pim/eligibility";
 import { regenerateMainImage } from "@/lib/pim/regen.functions";
 import {
   getMediaSettings,
