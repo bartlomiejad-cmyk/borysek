@@ -22,13 +22,12 @@ export function isPipelineEligible(p: EligibleLike): boolean {
 /**
  * Apply the eligibility filter to a Supabase query builder. Chains
  * `.eq("excluded", false).neq("row_kind", "variant")` and returns the
- * builder so it stays chainable.
+ * builder so it stays chainable. Untyped generic passthrough because
+ * PostgREST builder generics change on each chained call.
  */
-export function applyEligibilityFilter<
-  Q extends {
-    eq: (col: string, val: unknown) => Q;
-    neq: (col: string, val: unknown) => Q;
-  },
->(q: Q): Q {
-  return q.eq("excluded", false).neq("row_kind", "variant");
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function applyEligibilityFilter<Q>(q: Q): Q {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const b = q as any;
+  return b.eq("excluded", false).neq("row_kind", "variant") as Q;
 }
