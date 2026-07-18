@@ -248,11 +248,12 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
       // Persist error so the row/editor can show a durable badge. Use admin
       // client — the failure path may happen after RLS-relevant reads but
       // is scoped to a single enrichment id we already validated above.
-      await supabaseAdmin
-        .from("enrichments")
-        .update({ error: msg } as never)
-        .eq("id", data.enrichmentId)
-        .catch(() => undefined);
+      try {
+        await supabaseAdmin
+          .from("enrichments")
+          .update({ error: msg } as never)
+          .eq("id", data.enrichmentId);
+      } catch { /* best-effort */ }
       throw e;
     }
   });
