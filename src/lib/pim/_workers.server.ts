@@ -1371,7 +1371,7 @@ export async function runRegenerateMedia(
 
   const cached = (((enrichment as unknown as { media_classification?: Record<string, Classification> }).media_classification) ?? {});
   const toClassify = urls.filter((u) => !cached[u]);
-  const fresh = toClassify.length ? await classifyBatch(apiKey, toClassify, settings.component_a, settings.component_b) : {};
+  const fresh = toClassify.length ? await classifyBatch(apiKey, toClassify, settings.component_a, settings.component_b, ctx?.bulkJobId) : {};
   const classification: Record<string, Classification> = { ...cached, ...fresh };
   if (Object.keys(fresh).length) {
     await supabaseAdmin
@@ -1441,11 +1441,12 @@ export async function runRegenerateMedia(
           output_format: "jpeg",
         },
         FAL_KEY,
+        ctx?.bulkJobId,
       );
       const mainUrl = mainResp.images?.[0]?.url;
       if (!mainUrl) throw new Error("FAL nie zwróciło głównego zdjęcia");
 
-      const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY);
+      const mainBytes = await flattenToWhiteBackground(mainUrl, FAL_KEY, ctx?.bulkJobId);
       const { error: candErr } = await supabaseAdmin.storage
         .from("regenerated-images")
         .upload(candidatePath, mainBytes, { contentType: "image/png", upsert: true });
@@ -1571,6 +1572,7 @@ export async function runRegenerateMedia(
             output_format: "jpeg",
           },
           FAL_KEY,
+          ctx?.bulkJobId,
         );
         const genUrl = resp.images?.[0]?.url;
         if (!genUrl) throw new Error("brak url");
