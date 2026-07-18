@@ -24,23 +24,35 @@ export default defineTool({
     if (error) return errorResult(error.message);
     if (!product) return errorResult("Produkt nie istnieje lub brak dostępu.");
 
-    const [{ data: sources }, { data: enrichment }] = await Promise.all([
-      sb
-        .from("product_sources")
-        .select("url, title, score, provider, images, extra_images, created_at")
-        .eq("source_product_id", productId)
-        .order("score", { ascending: false })
-        .limit(50),
-      sb
-        .from("enrichments")
-        .select(
-          "id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, audit, data_sufficiency, generated_at, updated_at",
-        )
-        .eq("source_product_id", productId)
-        .maybeSingle(),
-    ]);
+    // product_sources has no source_product_id column — the source↔product
+    // link is enrichments.picked_urls (array of URLs) → product_sources.url
+    // within the project. Mirrors queries.functions.ts / export.functions.ts.
+    const { data: enrichment, error: enrErr } = await sb
+      .from("enrichments")
+      .select(
+        "id, status, match_type, matched_term, picked_urls, golden_name, golden_description, golden_features, golden_slug, golden_meta_description, golden_seo_keywords, audit, data_sufficiency, generated_at, updated_at",
+      )
+      .eq("source_product_id", productId)
+      .maybeSingle();
+    if (enrErr) return errorResult(enrErr.message);
 
-    const payload = { product, sources: sources ?? [], enrichment: enrichment ?? null };
+    const picked = (
+      (enrichment?.picked_urls as unknown as string[] | null) ?? []
+    ).filter((u): u is string => typeof u === "string" && u.length > 0);
+
+    let sources: unknown[] = [];
+    if (picked.length > 0) {
+      const { data: srcData, error: srcErr } = await sb
+        .from("product_sources")
+        .select("url, title, description, images, extra_images, image_meta, created_at")
+        .eq("project_id", product.project_id)
+        .in("url", picked)
+        .order("created_at", { ascending: false });
+      if (srcErr) return errorResult(srcErr.message);
+      sources = srcData ?? [];
+    }
+
+    const payload = { product, sources, enrichment: enrichment ?? null };
     return textResult(JSON.stringify(payload, null, 2), payload);
   },
 });
