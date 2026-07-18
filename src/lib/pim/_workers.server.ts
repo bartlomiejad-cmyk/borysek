@@ -2527,6 +2527,8 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   // numeric queries and Apify covers it well).
 
   // ---- Apify branch (first in combined mode) ----
+  // Keep only the top-N results per variant (SERP-order). Actor min limit is 10.
+  const TOP_PER_VARIANT = 2;
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
   const apifyVariantMeta: SerpMeta[] = [];
   // Per-variant Apify outcome (indexed by vi). Used by the Firecrawl branch
@@ -2539,7 +2541,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       buckets = await runSerpSearch(variants.map((v) => v.query), {
         gl: serpGl,
         hl: serpHl,
-        limit: 100,
+        limit: 10,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2558,6 +2560,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       const bucket = buckets.find((b) => b.query.trim().toLowerCase() === v.query.trim().toLowerCase())
         ?? buckets[vi];
       const results = bucket?.results ?? [];
+      const topResults = results.slice(0, TOP_PER_VARIANT);
       if (bucket?.meta) {
         apifyVariantMeta.push(bucket.meta);
         apifyStatusByVi[vi] = (bucket.meta.status ?? (bucket.meta.error ? "error" : "empty")) as typeof apifyStatusByVi[number];
@@ -2570,7 +2573,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       } else {
         apifyVariantMeta.push({
           provider: "apify",
-          input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: 100 },
+          input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: 10 },
           results_count: 0,
           error: "no bucket returned",
           status: "error",
@@ -2578,7 +2581,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
         apifyStatusByVi[vi] = "error";
       }
       let n = 0;
-      for (const r of results) {
+      for (const r of topResults) {
         idx++;
         upsertResult(vi, r.url, "apify", {
           title: r.title,
