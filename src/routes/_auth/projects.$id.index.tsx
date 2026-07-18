@@ -1025,6 +1025,19 @@ function ProjectPage() {
         </Card>
       )}
 
+      {!regenActive && regenJob && regenJob.status === "FAILED" && regenJob.last_error && (
+        <Card className="mb-4 border-red-500/60">
+          <CardContent className="py-3 text-sm">
+            <div className="font-medium text-red-700 dark:text-red-300">
+              Regeneracja zdjęć — ostatnie uruchomienie nie powiodło się
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {regenJob.last_error}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {discActive && discJob && (
         <Card className="mb-4">
           <CardContent className="py-3">
