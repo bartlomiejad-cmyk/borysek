@@ -3148,7 +3148,8 @@ export async function scrapeAndStoreSource(
       scrape = {
         markdown: cachedRow.markdown,
         metadata: { title: cachedRow.title ?? null },
-        // pickImagesFromScrape reads several shapes; give it the raw urls array
+        // Cache doesn't store rawHtml — supply the pre-extracted image URLs
+        // as Tier 0 so pickImagesFromScrape can recover the gallery on hit.
         images: imgs,
       } as Record<string, unknown>;
       await emit(ctx, { level: "info", message: `   ♻️ ${host} — shared cache hit (<14d)`, details: { url } });
