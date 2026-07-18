@@ -215,17 +215,32 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
     const shiftBeforeProcessing = !postShift;
 
     // Skip products flagged as excluded from the pipeline for every job
-    // kind EXCEPT discovery (an explicit discovery re-run is how the
-    // exclusion is meant to be cleared). Excluded items are dropped from
-    // the queue and counted as skipped (not failed) so terminal-state
-    // math still balances.
-    if (job.kind !== "FIRECRAWL_DISCOVERY") {
+    // kind. For FIRECRAWL_DISCOVERY the bypass is narrowed to
+    // excluded_reason='auto_no_sources' only — that reason is meant to be
+    // cleared by an explicit re-run. Manual/variant exclusions still skip.
+    // Excluded items are dropped from the queue and counted as skipped
+    // (not failed) so terminal-state math still balances.
+    {
       const { data: prod } = await supabaseAdmin
         .from("source_products" as never)
-        .select("excluded")
+        .select("excluded, excluded_reason, row_kind")
         .eq("id", pid)
         .maybeSingle();
-      if ((prod as { excluded?: boolean } | null)?.excluded) {
+      const p = prod as {
+        excluded?: boolean;
+        excluded_reason?: "auto_no_sources" | "manual" | "variant" | null;
+        row_kind?: string | null;
+      } | null;
+      const isVariant = (p?.row_kind ?? "main") === "variant";
+      const isExcluded = p?.excluded === true;
+      const reason = p?.excluded_reason ?? null;
+      // Discovery re-runs are allowed to clear auto_no_sources — but not
+      // manual or variant exclusions, and never a variant row.
+      const skip =
+        isVariant ||
+        (isExcluded &&
+          (job.kind !== "FIRECRAWL_DISCOVERY" || reason !== "auto_no_sources"));
+      if (skip) {
         remaining.shift();
         completedItems.add(pid); // counts against total so job can complete
         payload.completed_items = Array.from(completedItems);
@@ -236,7 +251,9 @@ async function processJob(job: BulkJobRow, deadline: number): Promise<{
             project_id: job.project_id,
             source_product_id: pid,
             level: "info",
-            message: "⏭ Pominięto — produkt poza procesem (wykluczony)",
+            message: isVariant
+              ? "⏭ Pominięto — wariant (poza procesem)"
+              : `⏭ Pominięto — produkt poza procesem (wykluczony${reason ? `: ${reason}` : ""})`,
             details: {} as never,
           } as never);
         } catch { /* logging must never break the worker */ }

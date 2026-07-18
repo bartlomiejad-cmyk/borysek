@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { filterImageUrls, sanitizeProductDescription } from "./source-cleanup";
+import { applyEligibilityFilter } from "./eligibility";
 
 /**
  * Marketplace / aggregator domains we never want as scraped sources.
@@ -103,10 +104,14 @@ export const startFirecrawlDiscovery = createServerFn({ method: "POST" })
     // The old "skip if search_results row exists" predicate is removed:
     // it disagreed with the pipeline stage bar for products whose sources
     // had been cleared.
-    const { data: products, error } = await supabase
-      .from("source_products")
-      .select("id, nazwa, pipeline_status")
-      .eq("project_id", data.projectId);
+    // Skip excluded rows (auto_no_sources, manual, variant) and row_kind='variant'
+    // via the shared eligibility predicate — variants never consume discovery budget.
+    const { data: products, error } = await applyEligibilityFilter(
+      supabase
+        .from("source_products")
+        .select("id, nazwa, pipeline_status")
+        .eq("project_id", data.projectId),
+    );
     if (error) throw new Error(error.message);
 
     const restrict = data.productIds ? new Set(data.productIds) : null;

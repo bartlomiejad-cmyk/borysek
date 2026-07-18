@@ -9,6 +9,7 @@ import {
 } from "./source-cleanup";
 import { llmCleanDescription, type CleaningMeta } from "./llm-cleaner.server";
 import { advancePipelineStatus } from "./pipeline-status";
+import { applyEligibilityFilter } from "./eligibility";
 
 const LLM_CLEAN_MIN_CHARS = 200;
 
@@ -362,11 +363,16 @@ export const runMatching = createServerFn({ method: "POST" })
       ? (rawSettings.trusted_domains as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
       : [];
 
+    // Exclude rows outside the pipeline (excluded=true or row_kind='variant')
+    // via the shared eligibility predicate. Locked products are still loaded
+    // — manual_lock is a downstream skip inside the scorer, not upstream.
     const [{ data: products }, { data: searches }] = await Promise.all([
-      supabase
-        .from("source_products")
-        .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
-        .eq("project_id", data.projectId),
+      applyEligibilityFilter(
+        supabase
+          .from("source_products")
+          .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
+          .eq("project_id", data.projectId),
+      ),
       supabase
         .from("search_results")
         .select("term, organic_urls")
@@ -981,10 +987,22 @@ export async function scoreAndCapForProduct(
 
   const { data: productRow } = await supabaseAdmin
     .from("source_products")
-    .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
+    .select("id, nazwa, ean, category, raw, manual_lock, matching_mode, excluded, excluded_reason, row_kind")
     .eq("id", productId)
     .single();
   if (!productRow) return { count: 0, strong: 0 };
+  // Never rescore variants or excluded rows (manual/variant). auto_no_sources
+  // rows are auto-cleared by explicit re-runs upstream — safe to rescore.
+  {
+    const r = productRow as {
+      row_kind?: string | null;
+      excluded?: boolean | null;
+      excluded_reason?: string | null;
+    };
+    const isVariant = (r.row_kind ?? "main") === "variant";
+    const isBlockedExcluded = r.excluded === true && r.excluded_reason !== "auto_no_sources";
+    if (isVariant || isBlockedExcluded) return { count: 0, strong: 0 };
+  }
   if ((productRow as { manual_lock?: boolean }).manual_lock && !opts?.force) {
     // Manually locked — do not rescore/overwrite picked_urls.
     return { count: 0, strong: 0 };
