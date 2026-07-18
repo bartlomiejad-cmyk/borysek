@@ -103,6 +103,7 @@ type DiscoveryUsage = {
   skipped_fc_searches?: number;
   fc_skipped_ean?: number;
   fc_skipped_apify_empty?: number;
+  fc_ean_fallback?: number;
   apify_quota_exhausted?: number;
   variant_errors?: number;
   dedup_dropped_host?: number;
