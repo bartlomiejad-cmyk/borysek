@@ -109,6 +109,11 @@ type DiscoveryUsage = {
   dedup_dropped_host?: number;
   dedup_dropped_marketplace?: number;
   preselect_kept?: number;
+  // Paid worker telemetry — additive per-call counters (RMW-safe).
+  // Bumped from runRegenerateMedia / runPimVisualization (FAL) and
+  // runGenerateGoldenRecord / runPimAudit (LLM).
+  fal_renders?: number;
+  llm_calls?: number;
 };
 
 async function bumpJobUsage(bulkJobId: string | undefined, patch: DiscoveryUsage): Promise<void> {
