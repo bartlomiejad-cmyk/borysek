@@ -1716,6 +1716,19 @@ function ProjectPage() {
                           );
                         })()}
                         {(() => {
+                          const err = ((p as { error?: string | null }).error ?? "").trim();
+                          if (!err) return null;
+                          return (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0 border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300"
+                              title={err}
+                            >
+                              ⚠ Błąd regeneracji
+                            </Badge>
+                          );
+                        })()}
+                        {(() => {
                           const rs = ((p as { review_status?: string | null }).review_status ?? "NONE") as string;
                           if (rs !== "APPROVED") return null;
                           return (
