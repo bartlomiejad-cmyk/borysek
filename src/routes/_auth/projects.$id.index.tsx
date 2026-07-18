@@ -702,6 +702,7 @@ function ProjectPage() {
     const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
     const targets = source.filter(
       (p) =>
+        isPipelineEligible(p as { excluded?: boolean | null; row_kind?: string | null }) &&
         !!(p as { enrichment_id?: string | null }).enrichment_id &&
         (p as { regenerated_main_image?: string | null }).regenerated_main_image !== "__imported__",
     );
@@ -733,7 +734,9 @@ function ProjectPage() {
     const idSet = opts.productIds ? new Set(opts.productIds) : null;
     const source = idSet ? products.filter((p) => idSet.has(p.id)) : filtered;
     const targets = source.filter(
-      (p) => !!(p as { enrichment_id?: string | null }).enrichment_id,
+      (p) =>
+        isPipelineEligible(p as { excluded?: boolean | null; row_kind?: string | null }) &&
+        !!(p as { enrichment_id?: string | null }).enrichment_id,
     );
     if (!targets.length) {
       toast.info("Brak produktów z dopasowaniem — najpierw uruchom Dopasowanie.");
