@@ -2354,7 +2354,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   const { data: product, error: pErr } = await supabaseAdmin
     .from("source_products")
-    .select("id, project_id, nazwa, kod, ean, raw")
+    .select("id, project_id, nazwa, kod, ean, raw, matching_mode")
     .eq("id", productId)
     .single();
   if (pErr || !product) throw new Error(pErr?.message ?? "Product not found");
@@ -2627,9 +2627,12 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       // Preserve original SERP order for the AI (its "position matters" heuristic).
       const orderedPre = preFiltered.slice().sort((a, b) => a.i - b.i);
       const capped = orderedPre.slice(0, 40);
+      const mode: "strict" | "compatible" =
+        (product as { matching_mode?: string | null }).matching_mode === "compatible" ? "compatible" : "strict";
       const preselect = await preselectSerpResults({
         product: { nazwa, ean: product.ean ?? null, producent, kod_producenta: mpn },
         items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
+        mode,
       });
       const byI = new Map(capped.map((f) => [f.i, f]));
       type Pick = { url: string; why?: string; vi: number; i: number };
