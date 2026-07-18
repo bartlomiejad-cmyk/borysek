@@ -1299,6 +1299,28 @@ export async function runRegenerateMedia(
   if (!product) throw new Error("Product not found");
   const productLocked = !!(product as { manual_lock?: boolean }).manual_lock;
 
+  // Client-owned (imported) photos are the source of truth. They carry the
+  // sentinel regenerated_main_image = "__imported__" and are NOT protected by
+  // manual_lock, so media regeneration would otherwise overwrite the customer's
+  // pinned main image and destroy the sentinel. Skip such products entirely —
+  // never run FAL, never touch pinned_main_url. Mirrors runGenerateGoldenRecord's
+  // early skip precedent (line ~852).
+  const { data: ownEnr } = await supabaseAdmin
+    .from("enrichments")
+    .select("regenerated_main_image")
+    .eq("source_product_id", product.id)
+    .maybeSingle();
+  if (
+    (ownEnr as { regenerated_main_image?: string | null } | null)?.regenerated_main_image ===
+    "__imported__"
+  ) {
+    await emit(ctx, {
+      level: "warn",
+      message: `⏭ Pominięte (zdjęcie klienta / import): ${productId.slice(0, 8)} — regeneracja mediów`,
+    });
+    return;
+  }
+
   const baseSettings = await loadMediaSettings(product.project_id);
   const settings = {
     ...baseSettings,
