@@ -19,8 +19,8 @@ export type ProductLike = {
 export type QueryStrategy = "EAN" | "NAZWA" | "HYBRID";
 
 export type QueryVariant = {
-  /** Krótki identyfikator wariantu: "A" | "B" | "C" | "D". */
-  kind: "A" | "B" | "C" | "D";
+  /** Krótki identyfikator wariantu: "A" | "B" | "C" | "D" | "E". */
+  kind: "A" | "B" | "C" | "D" | "E";
   query: string;
 };
 
@@ -87,6 +87,14 @@ export function buildQueryVariants(
   // A: sam EAN.
   if (ean) candidates.push({ kind: "A", query: ean });
 
+  // E: EAN + nazwa. Główny nośnik tożsamości — aktor Apify (scraperlink)
+  // zwraca 0 wyników dla samego numerycznego EAN, więc łączymy go z nazwą,
+  // żeby Google potraktował zapytanie jako tekstowe. Umieszczamy WCZEŚNIE,
+  // aby cap nie wypchnął go poza listę.
+  if (ean && nazwa) {
+    candidates.push({ kind: "E", query: `${ean} ${nazwa}` });
+  }
+
   // C: producent + MPN.
   if (mpn && producent) {
     candidates.push({ kind: "C", query: `${producent} ${mpn}` });
@@ -119,7 +127,7 @@ export function buildQueryVariants(
     if (!key || seen.has(key)) continue;
     seen.add(key);
     out.push({ ...c, query: c.query.replace(/\s+/g, " ").trim() });
-    if (out.length >= 3) break;
+    if (out.length >= 4) break;
   }
   return out;
 }
