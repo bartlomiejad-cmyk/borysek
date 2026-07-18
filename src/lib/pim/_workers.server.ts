@@ -997,7 +997,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
     const parsed = await callGatewayJson(apiKey, GOLDEN_MODEL, [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
-    ]);
+    ], ctx?.bulkJobId);
     // Model sometimes returns `features` as strings ("Kolor: biały") instead
     // of {key,value} objects. Coerce before Zod validation so a stylistic
     // shape mismatch does not fail the whole generation.
@@ -1038,7 +1038,7 @@ export async function runGenerateGoldenRecord(productId: string, mode: "all" | "
       const shortened = await callGatewayJson(apiKey, GOLDEN_MODEL, [
         { role: "system", content: SHORTEN_META_SYSTEM_PROMPT },
         { role: "user", content: text },
-      ]);
+      ], ctx?.bulkJobId);
       return (shortened as { meta_description?: string }).meta_description ?? "";
     });
     const dataSufficiency = out.data_sufficiency ?? null;
