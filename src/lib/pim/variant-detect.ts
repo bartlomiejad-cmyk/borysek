@@ -29,9 +29,6 @@ export const NAME_SIZE_LABEL_PATTERNS: RegExp[] = [
   /\brozmiar\s*[A-Z0-9]{1,4}\b/gi,
 ];
 
-/** Regex for kod suffixes like "_40", "-42", "_40_bez podnoska". */
-export const KOD_VARIANT_SUFFIX = /[_\-][A-Za-z0-9]{1,6}(?:[_\-][^_\-\s]{1,32}){0,2}$/;
-
 export type VariantRowInput = {
   id: string;
   nazwa: string | null;
@@ -98,19 +95,20 @@ export const stripKodVariantSuffix = (
 ): { base: string; suffix: string | null } => {
   if (!raw) return { base: "", suffix: null };
   const s = String(raw).trim();
-  const m = s.match(KOD_VARIANT_SUFFIX);
-  if (!m) return { base: s, suffix: null };
-  // Require the stripped tail to include a size-like or short token —
-  // otherwise every code with a dash gets truncated.
-  const tail = m[0];
-  const sizeLike = new RegExp(
-    `[_\\-](?:${[...FOOTWEAR_SIZES, ...APPAREL_SIZES].join("|")})(?:[_\\-]|$)`,
-    "i",
-  );
-  if (!sizeLike.test(tail)) return { base: s, suffix: null };
-  const base = s.slice(0, s.length - tail.length).trim();
+  // Find a size token that follows a _ or - delimiter ANYWHERE in the code,
+  // not only at the very end. This catches sizes embedded mid-code with
+  // trailing free-text (spaces allowed), e.g. "201 OB_41_bez podnoska" →
+  // base "201 OB", suffix "_41_bez podnoska". The previous end-anchored
+  // regex missed these because the trailing text contained a space and never
+  // reached the "$" anchor. Control case "117 S3 HRO_40" still yields
+  // base "117 S3 HRO", suffix "_40".
+  const sizeAlt = [...FOOTWEAR_SIZES, ...APPAREL_SIZES].join("|");
+  const embedded = new RegExp(`[_\\-](?:${sizeAlt})(?:[_\\-]|$)`, "i");
+  const m = s.match(embedded);
+  if (!m || m.index === undefined) return { base: s, suffix: null };
+  const base = s.slice(0, m.index).trim();
   if (!base) return { base: s, suffix: null };
-  return { base, suffix: tail };
+  return { base, suffix: s.slice(m.index) };
 };
 
 /**
@@ -137,9 +135,8 @@ export const detectVariantGroupsPhase1 = (
     const { base: kodBase, suffix: kodSuffix } = stripKodVariantSuffix(r.kod);
     const stripped = nameTokens.length > 0 || !!kodSuffix;
 
-    // Key on nameBase (fallback kodBase) — matches human intuition and
-    // survives kods with no consistent naming.
-    const key = `${nameBaseNorm}|${kodBase.toLowerCase()}`;
+    // Key on nameBase; fall back to kodBase only when the name has no base.
+    const key = nameBaseNorm || kodBase.toLowerCase();
     if (!nameBaseNorm && !kodBase) return; // completely empty row
     let b = buckets.get(key);
     if (!b) {
