@@ -56,7 +56,9 @@ export function DetectVariantsDialog({ projectId, open, onOpenChange, productsBy
             key: p.parentId ?? p.variantIds[0] ?? `g${idx}`,
             proposal: p,
             enabled: p.source === "phase1", // AI proposals unchecked by default
-            createSyntheticParent: false,
+            // Default to creating a synthetic parent when the group has no main row,
+            // mirroring the auto path (variant-detect.functions.ts). Prevents silent orphaning.
+            createSyntheticParent: p.missingParent,
             ejected: new Set(),
           })),
         );
@@ -89,6 +91,19 @@ export function DetectVariantsDialog({ projectId, open, onOpenChange, productsBy
   };
 
   const apply = async () => {
+    const orphaning = groups.filter(
+      (g) =>
+        g.enabled &&
+        g.proposal.missingParent &&
+        !g.createSyntheticParent &&
+        g.proposal.variantIds.some((id) => !g.ejected.has(id)),
+    );
+    if (orphaning.length > 0) {
+      const ok = window.confirm(
+        `Ta grupa nie ma produktu głównego — warianty zostaną osierocone (${orphaning.length} ${orphaning.length === 1 ? "grupa" : "grup"}). Kontynuować bez tworzenia rodzica?`,
+      );
+      if (!ok) return;
+    }
     const payload = groups
       .filter((g) => g.enabled)
       .map((g) => ({
