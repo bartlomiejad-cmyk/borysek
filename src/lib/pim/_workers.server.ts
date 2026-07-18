@@ -1345,7 +1345,7 @@ export async function runRegenerateMedia(
 
   const { data: enrichment } = await supabaseAdmin
     .from("enrichments")
-    .select("id, picked_urls, image_meta, image_scores, media_classification, ai_gallery_urls")
+    .select("id, picked_urls, image_meta, image_scores, media_classification, ai_gallery_urls, regenerated_main_image, pinned_main_url")
     .eq("source_product_id", product.id)
     .maybeSingle();
   if (!enrichment) throw new Error("Brak enrichment");
