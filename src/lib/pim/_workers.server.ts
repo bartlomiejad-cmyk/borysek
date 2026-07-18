@@ -535,7 +535,7 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function callFal(path: string, body: unknown, apiKey: string): Promise<FalResp> {
+async function callFal(path: string, body: unknown, apiKey: string, bulkJobId?: string): Promise<FalResp> {
   const res = await fetch(`${FAL_BASE}/${path}`, {
     method: "POST",
     headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
@@ -550,6 +550,8 @@ async function callFal(path: string, body: unknown, apiKey: string): Promise<Fal
     err.status = res.status;
     throw err;
   }
+  // Additive FAL render telemetry — only recorded when caller passed a bulkJobId.
+  if (bulkJobId) void bumpJobUsage(bulkJobId, { fal_renders: 1 });
   return (await res.json()) as FalResp;
 }
 
