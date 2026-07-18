@@ -32,6 +32,7 @@ import {
   type ExplicitCsvMapping,
 } from "@/lib/pim/parsers";
 import { ingestSourceProducts, clearProjectData } from "@/lib/pim/ingest.functions";
+import { autoDetectVariantsPhase1 } from "@/lib/pim/variant-detect.functions";
 import { friendlyError } from "@/lib/utils";
 
 type Field =
@@ -95,6 +96,7 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
   const qc = useQueryClient();
   const ingestFn = useServerFn(ingestSourceProducts);
   const clearFn = useServerFn(clearProjectData);
+  const autoDetectFn = useServerFn(autoDetectVariantsPhase1);
 
   const headers = csv?.headers ?? [];
   const previewRows = csv?.rows.slice(0, 20) ?? [];
@@ -253,10 +255,33 @@ export function ImportCsvDialog({ projectId, count, defaults, onDone }: Props) {
         mains += (res as { mains?: number }).mains ?? 0;
         variants += (res as { variants?: number }).variants ?? 0;
       }
+      // Auto-run Phase 1 (deterministic) pattern-based variant detection when
+      // the file had NO hierarchy columns mapped. When any of these columns
+      // are mapped, ingestSourceProducts already classified from them — don't
+      // double-process. Phase 2 (AI) is NOT auto-applied; it stays behind the
+      // manual DetectVariantsDialog with preview/confirm.
+      let autoNote = "";
+      if (
+        mapping.type_column === SKIP &&
+        mapping.parent_sku_column === SKIP &&
+        mapping.children_column === SKIP
+      ) {
+        try {
+          const res = (await autoDetectFn({ data: { projectId } })) as {
+            applied?: number;
+          };
+          const applied = res?.applied ?? 0;
+          if (applied > 0) autoNote = `, pogrupowano ${applied} wariantów`;
+        } catch (e) {
+          toast.info(
+            `Import ok, ale automatyczne wykrywanie wariantów nie powiodło się: ${friendlyError(e, "")}`,
+          );
+        }
+      }
       toast.success(
         variants > 0
-          ? `Wczytano ${mains} produktów głównych i ${variants} wariantów`
-          : `Wczytano ${rows.length} produktów`,
+          ? `Wczytano ${mains} produktów głównych i ${variants} wariantów${autoNote}`
+          : `Wczytano ${rows.length} produktów${autoNote}`,
       );
       qc.invalidateQueries({ queryKey: ["project", projectId] });
       onDone?.();
