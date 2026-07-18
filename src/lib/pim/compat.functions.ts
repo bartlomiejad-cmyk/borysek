@@ -61,7 +61,17 @@ export const rerunMatchingForProduct = createServerFn({ method: "POST" })
       })
       .parse(i),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: product, error: pErr } = await supabase
+      .from("source_products")
+      .select("id, project_id")
+      .eq("id", data.productId)
+      .single();
+    if (pErr || !product) throw new Error("Produkt nie znaleziony lub brak dostępu");
+    if ((product as { project_id: string }).project_id !== data.projectId) {
+      throw new Error("Produkt nie należy do projektu");
+    }
     const apiKey = process.env.LOVABLE_API_KEY;
     const res = await scoreAndCapForProduct(data.projectId, data.productId, apiKey, {
       force: true,
