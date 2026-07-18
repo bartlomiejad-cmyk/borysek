@@ -568,6 +568,7 @@ async function callFal(path: string, body: unknown, apiKey: string, bulkJobId?: 
 export async function flattenToWhiteBackground(
   publicImageUrl: string,
   apiKey: string,
+  bulkJobId?: string,
 ): Promise<Uint8Array> {
   // Step 1 — background removal. bria/background/remove returns { image: { url } }
   // with a transparent PNG. If it errors, fall back to imageutils/rembg.
@@ -577,6 +578,7 @@ export async function flattenToWhiteBackground(
       "fal-ai/bria/background/remove",
       { image_url: publicImageUrl },
       apiKey,
+      bulkJobId,
     );
     cutoutUrl = removed.image?.url ?? removed.images?.[0]?.url;
   } catch (e) {
@@ -587,6 +589,7 @@ export async function flattenToWhiteBackground(
       "fal-ai/imageutils/rembg",
       { image_url: publicImageUrl },
       apiKey,
+      bulkJobId,
     );
     cutoutUrl = removed2.image?.url ?? removed2.images?.[0]?.url;
   }
