@@ -1205,7 +1205,7 @@ async function collectScrapedUrls(projectId: string, pickedUrls: string[], inclu
   return out;
 }
 
-async function classifyOneImage(apiKey: string, url: string, a: string, b: string | null, timeoutMs = 15000): Promise<Classification> {
+async function classifyOneImage(apiKey: string, url: string, a: string, b: string | null, timeoutMs = 15000, bulkJobId?: string): Promise<Classification> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1236,6 +1236,7 @@ async function classifyOneImage(apiKey: string, url: string, a: string, b: strin
       }),
     });
     if (!res.ok) throw new Error(`classify ${res.status}`);
+    if (bulkJobId) void bumpJobUsage(bulkJobId, { llm_calls: 1 });
     const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = j.choices?.[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as { has_a?: boolean; has_b?: boolean; is_trash?: boolean };
@@ -1250,7 +1251,7 @@ async function classifyOneImage(apiKey: string, url: string, a: string, b: strin
   }
 }
 
-async function classifyBatch(apiKey: string, urls: string[], a: string, b: string | null): Promise<Record<string, Classification>> {
+async function classifyBatch(apiKey: string, urls: string[], a: string, b: string | null, bulkJobId?: string): Promise<Record<string, Classification>> {
   const out: Record<string, Classification> = {};
   let idx = 0;
   const worker = async () => {
@@ -1258,7 +1259,7 @@ async function classifyBatch(apiKey: string, urls: string[], a: string, b: strin
       const myIdx = idx++;
       const u = urls[myIdx];
       try {
-        out[u] = await classifyOneImage(apiKey, u, a, b);
+        out[u] = await classifyOneImage(apiKey, u, a, b, 15000, bulkJobId);
       } catch {
         out[u] = { has_a: false, has_b: false, is_trash: false, scored_at: new Date().toISOString() };
       }
