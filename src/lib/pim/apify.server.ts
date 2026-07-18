@@ -62,7 +62,7 @@ export type SerpOpts = {
   gl?: string;        // ISO country for localized results, default "PL"
   hl?: string;        // Google UI language, default "pl"
   lr?: string;        // optional language restriction (e.g. "lang_pl")
-  limit?: number;     // 10-100, default 100
+  limit?: number;     // 10-100, default 10
   timeoutMs?: number; // default 60_000
 };
 
@@ -182,7 +182,7 @@ export async function runSerpSearch(
 
   const gl = (opts.gl ?? "PL").toUpperCase();
   const hl = (opts.hl ?? "pl").toLowerCase();
-  const limit = Math.max(10, Math.min(100, opts.limit ?? 100));
+  const limit = Math.max(10, Math.min(100, opts.limit ?? 10));
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
   // Numeric-sample capture is per-call; guard against parallel writes.
