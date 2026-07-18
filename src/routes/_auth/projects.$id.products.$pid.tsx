@@ -864,7 +864,17 @@ function ProductDetail() {
                   )}
                   <Button
                     size="sm"
-                    disabled={!enrichment || !mainUrl || regenMut.isPending}
+                    disabled={
+                      !enrichment ||
+                      !mainUrl ||
+                      regenMut.isPending ||
+                      (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image === "__imported__"
+                    }
+                    title={
+                      (enrichment as { regenerated_main_image?: string | null } | null)?.regenerated_main_image === "__imported__"
+                        ? "Zdjęcie klienta (import) — regeneracja zablokowana"
+                        : undefined
+                    }
                     onClick={() => {
                       if (!enrichment || !mainUrl) return;
                       regenMut.mutate({

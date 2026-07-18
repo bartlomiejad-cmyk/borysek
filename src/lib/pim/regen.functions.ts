@@ -140,6 +140,27 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
       }
     } catch { /* keep original */ }
 
+    // Guard: client-owned photos ("__imported__" sentinel) and manual_lock.
+    // Refuse regeneration for imports (no FAL spend, no DB write); gate the
+    // pinned_main_url write on !manual_lock so curated pins survive.
+    const { data: enrGuard, error: enrGuardErr } = await context.supabase
+      .from("enrichments")
+      .select("regenerated_main_image, source_product_id")
+      .eq("id", data.enrichmentId)
+      .maybeSingle();
+    if (enrGuardErr) throw new Error(enrGuardErr.message);
+    if (!enrGuard) throw new Error("Nie znaleziono enrichmenta");
+    if ((enrGuard as { regenerated_main_image?: string | null }).regenerated_main_image === "__imported__") {
+      throw new Error("Pominięto: to zdjęcie klienta (import) — chronione przed regeneracją.");
+    }
+    const productIdGuard = (enrGuard as { source_product_id: string }).source_product_id;
+    const { data: prodGuard } = await context.supabase
+      .from("source_products")
+      .select("manual_lock")
+      .eq("id", productIdGuard)
+      .maybeSingle();
+    const locked = !!(prodGuard as { manual_lock?: boolean } | null)?.manual_lock;
+
     // Step 1 — bytedance/seedream v4 edit: biały seamless background,
     // miękki cień, produkt ~70% kadru, kwadrat 2560x2560.
     const sourceForFal = await prepareFalSourceImage(data.enrichmentId, sourceUrl);
@@ -209,10 +230,11 @@ export const regenerateMainImage = createServerFn({ method: "POST" })
 
     const { error: dbErr } = await context.supabase
       .from("enrichments")
-      .update({
-        regenerated_main_image: publicUrl,
-        pinned_main_url: publicUrl,
-      } as never)
+      .update((() => {
+        const patch: Record<string, unknown> = { regenerated_main_image: publicUrl };
+        if (!locked) patch.pinned_main_url = publicUrl;
+        return patch;
+      })() as never)
       .eq("id", data.enrichmentId);
     if (dbErr) throw new Error(dbErr.message);
 

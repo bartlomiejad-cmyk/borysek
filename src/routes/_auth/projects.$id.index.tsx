@@ -1812,10 +1812,15 @@ function ProjectPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          title="Regeneruj tło"
+                          title={
+                            (p as { regenerated_main_image?: string | null }).regenerated_main_image === "__imported__"
+                              ? "Zdjęcie klienta (import) — regeneracja zablokowana"
+                              : "Regeneruj tło"
+                          }
                           disabled={
                             !((p as { enrichment_id?: string | null }).enrichment_id) ||
-                            !(((p as { pinned_main_url?: string | null }).pinned_main_url) || (p.images ?? [])[0])
+                            !(((p as { pinned_main_url?: string | null }).pinned_main_url) || (p.images ?? [])[0]) ||
+                            ((p as { regenerated_main_image?: string | null }).regenerated_main_image === "__imported__")
                           }
                           onClick={async () => {
                             const enId = (p as { enrichment_id?: string | null }).enrichment_id;
