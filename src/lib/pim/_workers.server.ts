@@ -5684,6 +5684,7 @@ export async function runPimAudit(productId: string, ctx?: WorkerCtx): Promise<P
       if (res.status === 429) throw new Error("RATE_LIMIT");
       if (res.status === 402) throw new Error("CREDITS_EXHAUSTED");
       if (!res.ok) throw new Error(`AI gateway error ${res.status}: ${await res.text()}`);
+      if (ctx?.bulkJobId) void bumpJobUsage(ctx.bulkJobId, { llm_calls: 1 });
       const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       const raw = json.choices?.[0]?.message?.content ?? "{}";
       const parsed = JSON.parse(raw) as Partial<AuditLlmResult>;
