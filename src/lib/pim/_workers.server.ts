@@ -103,6 +103,7 @@ type DiscoveryUsage = {
   skipped_fc_searches?: number;
   fc_skipped_ean?: number;
   fc_skipped_apify_empty?: number;
+  fc_ean_fallback?: number;
   apify_quota_exhausted?: number;
   variant_errors?: number;
   dedup_dropped_host?: number;
@@ -2721,16 +2722,40 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       //     is "error" or "quota_exhausted". Status "empty" (Google truly
       //     had 0 results) does not trigger a fallback.
       if (searchProvider === "both") {
+        // EAN variant (kind "A", bare numeric query): if Apify returned
+        // results we skip FC (no double-pay). If Apify came back EMPTY for
+        // a bare-numeric query, the scraperlink actor swallowed it — fall
+        // back to Firecrawl instead of continuing with 0 hits.
+        const isBareNumeric = /^\d+$/.test(v.query);
         if (v.kind === "A") {
-          usage.fc_skipped_ean = (usage.fc_skipped_ean ?? 0) + 1;
-          usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
-          await emit(ctx, {
-            level: "info",
-            message: `   ⏭ ${nazwa} — Firecrawl search [A] pominięty (wariant EAN, Apify: ${apifyCount})`,
-          });
-          continue;
+          if (apifyStatus === "ok" && apifyCount > 0) {
+            usage.fc_skipped_ean = (usage.fc_skipped_ean ?? 0) + 1;
+            usage.skipped_fc_searches = (usage.skipped_fc_searches ?? 0) + 1;
+            await emit(ctx, {
+              level: "info",
+              message: `   ⏭ ${nazwa} — Firecrawl search [A] pominięty (wariant EAN, Apify: ${apifyCount})`,
+            });
+            continue;
+          }
+          if (isBareNumeric && (apifyStatus === "empty" || apifyStatus === "none" || apifyCount === 0)) {
+            usage.fc_ean_fallback = (usage.fc_ean_fallback ?? 0) + 1;
+            await emit(ctx, {
+              level: "info",
+              message: `   ↩ ${nazwa} — Firecrawl fallback [A] "${v.query}" (Apify: ${apifyStatus})`,
+            });
+            await logProductEvent(supabaseAdmin, {
+              projectId: product.project_id,
+              productId: product.id,
+              kind: "discovery_search",
+              message: `Firecrawl fallback dla numerycznego EAN "${v.query}" (Apify: ${apifyStatus})`,
+              meta: { fallback_fc: true, variant: "A", query: v.query, apify_status: apifyStatus, apify_count: apifyCount },
+            });
+            // fall through to firecrawl.search below (skip apifyUsable gate)
+          } else {
+            // error / quota_exhausted → fall through to generic gate below.
+          }
         }
-        const apifyUsable = apifyStatus === "ok" || apifyStatus === "empty";
+        const apifyUsable = v.kind !== "A" && (apifyStatus === "ok" || apifyStatus === "empty");
         if (apifyUsable) {
           if (apifyStatus === "empty") {
             usage.fc_skipped_apify_empty = (usage.fc_skipped_apify_empty ?? 0) + 1;
