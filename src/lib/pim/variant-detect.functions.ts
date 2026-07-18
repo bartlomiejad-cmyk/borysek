@@ -225,102 +225,56 @@ export const applyVariantGroups = createServerFn({ method: "POST" })
   }).parse(i))
   .handler(async ({ data, context }): Promise<{ variants: number; syntheticParents: number; groups: number }> => {
     const { supabase } = context;
-    const nowIso = new Date().toISOString();
-    let totalVariants = 0;
-    let syntheticParents = 0;
-
-    // Load the ids we care about for validation and to fetch a variant row
-    // when synthesizing a parent.
-    const allIds = Array.from(
-      new Set(data.groups.flatMap((g) => [...(g.parentId ? [g.parentId] : []), ...g.variantIds])),
-    );
-    const { data: rows, error: readErr } = await (
-      supabase.from("source_products") as unknown as {
-        select: (s: string) => { in: (c: string, v: string[]) => Promise<{ data: Array<{ id: string; kod: string | null; nazwa: string | null; ean: string | null; category: string | null; raw: Record<string, unknown> | null; manual_lock: boolean | null }> | null; error: { message: string } | null }> };
+    // Atomic apply via SECURITY DEFINER RPC (per-project advisory lock).
+    // Mirrors the previous TS semantics byte-for-byte, but rolls back the
+    // whole batch on any mid-loop failure. See migration
+    // 20260718170000_apply_variant_groups_tx.sql.
+    const { data: rpcData, error: rpcErr } = await (
+      supabase as unknown as {
+        rpc: (
+          name: string,
+          args: Record<string, unknown>,
+        ) => Promise<{ data: unknown; error: { message: string } | null }>;
       }
-    ).select("id, kod, nazwa, ean, category, raw, manual_lock").in("id", allIds);
-    if (readErr) throw new Error(readErr.message);
-    const rowById = new Map<string, { id: string; kod: string | null; nazwa: string | null; ean: string | null; category: string | null; raw: Record<string, unknown> | null; manual_lock: boolean | null }>();
-    for (const r of rows ?? []) rowById.set(r.id, r);
+    ).rpc("apply_variant_groups_tx", {
+      p_project_id: data.projectId,
+      p_groups: data.groups,
+    });
+    if (rpcErr) throw new Error(rpcErr.message);
 
-    for (const g of data.groups) {
-      // Determine parent kod for parent_sku linkage.
-      let parentKod: string | null = null;
-      let parentId: string | null = g.parentId;
-      const parentRow = parentId ? rowById.get(parentId) : null;
-      if (parentRow?.manual_lock) continue; // do not touch locked parent
+    const out = (rpcData ?? {}) as {
+      variants?: number;
+      syntheticParents?: number;
+      groups?: number;
+      variantIds?: string[];
+    };
+    const variants = Number(out.variants ?? 0);
+    const syntheticParents = Number(out.syntheticParents ?? 0);
+    const affected = Array.isArray(out.variantIds) ? out.variantIds : [];
 
-      if (parentRow) {
-        parentKod = parentRow.kod ?? g.baseKod ?? null;
-      } else if (g.createSyntheticParent && g.variantIds.length > 0) {
-        // Clone the first variant into a fresh main product.
-        const src = rowById.get(g.variantIds[0]);
-        if (!src) continue;
-        const insertPayload: Record<string, unknown> = {
-          project_id: data.projectId,
-          ext_id: null,
-          nazwa: g.baseName || src.nazwa,
-          kod: g.baseKod ?? null,
-          ean: null,
-          category: src.category,
-          row_kind: "main",
-          parent_sku: null,
-          raw: { ...(src.raw ?? {}), _synthetic_parent: true, _synthetic_from: src.id },
-        };
-        const { data: inserted, error: insErr } = await (
-          supabase.from("source_products") as unknown as {
-            insert: (p: unknown) => { select: (s: string) => { single: () => Promise<{ data: { id: string; kod: string | null } | null; error: { message: string } | null }> } };
-          }
-        ).insert(insertPayload).select("id, kod").single();
-        if (insErr || !inserted) throw new Error(insErr?.message ?? "insert failed");
-        parentId = inserted.id;
-        parentKod = inserted.kod ?? g.baseKod ?? null;
-        syntheticParents++;
-        // Seed an enrichment row so downstream pipeline picks it up.
-        await (supabase.from("enrichments") as unknown as {
-          upsert: (p: unknown, o: unknown) => Promise<{ error: { message: string } | null }>;
-        }).upsert(
-          { source_product_id: parentId, project_id: data.projectId, status: "PENDING", match_type: "NO_MATCH" } as unknown,
-          { onConflict: "source_product_id", ignoreDuplicates: true },
-        );
-      } else {
-        // Group with no main row and user did not opt to synthesize —
-        // still mark all variants; parent_sku left null.
-        parentKod = g.baseKod ?? null;
+    // Best-effort per-variant events (post-commit; failures never
+    // roll back the classification).
+    try {
+      const { logProductEvent } = await import("./product-events.server");
+      const parentByVariant = new Map<string, string | null>();
+      for (const g of data.groups) {
+        for (const vid of g.variantIds) {
+          parentByVariant.set(vid, g.baseKod ?? null);
+        }
       }
-
-      // Apply variant classification.
-      const patch = {
-        row_kind: "variant",
-        parent_sku: parentKod,
-        excluded: true,
-        excluded_reason: "variant",
-        excluded_at: nowIso,
-      };
-      for (const vid of g.variantIds) {
-        const vrow = rowById.get(vid);
-        if (!vrow || vrow.manual_lock) continue;
-        const { error: upErr } = await (
-          supabase.from("source_products") as unknown as {
-            update: (p: unknown) => { eq: (c: string, v: string) => Promise<{ error: { message: string } | null }> };
-          }
-        ).update(patch as unknown).eq("id", vid);
-        if (upErr) throw new Error(upErr.message);
-        totalVariants++;
-        try {
-          const { logProductEvent } = await import("./product-events.server");
-          await logProductEvent(supabase as never, {
-            projectId: data.projectId,
-            productId: vid,
-            kind: "manual_edit",
-            message: `Reklasyfikacja (wzorzec): wariant${parentKod ? ` (parent_sku=${parentKod})` : ""}`,
-            meta: { action: "variant_detect_v2_apply", parent_sku: parentKod, source: "user_confirmed" },
-          });
-        } catch { /* best-effort */ }
+      for (const vid of affected) {
+        const parentKod = parentByVariant.get(vid) ?? null;
+        await logProductEvent(supabase as never, {
+          projectId: data.projectId,
+          productId: vid,
+          kind: "manual_edit",
+          message: `Reklasyfikacja (wzorzec): wariant${parentKod ? ` (parent_sku=${parentKod})` : ""}`,
+          meta: { action: "variant_detect_v2_apply", parent_sku: parentKod, source: "user_confirmed" },
+        });
       }
-    }
+    } catch { /* best-effort */ }
 
-    return { variants: totalVariants, syntheticParents, groups: data.groups.length };
+    return { variants, syntheticParents, groups: data.groups.length };
   });
 
 /**
