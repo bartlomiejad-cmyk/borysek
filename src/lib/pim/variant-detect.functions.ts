@@ -217,6 +217,57 @@ const groupSchema = z.object({
   createSyntheticParent: z.boolean().default(false),
 });
 
+/**
+ * Auto-apply Phase 1 (deterministic) variant grouping for a project.
+ *
+ * Deliberate semantic decision: Phase 1 groups are auto-APPLIED without a
+ * preview because the rules are deterministic (name/kod token stripping) and
+ * the whole point is to prevent 3× discovery/scrape cost on ungrouped size
+ * runs imported from files without hierarchy columns. Phase 2 (LLM assist)
+ * is NOT auto-applied — it stays behind the manual DetectVariantsDialog
+ * with its preview/confirm.
+ *
+ * Idempotent by construction: loadCandidates filters out row_kind='variant'
+ * and manual_lock rows, so re-runs after successful classification are no-ops.
+ * Applies through the same transactional RPC (apply_variant_groups_tx).
+ */
+export const autoDetectVariantsPhase1 = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ projectId: z.string().uuid() }).parse(i))
+  .handler(async ({ data, context }): Promise<{ applied: number; groups: number }> => {
+    const { supabase } = context;
+    const rows = await loadCandidates(supabase as never, data.projectId);
+    if (rows.length < 2) return { applied: 0, groups: 0 };
+    const inputs: VariantRowInput[] = rows.map((r) => ({ id: r.id, nazwa: r.nazwa, kod: r.kod }));
+    const { groups } = detectVariantGroupsPhase1(inputs);
+    const proposals = asProposals(groups, rows, "phase1");
+    const applyGroups = proposals
+      .map((p) => ({
+        parentId: p.parentId,
+        variantIds: p.variantIds,
+        baseName: p.baseName,
+        baseKod: p.baseKod,
+        createSyntheticParent: p.missingParent,
+      }))
+      .filter((g) => g.variantIds.length >= 1);
+    if (!applyGroups.length) return { applied: 0, groups: 0 };
+
+    const { data: rpcData, error: rpcErr } = await (
+      supabase as unknown as {
+        rpc: (
+          name: string,
+          args: Record<string, unknown>,
+        ) => Promise<{ data: unknown; error: { message: string } | null }>;
+      }
+    ).rpc("apply_variant_groups_tx", {
+      p_project_id: data.projectId,
+      p_groups: applyGroups,
+    });
+    if (rpcErr) throw new Error(rpcErr.message);
+    const out = (rpcData ?? {}) as { variants?: number };
+    return { applied: Number(out.variants ?? 0), groups: applyGroups.length };
+  });
+
 export const applyVariantGroups = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({
