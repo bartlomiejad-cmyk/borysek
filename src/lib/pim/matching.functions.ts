@@ -362,11 +362,17 @@ export const runMatching = createServerFn({ method: "POST" })
       ? (rawSettings.trusted_domains as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
       : [];
 
+    // Exclude rows outside the pipeline (excluded=true or row_kind='variant')
+    // via the shared eligibility predicate. Locked products are still loaded
+    // — manual_lock is a downstream skip inside the scorer, not upstream.
+    const { applyEligibilityFilter } = await import("./eligibility");
     const [{ data: products }, { data: searches }] = await Promise.all([
-      supabase
-        .from("source_products")
-        .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
-        .eq("project_id", data.projectId),
+      applyEligibilityFilter(
+        supabase
+          .from("source_products")
+          .select("id, nazwa, ean, category, raw, manual_lock, matching_mode")
+          .eq("project_id", data.projectId),
+      ),
       supabase
         .from("search_results")
         .select("term, organic_urls")
