@@ -2606,10 +2606,10 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
     if (flat.length) {
       // Candidate-pool reduction BEFORE AI pre-selection:
       //   1) Drop marketplace / blacklist hits (they will never scrape well).
-      //   2) Host-level dedup: keep MAX 1 URL per host, prioritized by
-      //      (a) exact EAN present in title/snippet, (b) original SERP
-      //      position. AI pre-selection's output on this pool is then FINAL —
-      //      no host-dedup runs after it, so AI picks always survive.
+      // Host-level dedup runs AFTER preselection so the AI can see every
+      // host candidate (a real product card and a listing page from the same
+      // shop may both be present; picking the winner before the AI drops
+      // the product card irrecoverably).
       const eanDigits = (product.ean ?? "").replace(/\D/g, "");
       const hasEanInSnippet = (r: { title: string; snippet: string }) => {
         if (!eanDigits) return false;
@@ -2624,51 +2624,58 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       if (droppedMarketplacePre > 0) {
         usage.dedup_dropped_marketplace = (usage.dedup_dropped_marketplace ?? 0) + droppedMarketplacePre;
       }
-      const byHost = new Map<string, typeof preFiltered>();
-      for (const r of preFiltered) {
-        const h = r.domain || (() => { try { return new URL(r.url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
-        if (!h) continue;
-        const arr = byHost.get(h) ?? [];
-        arr.push(r);
-        byHost.set(h, arr);
-      }
-      const dedupPool: typeof preFiltered = [];
-      let droppedHostPre = 0;
-      for (const [, arr] of byHost) {
-        const sorted = arr.slice().sort((a, b) => {
-          const ea = hasEanInSnippet(a) ? 1 : 0;
-          const eb = hasEanInSnippet(b) ? 1 : 0;
-          if (ea !== eb) return eb - ea;
-          return a.i - b.i; // lower SERP position wins
-        });
-        // 1 URL per host — winner picked by (EAN in snippet, then SERP position).
-        dedupPool.push(sorted[0]);
-        droppedHostPre += Math.max(0, sorted.length - 1);
-      }
-      if (droppedHostPre > 0) {
-        usage.dedup_dropped_host = (usage.dedup_dropped_host ?? 0) + droppedHostPre;
-      }
-      // Preserve original SERP order in the pool we send to the AI so the
-      // prompt's "position matters" heuristic still holds.
-      dedupPool.sort((a, b) => a.i - b.i);
-      const capped = dedupPool.slice(0, 40);
+      // Preserve original SERP order for the AI (its "position matters" heuristic).
+      const orderedPre = preFiltered.slice().sort((a, b) => a.i - b.i);
+      const capped = orderedPre.slice(0, 40);
       const preselect = await preselectSerpResults({
         product: { nazwa, ean: product.ean ?? null, producent, kod_producenta: mpn },
         items: capped.map((f) => ({ i: f.i, title: f.title, snippet: f.snippet, domain: f.domain })),
       });
       const byI = new Map(capped.map((f) => [f.i, f]));
-      type Pick = { url: string; why?: string; vi: number };
+      type Pick = { url: string; why?: string; vi: number; i: number };
       let picks: Pick[] = [];
       if (preselect.ok && preselect.picks.length) {
         picks = preselect.picks
-          .map((p): Pick | null => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi } : null; })
+          .map((p): Pick | null => { const f = byI.get(p.i); return f ? { url: f.url, why: p.why, vi: f.vi, i: f.i } : null; })
           .filter((v): v is Pick => v !== null);
         aiPreselectMeta = { total: capped.length, picked: picks.length };
       } else {
         // Fallback when preselect fails: keep the same cap as the AI's
         // hard limit (8) so scrape budget stays predictable.
-        picks = capped.slice(0, 8).map((f) => ({ url: f.url, vi: f.vi }));
+        picks = capped.slice(0, 8).map((f) => ({ url: f.url, vi: f.vi, i: f.i }));
         aiPreselectMeta = { total: capped.length, picked: picks.length, error: preselect.error ?? "empty" };
+      }
+      // Host-dedup AFTER preselection: 1 pick per host, winner by
+      // (EAN-in-snippet, then lower SERP position). Hostless picks are kept.
+      {
+        const pickByHost = new Map<string, Pick>();
+        const kept: Pick[] = [];
+        let droppedHostPost = 0;
+        const hostOf = (u: string) => {
+          try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; }
+        };
+        const flatOf = (p: Pick) => byI.get(p.i);
+        const better = (a: Pick, b: Pick): Pick => {
+          const fa = flatOf(a); const fb = flatOf(b);
+          const ea = fa && hasEanInSnippet(fa) ? 1 : 0;
+          const eb = fb && hasEanInSnippet(fb) ? 1 : 0;
+          if (ea !== eb) return ea > eb ? a : b;
+          return a.i <= b.i ? a : b;
+        };
+        for (const p of picks) {
+          const f = flatOf(p);
+          const host = f?.domain || hostOf(p.url);
+          if (!host) { kept.push(p); continue; }
+          const cur = pickByHost.get(host);
+          if (!cur) { pickByHost.set(host, p); continue; }
+          const win = better(cur, p);
+          if (win !== cur) { pickByHost.set(host, win); }
+          droppedHostPost++;
+        }
+        picks = [...kept, ...pickByHost.values()];
+        if (droppedHostPost > 0) {
+          usage.dedup_dropped_host = (usage.dedup_dropped_host ?? 0) + droppedHostPost;
+        }
       }
       usage.preselect_kept = (usage.preselect_kept ?? 0) + picks.length;
       for (const p of picks) {
