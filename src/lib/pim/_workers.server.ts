@@ -666,7 +666,7 @@ function errorStatus(err: unknown): number | undefined {
   return (err as { status?: number } | null)?.status;
 }
 
-async function submitFalQueue(path: string, body: unknown, apiKey: string): Promise<FalQueueRequest> {
+async function submitFalQueue(path: string, body: unknown, apiKey: string, bulkJobId?: string): Promise<FalQueueRequest> {
   const res = await fetch(`${FAL_QUEUE_BASE}/${path}`, {
     method: "POST",
     headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
@@ -680,6 +680,9 @@ async function submitFalQueue(path: string, body: unknown, apiKey: string): Prom
   if (!data.request_id || !data.status_url || !data.response_url) {
     throw new Error("FAL queue: brak request_id/status_url/response_url");
   }
+  // Additive FAL render telemetry — counted at submission time so
+  // cancelled/timed-out polls still record what we paid to enqueue.
+  if (bulkJobId) void bumpJobUsage(bulkJobId, { fal_renders: 1 });
   return {
     request_id: data.request_id,
     status_url: data.status_url,
