@@ -185,7 +185,7 @@ const VerifySourcesSchema = z.object({
   notes: z.string().default(""),
 });
 
-async function callGatewayJson(apiKey: string, model: string, messages: unknown[]): Promise<unknown> {
+async function callGatewayJson(apiKey: string, model: string, messages: unknown[], bulkJobId?: string): Promise<unknown> {
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -196,6 +196,8 @@ async function callGatewayJson(apiKey: string, model: string, messages: unknown[
     body: JSON.stringify({ model, response_format: { type: "json_object" }, messages }),
   });
   if (!res.ok) throw new Error(`AI gateway ${res.status}: ${await res.text().catch(() => "")}`);
+  // Additive LLM telemetry — only recorded when caller passed a bulkJobId.
+  if (bulkJobId) void bumpJobUsage(bulkJobId, { llm_calls: 1 });
   const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const content = j.choices?.[0]?.message?.content ?? "{}";
   try {
