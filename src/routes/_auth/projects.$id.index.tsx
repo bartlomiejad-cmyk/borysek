@@ -2264,6 +2264,15 @@ function SettingsCard({
     return "both";
   })();
   const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify" | "both">(initialSearchProvider);
+  const initialSearchQueryStrategy: "ALL" | "EAN" | "EAN_NAME" | "NAME_EAN" = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).search_query_strategy;
+      if (v === "EAN" || v === "EAN_NAME" || v === "NAME_EAN" || v === "ALL") return v;
+    }
+    return "ALL";
+  })();
+  const [searchQueryStrategy, setSearchQueryStrategy] = useState<"ALL" | "EAN" | "EAN_NAME" | "NAME_EAN">(initialSearchQueryStrategy);
   const initialScrapeCap: number = (() => {
     const s = project?.settings;
     if (s && typeof s === "object") {
@@ -2411,6 +2420,24 @@ function SettingsCard({
           </div>
         </div>
         <div>
+          <Label>Strategia zapytań wyszukiwania</Label>
+          <p className="text-xs text-muted-foreground mb-1">
+            Steruje treścią zapytań wysyłanych do wyszukiwarki. To NIE to samo co „Strategia dopasowania" powyżej, która decyduje o łączeniu wyników.
+          </p>
+          <Select
+            value={searchQueryStrategy}
+            onValueChange={(v) => setSearchQueryStrategy(v as "ALL" | "EAN" | "EAN_NAME" | "NAME_EAN")}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">Wszystkie warianty (domyślne) — EAN, EAN+nazwa, nazwa</SelectItem>
+              <SelectItem value="EAN">Tylko EAN — produkt bez EAN zostaje pominięty w wyszukiwaniu</SelectItem>
+              <SelectItem value="EAN_NAME">EAN + nazwa — gdy brak EAN, wyszukuje po samej nazwie</SelectItem>
+              <SelectItem value="NAME_EAN">Nazwa + EAN — gdy brak EAN, wyszukuje po samej nazwie</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
           <Label>Custom prompt (instrukcje dla AI)</Label>
           <Textarea
             value={prompt}
@@ -2463,6 +2490,7 @@ function SettingsCard({
                 scrape_cap: scrapeCap,
                 auto_rescrape: autoRescrape,
                 workflow,
+                search_query_strategy: searchQueryStrategy,
               },
             })
           }
