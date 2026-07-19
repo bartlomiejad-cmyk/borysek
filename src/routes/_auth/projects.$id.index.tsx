@@ -2264,6 +2264,15 @@ function SettingsCard({
     return "both";
   })();
   const [searchProvider, setSearchProvider] = useState<"firecrawl" | "apify" | "both">(initialSearchProvider);
+  const initialSearchQueryStrategy: "ALL" | "EAN" | "EAN_NAME" | "NAME_EAN" = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = (s as Record<string, unknown>).search_query_strategy;
+      if (v === "EAN" || v === "EAN_NAME" || v === "NAME_EAN" || v === "ALL") return v;
+    }
+    return "ALL";
+  })();
+  const [searchQueryStrategy, setSearchQueryStrategy] = useState<"ALL" | "EAN" | "EAN_NAME" | "NAME_EAN">(initialSearchQueryStrategy);
   const initialScrapeCap: number = (() => {
     const s = project?.settings;
     if (s && typeof s === "object") {
