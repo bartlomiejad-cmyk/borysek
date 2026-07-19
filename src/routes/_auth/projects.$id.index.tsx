@@ -2421,130 +2421,55 @@ function SettingsCard({
   return (
     <Card>
       <CardContent className="space-y-4 pt-6">
-        <div className="grid sm:grid-cols-2 gap-4">
+                <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <Label>Nazwa</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
           </div>
+        </div>
+        <Tabs defaultValue="import" className="w-full">
+          <TabsList className="grid grid-cols-5 w-full">
+            <TabsTrigger value="import">Import</TabsTrigger>
+            <TabsTrigger value="zrodla">Źródła</TabsTrigger>
+            <TabsTrigger value="dopasowanie">Dopasowanie</TabsTrigger>
+            <TabsTrigger value="tresci">Treści</TabsTrigger>
+            <TabsTrigger value="media">Media</TabsTrigger>
+          </TabsList>
+          <TabsContent value="import" className="space-y-4 pt-2">
+        <div className="pt-4 border-t space-y-3">
+          <div className="flex items-center gap-3">
+            <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
+            <Label htmlFor="extra-imgs" className="cursor-pointer">
+              Uwzględniaj zdjęcia z extraProperties (uwaga: mogą zawierać śmieci)
+            </Label>
+          </div>
           <div>
-            <Label>Strategia dopasowania</Label>
-            <Select value={strategy} onValueChange={(v) => setStrategy(v as "EAN" | "NAZWA" | "HYBRID")}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="EAN">EAN — po kodzie EAN</SelectItem>
-                <SelectItem value="NAZWA">NAZWA — po nazwie produktu</SelectItem>
-                <SelectItem value="HYBRID">HYBRID — Nazwa+EAN, fallback po nazwie/EAN</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label className="text-sm">Mapowanie kolumn Source CSV</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Zostaw puste = automatyczne wykrycie. Podaj dokładną nazwę kolumny z pliku CSV.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Kolumna „id"</Label>
+                <Input value={idCol} onChange={(e) => setIdCol(e.target.value)} placeholder="np. product_id" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „nazwa"</Label>
+                <Input value={nameCol} onChange={(e) => setNameCol(e.target.value)} placeholder="np. name" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „kod" (kod importu)</Label>
+                <Input value={codeCol} onChange={(e) => setCodeCol(e.target.value)} placeholder="np. symbol" />
+              </div>
+              <div>
+                <Label className="text-xs">Kolumna „ean"</Label>
+                <Input value={eanCol} onChange={(e) => setEanCol(e.target.value)} placeholder="np. gtin" />
+              </div>
+            </div>
           </div>
         </div>
-        <div>
-          <Label>Strategia zapytań wyszukiwania</Label>
-          <p className="text-xs text-muted-foreground mb-1">
-            Steruje treścią zapytań wysyłanych do wyszukiwarki. To NIE to samo co „Strategia dopasowania" powyżej, która decyduje o łączeniu wyników.
-          </p>
-          <Select
-            value={searchQueryStrategy}
-            onValueChange={(v) => setSearchQueryStrategy(v as "ALL" | "EAN" | "EAN_NAME" | "NAME_EAN")}
-          >
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Wszystkie warianty (domyślne) — EAN, EAN+nazwa, nazwa</SelectItem>
-              <SelectItem value="EAN">Tylko EAN — produkt bez EAN zostaje pominięty w wyszukiwaniu</SelectItem>
-              <SelectItem value="EAN_NAME">EAN + nazwa — gdy brak EAN, wyszukuje po samej nazwie</SelectItem>
-              <SelectItem value="NAME_EAN">Nazwa + EAN — gdy brak EAN, wyszukuje po samej nazwie</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Custom prompt (instrukcje dla AI)</Label>
-          <Textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={4}
-            maxLength={8000}
-            placeholder="np. Pisz w drugiej osobie, podkreśl zastosowanie sportowe, max 800 znaków."
-          />
-        </div>
-        <div>
-          <Label>White-label blacklist (po jednej frazie w linii)</Label>
-          <Textarea
-            value={blacklist}
-            onChange={(e) => setBlacklist(e.target.value)}
-            rows={4}
-            placeholder={"kaliber.pl\nstrefacelu\nkup teraz\ngwarancja 24m"}
-          />
-        </div>
-        <div>
-          <Label>Zaufane domeny (jedna na linię)</Label>
-          <p className="text-xs text-muted-foreground mb-1">
-            Źródła z tych domen otrzymają bonus +4 do scoringu (np. oficjalny dystrybutor).
-          </p>
-          <Textarea
-            value={trustedDomains}
-            onChange={(e) => setTrustedDomains(e.target.value)}
-            rows={4}
-            placeholder={"producent.pl\ndystrybutor.eu"}
-          />
-        </div>
-        <Button
-          onClick={() =>
-            onSave({
-              name: name.trim(),
-              custom_prompt: prompt,
-              blacklist: blacklist.split("\n").map((s) => s.trim()).filter(Boolean),
-              strategy,
-              include_extra_images: includeExtra,
-              id_column: idCol.trim(),
-              name_column: nameCol.trim(),
-              code_column: codeCol.trim(),
-              ean_column: eanCol.trim(),
-              settings: {
-                ...((project?.settings && typeof project.settings === "object") ? (project.settings as Record<string, unknown>) : {}),
-                trusted_domains: trustedDomains
-                  .split("\n")
-                  .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
-                  .filter(Boolean),
-                search_provider: searchProvider,
-                scrape_cap: scrapeCap,
-                auto_rescrape: autoRescrape,
-                workflow,
-                search_query_strategy: searchQueryStrategy,
-                top_per_variant: topPerVariant,
-                serp_limit: serpLimit,
-              },
-            })
-          }
-        >
-          Zapisz
-        </Button>
-        <div className="pt-4 border-t space-y-2">
-          <Label className="text-sm font-medium">Tryb projektu</Label>
-          <p className="text-xs text-muted-foreground">
-            Steruje widocznością etapów. „Tylko treści" pomija Wyszukiwanie i Dopasowanie — opis generowany jest wyłącznie z danych klienta. „Tylko media" pomija także generację treści.
-          </p>
-          <div className="flex flex-col gap-2">
-            {([
-              { v: "full", title: "Pełny proces", desc: "Wyszukiwanie → Dopasowanie → Treści → Media → Review." },
-              { v: "content_only", title: "Tylko treści (z danych klienta)", desc: "Pomija discovery i matching; opis generowany z RAW atrybutów klienta." },
-              { v: "media_only", title: "Tylko media", desc: "Pomija generację opisów — użyj gdy klient dostarcza własne treści." },
-            ] as const).map((o) => (
-              <label key={o.v} className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="workflow"
-                  className="mt-1"
-                  checked={workflow === o.v}
-                  onChange={() => setWorkflow(o.v)}
-                />
-                <span>
-                  <span className="font-medium">{o.title}</span>
-                  <span className="block text-xs text-muted-foreground">{o.desc}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
+          </TabsContent>
+          <TabsContent value="zrodla" className="space-y-4 pt-2">
         <div className="pt-4 border-t space-y-2">
           <Label className="text-sm font-medium">Źródło wyszukiwania</Label>
           <p className="text-xs text-muted-foreground">
@@ -2654,6 +2579,24 @@ function SettingsCard({
             </div>
           ) : null}
         </div>
+        <div>
+          <Label>Strategia zapytań wyszukiwania</Label>
+          <p className="text-xs text-muted-foreground mb-1">
+            Steruje treścią zapytań wysyłanych do wyszukiwarki. To NIE to samo co „Strategia dopasowania" powyżej, która decyduje o łączeniu wyników.
+          </p>
+          <Select
+            value={searchQueryStrategy}
+            onValueChange={(v) => setSearchQueryStrategy(v as "ALL" | "EAN" | "EAN_NAME" | "NAME_EAN")}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">Wszystkie warianty (domyślne) — EAN, EAN+nazwa, nazwa</SelectItem>
+              <SelectItem value="EAN">Tylko EAN — produkt bez EAN zostaje pominięty w wyszukiwaniu</SelectItem>
+              <SelectItem value="EAN_NAME">EAN + nazwa — gdy brak EAN, wyszukuje po samej nazwie</SelectItem>
+              <SelectItem value="NAME_EAN">Nazwa + EAN — gdy brak EAN, wyszukuje po samej nazwie</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="pt-4 border-t space-y-3">
           <Label className="text-sm font-medium">Budżet scrape'ów</Label>
           <div className="grid sm:grid-cols-2 gap-3 items-end">
@@ -2721,53 +2664,81 @@ function SettingsCard({
             </div>
           </div>
         </div>
-        <ProjectUsagePanel />
-        <div className="pt-4 border-t space-y-3">
-          <div className="flex items-center gap-3">
-            <Switch checked={includeExtra} onCheckedChange={setIncludeExtra} id="extra-imgs" />
-            <Label htmlFor="extra-imgs" className="cursor-pointer">
-              Uwzględniaj zdjęcia z extraProperties (uwaga: mogą zawierać śmieci)
-            </Label>
-          </div>
+        <div>
+          <Label>Zaufane domeny (jedna na linię)</Label>
+          <p className="text-xs text-muted-foreground mb-1">
+            Źródła z tych domen otrzymają bonus +4 do scoringu (np. oficjalny dystrybutor).
+          </p>
+          <Textarea
+            value={trustedDomains}
+            onChange={(e) => setTrustedDomains(e.target.value)}
+            rows={4}
+            placeholder={"producent.pl\ndystrybutor.eu"}
+          />
+        </div>
+        <div>
+          <Label>White-label blacklist (po jednej frazie w linii)</Label>
+          <Textarea
+            value={blacklist}
+            onChange={(e) => setBlacklist(e.target.value)}
+            rows={4}
+            placeholder={"kaliber.pl\nstrefacelu\nkup teraz\ngwarancja 24m"}
+          />
+        </div>
+          </TabsContent>
+          <TabsContent value="dopasowanie" className="space-y-4 pt-2">
           <div>
-            <Label className="text-sm">Mapowanie kolumn Source CSV</Label>
-            <p className="text-xs text-muted-foreground mb-2">
-              Zostaw puste = automatyczne wykrycie. Podaj dokładną nazwę kolumny z pliku CSV.
-            </p>
-            <div className="grid sm:grid-cols-2 gap-2">
-              <div>
-                <Label className="text-xs">Kolumna „id"</Label>
-                <Input value={idCol} onChange={(e) => setIdCol(e.target.value)} placeholder="np. product_id" />
-              </div>
-              <div>
-                <Label className="text-xs">Kolumna „nazwa"</Label>
-                <Input value={nameCol} onChange={(e) => setNameCol(e.target.value)} placeholder="np. name" />
-              </div>
-              <div>
-                <Label className="text-xs">Kolumna „kod" (kod importu)</Label>
-                <Input value={codeCol} onChange={(e) => setCodeCol(e.target.value)} placeholder="np. symbol" />
-              </div>
-              <div>
-                <Label className="text-xs">Kolumna „ean"</Label>
-                <Input value={eanCol} onChange={(e) => setEanCol(e.target.value)} placeholder="np. gtin" />
-              </div>
-            </div>
+            <Label>Strategia dopasowania</Label>
+            <Select value={strategy} onValueChange={(v) => setStrategy(v as "EAN" | "NAZWA" | "HYBRID")}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="EAN">EAN — po kodzie EAN</SelectItem>
+                <SelectItem value="NAZWA">NAZWA — po nazwie produktu</SelectItem>
+                <SelectItem value="HYBRID">HYBRID — Nazwa+EAN, fallback po nazwie/EAN</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          </TabsContent>
+          <TabsContent value="tresci" className="space-y-4 pt-2">
+        <div>
+          <Label>Custom prompt (instrukcje dla AI)</Label>
+          <Textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={4}
+            maxLength={8000}
+            placeholder="np. Pisz w drugiej osobie, podkreśl zastosowanie sportowe, max 800 znaków."
+          />
+        </div>
+        <div className="pt-4 border-t space-y-2">
+          <Label className="text-sm font-medium">Tryb projektu</Label>
+          <p className="text-xs text-muted-foreground">
+            Steruje widocznością etapów. „Tylko treści" pomija Wyszukiwanie i Dopasowanie — opis generowany jest wyłącznie z danych klienta. „Tylko media" pomija także generację treści.
+          </p>
+          <div className="flex flex-col gap-2">
+            {([
+              { v: "full", title: "Pełny proces", desc: "Wyszukiwanie → Dopasowanie → Treści → Media → Review." },
+              { v: "content_only", title: "Tylko treści (z danych klienta)", desc: "Pomija discovery i matching; opis generowany z RAW atrybutów klienta." },
+              { v: "media_only", title: "Tylko media", desc: "Pomija generację opisów — użyj gdy klient dostarcza własne treści." },
+            ] as const).map((o) => (
+              <label key={o.v} className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="workflow"
+                  className="mt-1"
+                  checked={workflow === o.v}
+                  onChange={() => setWorkflow(o.v)}
+                />
+                <span>
+                  <span className="font-medium">{o.title}</span>
+                  <span className="block text-xs text-muted-foreground">{o.desc}</span>
+                </span>
+              </label>
+            ))}
           </div>
         </div>
-        <div className="pt-4 border-t">
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={async () => {
-              if (!confirm("Wyczyścić WSZYSTKIE dane projektu (produkty, wyszukiwania, źródła, rekordy)?")) return;
-              // We use clearProjectData via the parent through a re-bound action would be cleaner,
-              // but keep simple: reload.
-              window.location.reload();
-            }}
-          >
-            <Trash2 className="h-4 w-4 mr-2" /> Reset widoku
-          </Button>
-        </div>
+          </TabsContent>
+          <TabsContent value="media" className="space-y-4 pt-2">
         <div className="pt-4 border-t space-y-3">
           <h3 className="font-semibold text-base">Zdjęcia AI</h3>
           <p className="text-xs text-muted-foreground">
@@ -2833,8 +2804,58 @@ function SettingsCard({
             Zapisz ustawienia AI
           </Button>
         </div>
+          </TabsContent>
+        </Tabs>
+        <Button
+          onClick={() =>
+            onSave({
+              name: name.trim(),
+              custom_prompt: prompt,
+              blacklist: blacklist.split("\n").map((s) => s.trim()).filter(Boolean),
+              strategy,
+              include_extra_images: includeExtra,
+              id_column: idCol.trim(),
+              name_column: nameCol.trim(),
+              code_column: codeCol.trim(),
+              ean_column: eanCol.trim(),
+              settings: {
+                ...((project?.settings && typeof project.settings === "object") ? (project.settings as Record<string, unknown>) : {}),
+                trusted_domains: trustedDomains
+                  .split("\n")
+                  .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
+                  .filter(Boolean),
+                search_provider: searchProvider,
+                scrape_cap: scrapeCap,
+                auto_rescrape: autoRescrape,
+                workflow,
+                search_query_strategy: searchQueryStrategy,
+                top_per_variant: topPerVariant,
+                serp_limit: serpLimit,
+              },
+            })
+          }
+        >
+          Zapisz
+        </Button>
+        <ProjectUsagePanel />
+        <div className="pt-4 border-t">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={async () => {
+              if (!confirm("Wyczyścić WSZYSTKIE dane projektu (produkty, wyszukiwania, źródła, rekordy)?")) return;
+              // We use clearProjectData via the parent through a re-bound action would be cleaner,
+              // but keep simple: reload.
+              window.location.reload();
+            }}
+          >
+            <Trash2 className="h-4 w-4 mr-2" /> Reset widoku
+          </Button>
+        </div>
       </CardContent>
     </Card>
+  );
+}
   );
 }
 
