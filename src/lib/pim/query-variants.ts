@@ -5,7 +5,7 @@
  *
  * Kolejność priorytetów: A (EAN), C (producent + MPN), B (nazwa + producent),
  * D (nazwa bez szumu wariantowego — tylko dla strategii NAZWA i HYBRID).
- * Zwracamy maksymalnie 3 warianty, aby ograniczyć budżet Firecrawl.
+ * Zwracamy maksymalnie 4 warianty, aby ograniczyć budżet Firecrawl.
  */
 
 export type ProductLike = {
