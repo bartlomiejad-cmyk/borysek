@@ -2673,6 +2673,42 @@ function SettingsCard({
                 Twarda granica prób scrape na produkt (1–12). Pętla kończy się wcześniej po 3 wnoszących źródłach.
               </p>
             </div>
+            <div>
+              <Label className="text-xs">Wyników na wariant zapytania</Label>
+              <Input
+                type="number"
+                min={1}
+                max={5}
+                value={topPerVariant}
+                onChange={(e) => {
+                  const v = Math.max(1, Math.min(5, Math.floor(Number(e.target.value) || 2)));
+                  setTopPerVariant(v);
+                }}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Ile najlepszych wyników z każdego wariantu trafia do preselekcji AI (domyślnie 2).
+              </p>
+            </div>
+            <div>
+              <Label className="text-xs">Szerokość SERP</Label>
+              <Select
+                value={String(serpLimit)}
+                onValueChange={(v) => {
+                  const n = Number(v);
+                  setSerpLimit((n === 20 || n === 30 ? n : 10) as 10 | 20 | 30);
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 wyników</SelectItem>
+                  <SelectItem value="20">20 wyników</SelectItem>
+                  <SelectItem value="30">30 wyników</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Każde 10 wyników = 1 płatne zapytanie Apify (~$0.50/1000 SERP).
+              </p>
+            </div>
             <div className="flex items-center gap-3">
               <Switch
                 id="auto-rescrape"
