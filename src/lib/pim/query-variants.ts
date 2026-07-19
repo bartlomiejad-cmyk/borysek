@@ -18,6 +18,13 @@ export type ProductLike = {
 
 export type QueryStrategy = "EAN" | "NAZWA" | "HYBRID";
 
+/**
+ * Sterowanie kompozycją zapytań SERP — niezależne od strategii dopasowania
+ * (`QueryStrategy`). Domyślna wartość "ALL" odtwarza dotychczasowe zachowanie
+ * bajt-w-bajt.
+ */
+export type SearchQueryStrategy = "ALL" | "EAN" | "EAN_NAME" | "NAME_EAN";
+
 export type QueryVariant = {
   /** Krótki identyfikator wariantu: "A" | "B" | "C" | "D" | "E". */
   kind: "A" | "B" | "C" | "D" | "E";
@@ -76,6 +83,7 @@ function norm(s: string | null | undefined): string {
 export function buildQueryVariants(
   product: ProductLike,
   strategy: QueryStrategy,
+  searchQueryStrategy: SearchQueryStrategy = "ALL",
 ): QueryVariant[] {
   const nazwa = norm(product.nazwa);
   const ean = norm(product.ean);
@@ -84,38 +92,57 @@ export function buildQueryVariants(
 
   const candidates: QueryVariant[] = [];
 
-  // A: sam EAN.
-  if (ean) candidates.push({ kind: "A", query: ean });
+  if (searchQueryStrategy === "ALL") {
+    // A: sam EAN.
+    if (ean) candidates.push({ kind: "A", query: ean });
 
-  // E: EAN + nazwa. Główny nośnik tożsamości — aktor Apify (scraperlink)
-  // zwraca 0 wyników dla samego numerycznego EAN, więc łączymy go z nazwą,
-  // żeby Google potraktował zapytanie jako tekstowe. Umieszczamy WCZEŚNIE,
-  // aby cap nie wypchnął go poza listę.
-  if (ean && nazwa) {
-    candidates.push({ kind: "E", query: `${ean} ${nazwa}` });
-  }
+    // E: EAN + nazwa. Główny nośnik tożsamości — aktor Apify (scraperlink)
+    // zwraca 0 wyników dla samego numerycznego EAN, więc łączymy go z nazwą,
+    // żeby Google potraktował zapytanie jako tekstowe. Umieszczamy WCZEŚNIE,
+    // aby cap nie wypchnął go poza listę.
+    if (ean && nazwa) {
+      candidates.push({ kind: "E", query: `${ean} ${nazwa}` });
+    }
 
-  // C: producent + MPN.
-  if (mpn && producent) {
-    candidates.push({ kind: "C", query: `${producent} ${mpn}` });
-  } else if (mpn && !producent) {
-    // Bez producenta MPN sam z siebie jest często zbyt ogólny — pomijamy
-    // wariant C zgodnie ze specyfikacją (wymaga producenta + MPN).
-  }
+    // C: producent + MPN.
+    if (mpn && producent) {
+      candidates.push({ kind: "C", query: `${producent} ${mpn}` });
+    } else if (mpn && !producent) {
+      // Bez producenta MPN sam z siebie jest często zbyt ogólny — pomijamy
+      // wariant C zgodnie ze specyfikacją (wymaga producenta + MPN).
+    }
 
-  // B: nazwa + producent (producent opcjonalny).
-  if (nazwa) {
-    const q = producent && !nazwa.toLowerCase().includes(producent.toLowerCase())
-      ? `${nazwa} ${producent}`
-      : nazwa;
-    candidates.push({ kind: "B", query: q });
-  }
+    // B: nazwa + producent (producent opcjonalny).
+    if (nazwa) {
+      const q = producent && !nazwa.toLowerCase().includes(producent.toLowerCase())
+        ? `${nazwa} ${producent}`
+        : nazwa;
+      candidates.push({ kind: "B", query: q });
+    }
 
-  // D: nazwa bez ogonowego szumu wariantowego — tylko dla NAZWA/HYBRID.
-  if ((strategy === "NAZWA" || strategy === "HYBRID") && nazwa) {
-    const stripped = stripVariantNoise(nazwa);
-    if (stripped && stripped.toLowerCase() !== nazwa.toLowerCase()) {
-      candidates.push({ kind: "D", query: stripped });
+    // D: nazwa bez ogonowego szumu wariantowego — tylko dla NAZWA/HYBRID.
+    if ((strategy === "NAZWA" || strategy === "HYBRID") && nazwa) {
+      const stripped = stripVariantNoise(nazwa);
+      if (stripped && stripped.toLowerCase() !== nazwa.toLowerCase()) {
+        candidates.push({ kind: "D", query: stripped });
+      }
+    }
+  } else if (searchQueryStrategy === "EAN") {
+    // Tylko sam EAN — precyzja; brak cichego fallbacku na nazwę.
+    if (ean) candidates.push({ kind: "A", query: ean });
+  } else if (searchQueryStrategy === "EAN_NAME") {
+    // EAN-first: "${ean} ${nazwa}", z fallbackiem do samej nazwy.
+    if (ean && nazwa) {
+      candidates.push({ kind: "E", query: `${ean} ${nazwa}` });
+    } else if (!ean && nazwa) {
+      candidates.push({ kind: "B", query: nazwa });
+    }
+  } else if (searchQueryStrategy === "NAME_EAN") {
+    // NAME-first: "${nazwa} ${ean}", z fallbackiem do samej nazwy.
+    if (ean && nazwa) {
+      candidates.push({ kind: "E", query: `${nazwa} ${ean}` });
+    } else if (!ean && nazwa) {
+      candidates.push({ kind: "B", query: nazwa });
     }
   }
 
