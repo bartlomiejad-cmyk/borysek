@@ -2551,6 +2551,28 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const rawCap = Number((projectSettings.scrape_cap as unknown) ?? 4);
   const scrapeCap = Math.max(1, Math.min(12, Number.isFinite(rawCap) ? Math.floor(rawCap) : 4));
 
+  // SERP width knobs (call-time). Defaults preserve status quo (2 / 10).
+  const rawTopPerVariant = Number((projectSettings.top_per_variant as unknown) ?? 2);
+  const topPerVariant = Math.max(
+    1,
+    Math.min(5, Number.isFinite(rawTopPerVariant) ? Math.floor(rawTopPerVariant) : 2),
+  );
+  const ALLOWED_SERP_LIMITS = [10, 20, 30] as const;
+  const rawSerpLimit = Number((projectSettings.serp_limit as unknown) ?? 10);
+  const serpLimit = (() => {
+    if (!Number.isFinite(rawSerpLimit)) return 10;
+    const n = Math.floor(rawSerpLimit);
+    if ((ALLOWED_SERP_LIMITS as readonly number[]).includes(n)) return n;
+    // snap to nearest allowed value
+    let best = 10;
+    let bestDiff = Infinity;
+    for (const v of ALLOWED_SERP_LIMITS) {
+      const d = Math.abs(v - n);
+      if (d < bestDiff) { bestDiff = d; best = v; }
+    }
+    return Math.max(10, Math.min(100, best));
+  })();
+
   // Owner userId for cross-project scrape_cache scoping.
   let userId: string | null = null;
   if (ctx?.bulkJobId) {
@@ -2595,7 +2617,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
 
   // ---- Apify branch (first in combined mode) ----
   // Keep only the top-N results per variant (SERP-order). Actor min limit is 10.
-  const TOP_PER_VARIANT = 2;
+  const TOP_PER_VARIANT = topPerVariant;
   let aiPreselectMeta: { total: number; picked: number; error?: string } | null = null;
   const apifyVariantMeta: SerpMeta[] = [];
   // Per-variant Apify outcome (indexed by vi). Used by the Firecrawl branch
@@ -2608,7 +2630,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       buckets = await runSerpSearch(variants.map((v) => v.query), {
         gl: serpGl,
         hl: serpHl,
-        limit: 10,
+        limit: serpLimit,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2640,7 +2662,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       } else {
         apifyVariantMeta.push({
           provider: "apify",
-          input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: 10 },
+          input: { keyword: v.query, gl: serpGl, hl: serpHl, limit: serpLimit },
           results_count: 0,
           error: "no bucket returned",
           status: "error",
@@ -2831,7 +2853,7 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
       let hits: FirecrawlSearchHit[] = [];
       try {
         const sr = (await firecrawl.search(v.query, {
-          limit: 10,
+          limit: serpLimit,
           sources: ["web"],
           location: "Poland",
           lang: "pl",
