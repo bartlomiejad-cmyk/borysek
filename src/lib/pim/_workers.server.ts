@@ -28,7 +28,7 @@ import {
   SHORTEN_META_SYSTEM_PROMPT,
 } from "./seo";
 import Firecrawl from "@mendable/firecrawl-js";
-import { buildQueryVariants, normalizeUrlForDedup, stripTrackingParams, type QueryStrategy } from "./query-variants";
+import { buildQueryVariants, normalizeUrlForDedup, stripTrackingParams, type QueryStrategy, type SearchQueryStrategy } from "./query-variants";
 import { advancePipelineStatus } from "./pipeline-status";
 import { logProductEvent } from "./product-events.server";
 import { runSerpSearch, type SerpBucket, type SerpMeta, type SerpResult } from "./apify.server";
