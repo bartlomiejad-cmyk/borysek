@@ -2282,6 +2282,25 @@ function SettingsCard({
     return 6;
   })();
   const [scrapeCap, setScrapeCap] = useState<number>(initialScrapeCap);
+  const initialTopPerVariant: number = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = Number((s as Record<string, unknown>).top_per_variant);
+      if (Number.isFinite(v)) return Math.max(1, Math.min(5, Math.floor(v)));
+    }
+    return 2;
+  })();
+  const [topPerVariant, setTopPerVariant] = useState<number>(initialTopPerVariant);
+  const initialSerpLimit: 10 | 20 | 30 = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = Number((s as Record<string, unknown>).serp_limit);
+      if (v === 20) return 20;
+      if (v === 30) return 30;
+    }
+    return 10;
+  })();
+  const [serpLimit, setSerpLimit] = useState<10 | 20 | 30>(initialSerpLimit);
   const initialAutoRescrape: boolean = (() => {
     const s = project?.settings;
     if (s && typeof s === "object") {
