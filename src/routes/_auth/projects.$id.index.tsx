@@ -2856,8 +2856,6 @@ function SettingsCard({
     </Card>
   );
 }
-  );
-}
 
 function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
