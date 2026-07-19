@@ -2429,6 +2429,15 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const searchProvider: "firecrawl" | "apify" | "both" =
     rawProvider === "apify" ? "apify" : rawProvider === "firecrawl" ? "firecrawl" : "both";
 
+  // Kompozycja zapytań SERP — niezależna od strategii dopasowania.
+  // Nieznana/pusta wartość → "ALL" (status quo).
+  const searchQueryStrategy: SearchQueryStrategy =
+    (["ALL", "EAN", "EAN_NAME", "NAME_EAN"] as const).includes(
+      projectSettings.search_query_strategy as never,
+    )
+      ? (projectSettings.search_query_strategy as SearchQueryStrategy)
+      : "ALL";
+
   // Optional locale override — future-proofs the actor call for
   // non-Polish projects. Default to Poland / Polish.
   const localeRaw = (projectSettings.serp_locale ?? null) as { gl?: unknown; hl?: unknown } | null;
@@ -2463,9 +2472,24 @@ export async function runFirecrawlDiscovery(productId: string, ctx?: WorkerCtx):
   const variants = buildQueryVariants(
     { nazwa, ean: eanForSearch, mpn, producent },
     strategy,
+    searchQueryStrategy,
   );
   if (!variants.length) {
-    await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak wariantów zapytań` });
+    if (searchQueryStrategy === "EAN" && !eanForSearch) {
+      await emit(ctx, {
+        level: "warn",
+        message: `⏭ ${nazwa} — pominięto: brak EAN (tryb zapytań: tylko EAN)`,
+      });
+      await logProductEvent(supabaseAdmin, {
+        projectId: product.project_id,
+        productId: product.id,
+        kind: "discovery_search",
+        message: `Pominięto: brak EAN (tryb zapytań: tylko EAN)`,
+        meta: { skipped: true, reason: "no_ean_ean_only_mode" },
+      });
+    } else {
+      await emit(ctx, { level: "warn", message: `⚠️ ${nazwa} — brak wariantów zapytań` });
+    }
     return;
   }
 
