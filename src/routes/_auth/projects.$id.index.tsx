@@ -2472,6 +2472,7 @@ function SettingsCard({
                 scrape_cap: scrapeCap,
                 auto_rescrape: autoRescrape,
                 workflow,
+                search_query_strategy: searchQueryStrategy,
               },
             })
           }
