@@ -2282,6 +2282,25 @@ function SettingsCard({
     return 6;
   })();
   const [scrapeCap, setScrapeCap] = useState<number>(initialScrapeCap);
+  const initialTopPerVariant: number = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = Number((s as Record<string, unknown>).top_per_variant);
+      if (Number.isFinite(v)) return Math.max(1, Math.min(5, Math.floor(v)));
+    }
+    return 2;
+  })();
+  const [topPerVariant, setTopPerVariant] = useState<number>(initialTopPerVariant);
+  const initialSerpLimit: 10 | 20 | 30 = (() => {
+    const s = project?.settings;
+    if (s && typeof s === "object") {
+      const v = Number((s as Record<string, unknown>).serp_limit);
+      if (v === 20) return 20;
+      if (v === 30) return 30;
+    }
+    return 10;
+  })();
+  const [serpLimit, setSerpLimit] = useState<10 | 20 | 30>(initialSerpLimit);
   const initialAutoRescrape: boolean = (() => {
     const s = project?.settings;
     if (s && typeof s === "object") {
@@ -2491,6 +2510,8 @@ function SettingsCard({
                 auto_rescrape: autoRescrape,
                 workflow,
                 search_query_strategy: searchQueryStrategy,
+                top_per_variant: topPerVariant,
+                serp_limit: serpLimit,
               },
             })
           }
@@ -2650,6 +2671,42 @@ function SettingsCard({
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Twarda granica prób scrape na produkt (1–12). Pętla kończy się wcześniej po 3 wnoszących źródłach.
+              </p>
+            </div>
+            <div>
+              <Label className="text-xs">Wyników na wariant zapytania</Label>
+              <Input
+                type="number"
+                min={1}
+                max={5}
+                value={topPerVariant}
+                onChange={(e) => {
+                  const v = Math.max(1, Math.min(5, Math.floor(Number(e.target.value) || 2)));
+                  setTopPerVariant(v);
+                }}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Ile najlepszych wyników z każdego wariantu trafia do preselekcji AI (domyślnie 2).
+              </p>
+            </div>
+            <div>
+              <Label className="text-xs">Szerokość SERP</Label>
+              <Select
+                value={String(serpLimit)}
+                onValueChange={(v) => {
+                  const n = Number(v);
+                  setSerpLimit((n === 20 || n === 30 ? n : 10) as 10 | 20 | 30);
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 wyników</SelectItem>
+                  <SelectItem value="20">20 wyników</SelectItem>
+                  <SelectItem value="30">30 wyników</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Każde 10 wyników = 1 płatne zapytanie Apify (~$0.50/1000 SERP).
               </p>
             </div>
             <div className="flex items-center gap-3">
