@@ -146,7 +146,7 @@ export function buildQueryVariants(
     }
   }
 
-  // Deduplikacja po znormalizowanym query, cap 3.
+  // Deduplikacja po znormalizowanym query, cap 4.
   const seen = new Set<string>();
   const out: QueryVariant[] = [];
   for (const c of candidates) {
