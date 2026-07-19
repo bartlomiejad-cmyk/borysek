@@ -2510,6 +2510,8 @@ function SettingsCard({
                 auto_rescrape: autoRescrape,
                 workflow,
                 search_query_strategy: searchQueryStrategy,
+                top_per_variant: topPerVariant,
+                serp_limit: serpLimit,
               },
             })
           }
