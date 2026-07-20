@@ -132,7 +132,7 @@ export const getProductPreview = createServerFn({ method: "GET" })
     return {
       product: {
         id: product.id,
-        nazwa: product.nazwa,
+        nazwa: product.nazwa ?? "",
         ean: product.ean,
         kod: product.kod,
         ext_id: product.ext_id,
