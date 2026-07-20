@@ -271,15 +271,16 @@ export const getProductDetail = createServerFn({ method: "GET" })
       .from("projects")
       .select("include_extra_images")
       .eq("id", data.projectId)
-      .single();
+      .maybeSingle();
     const includeExtra = (project as { include_extra_images?: boolean } | null)?.include_extra_images ?? false;
 
     const { data: product, error } = await supabase
       .from("source_products")
       .select("*")
       .eq("id", data.productId)
-      .single();
-    if (error || !product) throw new Error(error?.message ?? "Not found");
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!product) throw new Error("Produkt nie istnieje lub brak dostępu do tego projektu.");
     const { data: enrichment } = await supabase
       .from("enrichments")
       .select("*")
