@@ -25,8 +25,8 @@ import { Route as AuthProjectsIdIndexRouteImport } from './routes/_auth/projects
 import { Route as ShareTokenPPidRouteImport } from './routes/share.$token.p.$pid'
 import { Route as ApiPublicHooksProcessBulkJobsRouteImport } from './routes/api/public/hooks/process-bulk-jobs'
 import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/projects.$id.verify'
+import { Route as ProjectsIdProductsPidPreviewRouteImport } from './routes/projects.$id.products.$pid_.preview'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
-import { Route as AuthProjectsIdProductsPidPreviewRouteImport } from './routes/_auth/projects.$id.products.$pid_.preview'
 
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
@@ -111,16 +111,16 @@ const AuthProjectsIdVerifyRoute = AuthProjectsIdVerifyRouteImport.update({
   path: '/projects/$id/verify',
   getParentRoute: () => AuthRoute,
 } as any)
+const ProjectsIdProductsPidPreviewRoute =
+  ProjectsIdProductsPidPreviewRouteImport.update({
+    id: '/projects/$id/products/$pid_/preview',
+    path: '/projects/$id/products/$pid/preview',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthProjectsIdProductsPidRoute =
   AuthProjectsIdProductsPidRouteImport.update({
     id: '/projects/$id/products/$pid',
     path: '/projects/$id/products/$pid',
-    getParentRoute: () => AuthRoute,
-  } as any)
-const AuthProjectsIdProductsPidPreviewRoute =
-  AuthProjectsIdProductsPidPreviewRouteImport.update({
-    id: '/projects/$id/products/$pid_/preview',
-    path: '/projects/$id/products/$pid/preview',
     getParentRoute: () => AuthRoute,
   } as any)
 
@@ -141,7 +141,7 @@ export interface FileRoutesByFullPath {
   '/share/$token/p/$pid': typeof ShareTokenPPidRoute
   '/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
-  '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
+  '/projects/$id/products/$pid/preview': typeof ProjectsIdProductsPidPreviewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -160,7 +160,7 @@ export interface FileRoutesByTo {
   '/share/$token/p/$pid': typeof ShareTokenPPidRoute
   '/projects/$id': typeof AuthProjectsIdIndexRoute
   '/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
-  '/projects/$id/products/$pid/preview': typeof AuthProjectsIdProductsPidPreviewRoute
+  '/projects/$id/products/$pid/preview': typeof ProjectsIdProductsPidPreviewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -181,7 +181,7 @@ export interface FileRoutesById {
   '/share/$token/p/$pid': typeof ShareTokenPPidRoute
   '/_auth/projects/$id/': typeof AuthProjectsIdIndexRoute
   '/_auth/projects/$id/products/$pid': typeof AuthProjectsIdProductsPidRoute
-  '/_auth/projects/$id/products/$pid_/preview': typeof AuthProjectsIdProductsPidPreviewRoute
+  '/projects/$id/products/$pid_/preview': typeof ProjectsIdProductsPidPreviewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -241,7 +241,7 @@ export interface FileRouteTypes {
     | '/share/$token/p/$pid'
     | '/_auth/projects/$id/'
     | '/_auth/projects/$id/products/$pid'
-    | '/_auth/projects/$id/products/$pid_/preview'
+    | '/projects/$id/products/$pid_/preview'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -255,6 +255,7 @@ export interface RootRouteChildren {
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiPublicHooksProcessBulkJobsRoute: typeof ApiPublicHooksProcessBulkJobsRoute
+  ProjectsIdProductsPidPreviewRoute: typeof ProjectsIdProductsPidPreviewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -371,18 +372,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthProjectsIdVerifyRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/projects/$id/products/$pid_/preview': {
+      id: '/projects/$id/products/$pid_/preview'
+      path: '/projects/$id/products/$pid/preview'
+      fullPath: '/projects/$id/products/$pid/preview'
+      preLoaderRoute: typeof ProjectsIdProductsPidPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_auth/projects/$id/products/$pid': {
       id: '/_auth/projects/$id/products/$pid'
       path: '/projects/$id/products/$pid'
       fullPath: '/projects/$id/products/$pid'
       preLoaderRoute: typeof AuthProjectsIdProductsPidRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/projects/$id/products/$pid_/preview': {
-      id: '/_auth/projects/$id/products/$pid_/preview'
-      path: '/projects/$id/products/$pid/preview'
-      fullPath: '/projects/$id/products/$pid/preview'
-      preLoaderRoute: typeof AuthProjectsIdProductsPidPreviewRouteImport
       parentRoute: typeof AuthRoute
     }
   }
@@ -395,7 +396,6 @@ interface AuthRouteChildren {
   AuthProjectsIdVerifyRoute: typeof AuthProjectsIdVerifyRoute
   AuthProjectsIdIndexRoute: typeof AuthProjectsIdIndexRoute
   AuthProjectsIdProductsPidRoute: typeof AuthProjectsIdProductsPidRoute
-  AuthProjectsIdProductsPidPreviewRoute: typeof AuthProjectsIdProductsPidPreviewRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
@@ -405,7 +405,6 @@ const AuthRouteChildren: AuthRouteChildren = {
   AuthProjectsIdVerifyRoute: AuthProjectsIdVerifyRoute,
   AuthProjectsIdIndexRoute: AuthProjectsIdIndexRoute,
   AuthProjectsIdProductsPidRoute: AuthProjectsIdProductsPidRoute,
-  AuthProjectsIdProductsPidPreviewRoute: AuthProjectsIdProductsPidPreviewRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
@@ -434,6 +433,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiPublicHooksProcessBulkJobsRoute: ApiPublicHooksProcessBulkJobsRoute,
+  ProjectsIdProductsPidPreviewRoute: ProjectsIdProductsPidPreviewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
