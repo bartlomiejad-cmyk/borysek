@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/_auth/projects/$id/products/$pid_/preview")({
+export const Route = createFileRoute("/projects/$id/products/$pid_/preview")({
   component: ProductPreview,
   head: () => ({ meta: [{ title: "Podgląd karty produktu" }, { name: "robots", content: "noindex" }] }),
 });
