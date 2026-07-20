@@ -1,8 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { getProductDetail } from "@/lib/pim/queries.functions";
+import { getProductPreview } from "@/lib/pim/preview.functions";
 import { resolveRegenUrl } from "@/lib/pim/media";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,22 +17,9 @@ export const Route = createFileRoute("/projects/$id/products/$pid_/preview")({
   head: () => ({ meta: [{ title: "Podgląd karty produktu" }, { name: "robots", content: "noindex" }] }),
 });
 
-type Enrichment = {
-  id: string;
-  golden_name: string | null;
-  golden_description: string | null;
-  golden_slug: string | null;
-  golden_meta_description: string | null;
-  golden_seo_keywords: string[] | null;
-  golden_features: Array<{ key: string; value: string }> | null;
-  ai_gallery_urls: string[] | null;
-  regenerated_main_image: string | null;
-  pinned_main_url: string | null;
-};
-
 function ProductPreview() {
   const { id, pid } = Route.useParams();
-  const getFn = useServerFn(getProductDetail);
+  const getFn = useServerFn(getProductPreview);
   const { data, isLoading, error } = useQuery({
     queryKey: ["product-preview", id, pid],
     queryFn: () => getFn({ data: { projectId: id, productId: pid } }),
@@ -53,7 +40,7 @@ function ProductPreview() {
 
   const gallery = useMemo<string[]>(() => {
     if (!data) return [];
-    const en = data.enrichment as unknown as Enrichment | null;
+    const en = data.enrichment;
     const list: string[] = [];
     const push = (u?: string | null) => { if (u && !list.includes(u)) list.push(u); };
     push(en?.pinned_main_url ?? null);
@@ -77,16 +64,13 @@ function ProductPreview() {
           <p className="text-sm text-muted-foreground">
             {(error as Error | null)?.message ?? "Nieznany błąd"}
           </p>
-          <Button asChild variant="outline">
-            <Link to="/projects/$id" params={{ id }}>← Wróć do projektu</Link>
-          </Button>
         </div>
       </main>
     );
   }
 
-  const en = data.enrichment as unknown as Enrichment | null;
-  const product = data.product as { nazwa: string; ean: string | null; kod: string | null; ext_id: string | null };
+  const en = data.enrichment;
+  const product = data.product;
   const goldenName = en?.golden_name?.trim() || null;
   const goldenDesc = en?.golden_description?.trim() || null;
   const features = (en?.golden_features ?? []).filter((f) => f?.key?.trim() && f?.value?.trim());
@@ -143,9 +127,7 @@ function ProductPreview() {
             Ten produkt nie ma jeszcze wygenerowanego złotego rekordu. Wygeneruj go w edycji produktu,
             a następnie wróć tutaj, żeby zobaczyć gotową kartę produktową.
           </p>
-          <Button asChild>
-            <Link to="/projects/$id/products/$pid" params={{ id, pid }}>Przejdź do edycji</Link>
-          </Button>
+
         </div>
       ) : (
         <>
