@@ -33,9 +33,10 @@ type Enrichment = {
 function ProductPreview() {
   const { id, pid } = Route.useParams();
   const getFn = useServerFn(getProductDetail);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["product-preview", id, pid],
     queryFn: () => getFn({ data: { projectId: id, productId: pid } }),
+    retry: false,
   });
 
   const [activeIdx, setActiveIdx] = useState(0);
@@ -65,8 +66,23 @@ function ProductPreview() {
     return list;
   }, [data]);
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return <main className="min-h-screen grid place-items-center text-muted-foreground">Ładowanie…</main>;
+  }
+  if (error || !data) {
+    return (
+      <main className="min-h-screen grid place-items-center p-6">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold">Nie można otworzyć podglądu</h1>
+          <p className="text-sm text-muted-foreground">
+            {(error as Error | null)?.message ?? "Nieznany błąd"}
+          </p>
+          <Button asChild variant="outline">
+            <Link to="/projects/$id" params={{ id }}>← Wróć do projektu</Link>
+          </Button>
+        </div>
+      </main>
+    );
   }
 
   const en = data.enrichment as unknown as Enrichment | null;
