@@ -372,7 +372,11 @@ function PhotoProjectPage() {
       {/* Settings */}
       <div className="rounded-2xl border border-border/50 bg-card/60 p-4 mb-6 grid md:grid-cols-3 gap-4">
         <div className="md:col-span-3">
-          <Label className="text-xs">Styl / scena dla wizualizacji (opcjonalnie)</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">Styl / scena dla wizualizacji (opcjonalnie)</Label>
+            <AiFieldButtons field="style" />
+          </div>
+          {aiRefine === "style" && <AiRefineBar field="style" />}
           <Textarea
             rows={2}
             placeholder="np. Nowoczesna kuchnia, blat drewniany, poranne światło z okna, minimalizm."
@@ -381,7 +385,11 @@ function PhotoProjectPage() {
           />
         </div>
         <div className="md:col-span-3">
-          <Label className="text-xs">Wymagania (PL) — AI przepisze je na profesjonalny prompt EN dla generatora</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">Wymagania (PL) — AI przepisze je na profesjonalny prompt EN dla generatora</Label>
+            <AiFieldButtons field="requirements" />
+          </div>
+          {aiRefine === "requirements" && <AiRefineBar field="requirements" />}
           <Textarea
             rows={4}
             placeholder={"np. Miniaturka: produkt na białym tle z 2–3 świeżymi listkami po lewej stronie i drobnymi ścinkami trawy. Wizualizacja: ogród, poranne światło, dłoń w rękawicy trzymająca produkt, w tle rozmyty żywopłot."}
