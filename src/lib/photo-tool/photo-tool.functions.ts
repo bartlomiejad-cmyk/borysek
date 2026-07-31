@@ -133,6 +133,7 @@ export const getPhotoProject = createServerFn({ method: "GET" })
 
 export const addPhotoProduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   .inputValidator((i) =>
     z
       .object({
