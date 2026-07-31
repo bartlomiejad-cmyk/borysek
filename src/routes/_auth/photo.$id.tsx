@@ -901,6 +901,8 @@ function PhotoProjectPage() {
                 </div>
               </div>
 
+              <ProductPromptEditor product={p} />
+
               {/* Output grid — always 1 miniaturka + 5 wizualizacji */}
               <div className="grid grid-cols-3 gap-2">
                 {(() => {
