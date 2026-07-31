@@ -8,6 +8,7 @@ import {
   deletePhotoProduct,
   updatePhotoProject,
   editPhotoImage,
+  suggestPhotoPrompt,
   type PhotoProduct,
 } from "@/lib/photo-tool/photo-tool.functions";
 import {
