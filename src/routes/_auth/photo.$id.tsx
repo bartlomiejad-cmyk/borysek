@@ -193,6 +193,117 @@ function PhotoProjectPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
 
+  // --- AI helpers for the two prompt fields ---------------------------------
+  type PromptField = "style" | "requirements";
+  const suggestFn = useServerFn(suggestPhotoPrompt);
+  const [aiRefine, setAiRefine] = useState<PromptField | null>(null);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiBusy, setAiBusy] = useState<PromptField | null>(null);
+
+  async function runAi(field: PromptField, mode: "generate" | "refine") {
+    const current = field === "style" ? (style ?? "") : (reqPl ?? "");
+    const other = field === "style" ? (reqPl ?? "") : (style ?? "");
+    if (mode === "refine" && aiInstruction.trim().length < 2) {
+      toast.error("Napisz co zmienić");
+      return;
+    }
+    setAiBusy(field);
+    try {
+      const res = await suggestFn({
+        data: {
+          projectId: id,
+          field,
+          mode,
+          currentText: current,
+          otherText: other,
+          instruction: mode === "refine" ? aiInstruction.trim() : undefined,
+        },
+      });
+      if (field === "style") setStyle(res.text);
+      else setReqPl(res.text);
+      setAiRefine(null);
+      setAiInstruction("");
+      toast.success("Propozycja AI wstawiona — sprawdź i zapisz ustawienia.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Błąd AI");
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  function AiFieldButtons({ field }: { field: PromptField }) {
+    const busy = aiBusy === field;
+    return (
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          disabled={busy}
+          onClick={() => runAi(field, "generate")}
+        >
+          {busy && aiRefine !== field ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5 mr-1" />
+          )}
+          Wygeneruj AI
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          disabled={busy}
+          onClick={() => {
+            setAiInstruction("");
+            setAiRefine((p) => (p === field ? null : field));
+          }}
+        >
+          <Pencil className="h-3.5 w-3.5 mr-1" />
+          Popraw AI
+        </Button>
+      </div>
+    );
+  }
+
+  function AiRefineBar({ field }: { field: PromptField }) {
+    const busy = aiBusy === field;
+    return (
+      <div className="flex items-center gap-2 my-2">
+        <Input
+          autoFocus
+          className="h-8 text-xs"
+          placeholder="Co zmienić? np. bardziej minimalistycznie, jasne tło"
+          value={aiInstruction}
+          onChange={(e) => setAiInstruction(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void runAi(field, "refine");
+            }
+          }}
+        />
+        <Button type="button" size="sm" className="h-8" disabled={busy} onClick={() => runAi(field, "refine")}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Popraw"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8"
+          onClick={() => {
+            setAiRefine(null);
+            setAiInstruction("");
+          }}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
   // --- Per-image edit state ---------------------------------------------------
   // busyEdits tracks slot keys currently being processed by FAL. We remember
   // the URL that was showing when the user submitted so we know when it has
