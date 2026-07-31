@@ -625,6 +625,56 @@ function PhotoProjectPage() {
               />
             </label>
             {pending.length > 0 && (
+              splitPerImage ? (
+              <div className="mt-3 space-y-2">
+                {pending.map((f) => (
+                  <div key={f.key} className="flex gap-3 items-start rounded-lg border p-2">
+                    <div className="relative w-20 shrink-0">
+                      <img src={f.localUrl} alt="" className="w-20 h-20 object-cover rounded-md border" />
+                      {f.status === "uploading" && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/70 rounded-md">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[11px] text-muted-foreground truncate">{f.name}</span>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            disabled={f.aiBusy || f.status !== "done"}
+                            onClick={() => void visionForPending(f.key)}
+                          >
+                            {f.aiBusy ? (
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            AI ze zdjęcia
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => removePending(f.key)}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <Textarea
+                        rows={2}
+                        className="text-xs"
+                        placeholder="Prompt (PL) tylko dla tego zdjęcia — puste = wymagania wspólne poniżej"
+                        value={f.prompt ?? ""}
+                        onChange={(e) =>
+                          setPending((prev) => prev.map((x) => (x.key === f.key ? { ...x, prompt: e.target.value } : x)))
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              ) : (
               <div className="mt-3 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
                 {pending.map((f) => (
                   <div key={f.key} className="relative group">
@@ -649,8 +699,18 @@ function PhotoProjectPage() {
                   </div>
                 ))}
               </div>
+              )
             )}
           </div>
+
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={splitPerImage}
+              onChange={(e) => setSplitPerImage(e.target.checked)}
+            />
+            Każde zdjęcie = osobny produkt (własny prompt per zdjęcie)
+          </label>
 
           <div>
             <Label className="text-xs">…lub wklej URL zdjęcia (opcjonalnie, dodatkowe źródło)</Label>
