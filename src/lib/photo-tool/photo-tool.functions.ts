@@ -133,7 +133,6 @@ export const getPhotoProject = createServerFn({ method: "GET" })
 
 export const addPhotoProduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   .inputValidator((i) =>
     z
       .object({
@@ -226,4 +225,89 @@ export const editPhotoImage = createServerFn({ method: "POST" })
     }
 
     return { jobId: (row as { id: string }).id };
+  });
+
+// --- AI-assisted prompt fields -------------------------------------------
+// Generates or refines the project-level "style/scene" and "requirements (PL)"
+// texts. Returns a suggestion only; the user still saves it explicitly.
+export const suggestPhotoPrompt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        field: z.enum(["style", "requirements"]),
+        mode: z.enum(["generate", "refine"]),
+        currentText: z.string().max(4000).optional(),
+        otherText: z.string().max(4000).optional(),
+        instruction: z.string().max(1000).optional(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("Brak konfiguracji AI (LOVABLE_API_KEY)");
+
+    const { data: project, error: projErr } = await context.supabase
+      .from("photo_projects" as never)
+      .select("id, name")
+      .eq("id", data.projectId)
+      .maybeSingle();
+    if (projErr) throw new Error(projErr.message);
+    if (!project) throw new Error("Nie znaleziono projektu");
+
+    const { data: products } = await context.supabase
+      .from("photo_products" as never)
+      .select("name, description")
+      .eq("project_id", data.projectId)
+      .limit(10);
+
+    const productLines = ((products ?? []) as Array<{ name?: string | null; description?: string | null }>)
+      .map((p) => `- ${p.name ?? "(bez nazwy)"}${p.description ? `: ${p.description.slice(0, 300)}` : ""}`)
+      .join("\n");
+
+    const fieldDesc =
+      data.field === "style"
+        ? "POLE: „Styl / scena dla wizualizacji” — krótki opis scenerii, światła, tła i nastroju (1–3 zdania, po polsku). Bez list, bez nagłówków."
+        : "POLE: „Wymagania (PL)” — konkretne wytyczne po polsku: osobno co ma być na MINIATURCE (packshot na białym tle) i osobno na WIZUALIZACJI (scena lifestyle). 2–5 zdań, konkretnie, bez marketingowego lania wody.";
+
+    const system =
+      "Jesteś dyrektorem artystycznym fotografii produktowej e-commerce. Piszesz po polsku. " +
+      "Zwracasz WYŁĄCZNIE gotowy tekst do wklejenia w pole formularza — bez komentarzy, bez cudzysłowów, bez markdown. " +
+      "Produkt musi pozostać wierny oryginałowi: nie wymyślaj etykiet, logotypów ani zmian opakowania.";
+
+    const parts = [
+      fieldDesc,
+      `PROJEKT: ${(project as { name?: string }).name ?? "-"}`,
+      productLines ? `PRODUKTY W PROJEKCIE:\n${productLines}` : "PRODUKTY: brak (projekt pusty)",
+      data.otherText?.trim() ? `KONTEKST — drugie pole ustawień:\n${data.otherText.trim()}` : "",
+      data.mode === "refine"
+        ? `AKTUALNA TREŚĆ POLA:\n${data.currentText?.trim() || "(puste)"}\n\nPOPRAW ZGODNIE Z INSTRUKCJĄ:\n${data.instruction?.trim() || "popraw i doprecyzuj"}`
+        : "Wygeneruj propozycję treści tego pola.",
+    ].filter(Boolean);
+
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": apiKey,
+        "X-Lovable-AIG-SDK": "raw",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3.6-flash",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: parts.join("\n\n") },
+        ],
+      }),
+    });
+
+    if (res.status === 429) throw new Error("Limit zapytań AI przekroczony — spróbuj za chwilę.");
+    if (res.status === 402) throw new Error("Brak kredytów AI — doładuj w Ustawieniach.");
+    if (!res.ok) throw new Error(`Błąd AI (${res.status}): ${(await res.text()).slice(0, 300)}`);
+
+    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = (j.choices?.[0]?.message?.content ?? "").trim();
+    if (!text) throw new Error("AI nie zwróciło treści — spróbuj ponownie.");
+    return { text };
   });
