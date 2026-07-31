@@ -741,6 +741,35 @@ function PhotoProjectPage() {
             </div>
           </div>
 
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs">
+                Wymagania (PL) dla {splitPerImage ? "zdjęć bez własnego promptu" : "tego produktu"} — nadpisują ustawienia projektu
+              </Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                disabled={pReqAiBusy}
+                onClick={() => void visionForAddForm()}
+              >
+                {pReqAiBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                )}
+                AI ze zdjęć (Vision)
+              </Button>
+            </div>
+            <Textarea
+              rows={3}
+              placeholder="np. Miniaturka: packshot na białym tle, produkt pod lekkim kątem. Wizualizacja: kuchnia, poranne światło, dłoń trzymająca produkt."
+              value={pReq}
+              onChange={(e) => setPReq(e.target.value)}
+            />
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="text-xs text-muted-foreground">
               {totalSources > 0 ? (
