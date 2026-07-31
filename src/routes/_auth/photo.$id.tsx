@@ -237,6 +237,71 @@ function PhotoProjectPage() {
     }
   }
 
+  // Per-product prompt editor rendered in every product card.
+  function ProductPromptEditor({ product }: { product: PhotoProduct }) {
+    const [txt, setTxt] = useState(product.requirements_pl ?? "");
+    const [busy, setBusy] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const sources = product.source_image_urls?.length ? product.source_image_urls : [product.source_image_url];
+
+    async function runVision() {
+      setBusy(true);
+      try {
+        const res = await visionFn({
+          data: {
+            projectId: id,
+            imageUrls: sources.slice(0, 6),
+            productName: product.name ?? undefined,
+            currentText: txt || undefined,
+          },
+        });
+        setTxt(res.text);
+        toast.success("Prompt dobrany na podstawie zdjęć — zapisz, żeby użyć.");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Błąd AI");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function save() {
+      setSaving(true);
+      try {
+        await updProdFn({ data: { id: product.id, requirements_pl: txt.trim() || null } });
+        toast.success("Prompt produktu zapisany");
+        qc.invalidateQueries({ queryKey: ["photo-project", id] });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Błąd");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div className="mb-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase text-muted-foreground">Prompt (PL) tego produktu</div>
+          <div className="flex items-center gap-1">
+            <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void runVision()}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+              AI ze zdjęć
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={saving} onClick={() => void save()}>
+              Zapisz
+            </Button>
+          </div>
+        </div>
+        <Textarea
+          rows={2}
+          className="text-xs mt-1"
+          placeholder="Puste = użyte zostaną wymagania projektu."
+          value={txt}
+          onChange={(e) => setTxt(e.target.value)}
+        />
+      </div>
+    );
+  }
+
   const del = useMutation({
     mutationFn: (pid: string) => delFn({ data: { id: pid } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["photo-project", id] }),
