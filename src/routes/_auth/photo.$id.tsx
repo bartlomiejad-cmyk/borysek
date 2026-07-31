@@ -9,6 +9,8 @@ import {
   updatePhotoProject,
   editPhotoImage,
   suggestPhotoPrompt,
+  updatePhotoProduct,
+  suggestProductPromptFromImages,
   type PhotoProduct,
 } from "@/lib/photo-tool/photo-tool.functions";
 import {
@@ -56,6 +58,8 @@ function PhotoProjectPage() {
   const delFn = useServerFn(deletePhotoProduct);
   const updFn = useServerFn(updatePhotoProject);
   const editFn = useServerFn(editPhotoImage);
+  const updProdFn = useServerFn(updatePhotoProduct);
+  const visionFn = useServerFn(suggestProductPromptFromImages);
   const createJob = useServerFn(createBulkJob);
   const cancelJob = useServerFn(cancelBulkJob);
   const activeJob = useServerFn(getActiveBulkJob);
@@ -94,10 +98,13 @@ function PhotoProjectPage() {
   // Add-product form state
   const [urlInput, setUrlInput] = useState("");
   const [pending, setPending] = useState<
-    { key: string; name: string; localUrl: string; status: "uploading" | "done" | "error"; publicUrl?: string; error?: string }[]
+    { key: string; name: string; localUrl: string; status: "uploading" | "done" | "error"; publicUrl?: string; error?: string; prompt?: string; aiBusy?: boolean }[]
   >([]);
   const [pName, setPName] = useState("");
   const [pDesc, setPDesc] = useState("");
+  const [pReq, setPReq] = useState("");
+  const [splitPerImage, setSplitPerImage] = useState(false);
+  const [pReqAiBusy, setPReqAiBusy] = useState(false);
 
   const readyUrls = pending.filter((f) => f.status === "done" && f.publicUrl).map((f) => f.publicUrl as string);
   const totalSources = readyUrls.length + (urlInput.trim() ? 1 : 0);
@@ -147,22 +154,88 @@ function PhotoProjectPage() {
       if (urlInput.trim()) urls.push(urlInput.trim());
       if (!urls.length) throw new Error("Dodaj przynajmniej jedno zdjęcie źródłowe (upload lub URL)");
       if (pending.some((p) => p.status === "uploading")) throw new Error("Poczekaj aż uploady się zakończą");
+      if (splitPerImage) {
+        // Each source photo becomes its own product, with its own PL prompt.
+        const items = pending
+          .filter((f) => f.status === "done" && f.publicUrl)
+          .map((f) => ({ url: f.publicUrl as string, prompt: (f.prompt ?? "").trim(), label: f.name }));
+        if (urlInput.trim()) items.push({ url: urlInput.trim(), prompt: "", label: "" });
+        for (const it of items) {
+          await addFn({
+            data: {
+              projectId: id,
+              source_image_urls: [it.url],
+              name: (pName.trim() ? `${pName.trim()} — ${it.label || ""}`.trim() : it.label) || null,
+              description: pDesc.trim() || null,
+              requirements_pl: it.prompt || pReq.trim() || null,
+            },
+          });
+        }
+        return;
+      }
       await addFn({
         data: {
           projectId: id,
           source_image_urls: urls,
           name: pName.trim() || null,
           description: pDesc.trim() || null,
+          requirements_pl: pReq.trim() || null,
         },
       });
     },
     onSuccess: () => {
       for (const p of pending) if (p.localUrl) URL.revokeObjectURL(p.localUrl);
-      setPending([]); setUrlInput(""); setPName(""); setPDesc("");
+      setPending([]); setUrlInput(""); setPName(""); setPDesc(""); setPReq("");
       qc.invalidateQueries({ queryKey: ["photo-project", id] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
+
+  // --- Gemini Vision helpers -------------------------------------------------
+  async function visionForPending(key: string) {
+    const item = pending.find((f) => f.key === key);
+    if (!item?.publicUrl) { toast.error("Poczekaj aż zdjęcie się wgra"); return; }
+    setPending((prev) => prev.map((f) => (f.key === key ? { ...f, aiBusy: true } : f)));
+    try {
+      const res = await visionFn({
+        data: {
+          projectId: id,
+          imageUrls: [item.publicUrl],
+          productName: pName.trim() || undefined,
+          currentText: item.prompt || undefined,
+        },
+      });
+      setPending((prev) => prev.map((f) => (f.key === key ? { ...f, prompt: res.text } : f)));
+      toast.success("Prompt dobrany na podstawie zdjęcia");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Błąd AI");
+    } finally {
+      setPending((prev) => prev.map((f) => (f.key === key ? { ...f, aiBusy: false } : f)));
+    }
+  }
+
+  async function visionForAddForm() {
+    const urls = [...readyUrls];
+    if (urlInput.trim()) urls.push(urlInput.trim());
+    if (!urls.length) { toast.error("Najpierw dodaj zdjęcie"); return; }
+    setPReqAiBusy(true);
+    try {
+      const res = await visionFn({
+        data: {
+          projectId: id,
+          imageUrls: urls.slice(0, 6),
+          productName: pName.trim() || undefined,
+          currentText: pReq.trim() || undefined,
+        },
+      });
+      setPReq(res.text);
+      toast.success("Prompt dobrany na podstawie zdjęć");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Błąd AI");
+    } finally {
+      setPReqAiBusy(false);
+    }
+  }
 
   const del = useMutation({
     mutationFn: (pid: string) => delFn({ data: { id: pid } }),
