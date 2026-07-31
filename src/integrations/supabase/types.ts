@@ -352,6 +352,7 @@ export type Database = {
           name: string | null
           project_id: string
           prompt_source_hash: string | null
+          requirements_pl: string | null
           source_image_url: string
           source_image_urls: string[]
           status: string
@@ -370,6 +371,7 @@ export type Database = {
           name?: string | null
           project_id: string
           prompt_source_hash?: string | null
+          requirements_pl?: string | null
           source_image_url: string
           source_image_urls?: string[]
           status?: string
@@ -388,6 +390,7 @@ export type Database = {
           name?: string | null
           project_id?: string
           prompt_source_hash?: string | null
+          requirements_pl?: string | null
           source_image_url?: string
           source_image_urls?: string[]
           status?: string
