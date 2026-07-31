@@ -9,6 +9,8 @@ import {
   updatePhotoProject,
   editPhotoImage,
   suggestPhotoPrompt,
+  updatePhotoProduct,
+  suggestProductPromptFromImages,
   type PhotoProduct,
 } from "@/lib/photo-tool/photo-tool.functions";
 import {
@@ -56,6 +58,8 @@ function PhotoProjectPage() {
   const delFn = useServerFn(deletePhotoProduct);
   const updFn = useServerFn(updatePhotoProject);
   const editFn = useServerFn(editPhotoImage);
+  const updProdFn = useServerFn(updatePhotoProduct);
+  const visionFn = useServerFn(suggestProductPromptFromImages);
   const createJob = useServerFn(createBulkJob);
   const cancelJob = useServerFn(cancelBulkJob);
   const activeJob = useServerFn(getActiveBulkJob);
@@ -94,10 +98,13 @@ function PhotoProjectPage() {
   // Add-product form state
   const [urlInput, setUrlInput] = useState("");
   const [pending, setPending] = useState<
-    { key: string; name: string; localUrl: string; status: "uploading" | "done" | "error"; publicUrl?: string; error?: string }[]
+    { key: string; name: string; localUrl: string; status: "uploading" | "done" | "error"; publicUrl?: string; error?: string; prompt?: string; aiBusy?: boolean }[]
   >([]);
   const [pName, setPName] = useState("");
   const [pDesc, setPDesc] = useState("");
+  const [pReq, setPReq] = useState("");
+  const [splitPerImage, setSplitPerImage] = useState(false);
+  const [pReqAiBusy, setPReqAiBusy] = useState(false);
 
   const readyUrls = pending.filter((f) => f.status === "done" && f.publicUrl).map((f) => f.publicUrl as string);
   const totalSources = readyUrls.length + (urlInput.trim() ? 1 : 0);
@@ -147,22 +154,153 @@ function PhotoProjectPage() {
       if (urlInput.trim()) urls.push(urlInput.trim());
       if (!urls.length) throw new Error("Dodaj przynajmniej jedno zdjęcie źródłowe (upload lub URL)");
       if (pending.some((p) => p.status === "uploading")) throw new Error("Poczekaj aż uploady się zakończą");
+      if (splitPerImage) {
+        // Each source photo becomes its own product, with its own PL prompt.
+        const items = pending
+          .filter((f) => f.status === "done" && f.publicUrl)
+          .map((f) => ({ url: f.publicUrl as string, prompt: (f.prompt ?? "").trim(), label: f.name }));
+        if (urlInput.trim()) items.push({ url: urlInput.trim(), prompt: "", label: "" });
+        for (const it of items) {
+          await addFn({
+            data: {
+              projectId: id,
+              source_image_urls: [it.url],
+              name: (pName.trim() ? `${pName.trim()} — ${it.label || ""}`.trim() : it.label) || null,
+              description: pDesc.trim() || null,
+              requirements_pl: it.prompt || pReq.trim() || null,
+            },
+          });
+        }
+        return;
+      }
       await addFn({
         data: {
           projectId: id,
           source_image_urls: urls,
           name: pName.trim() || null,
           description: pDesc.trim() || null,
+          requirements_pl: pReq.trim() || null,
         },
       });
     },
     onSuccess: () => {
       for (const p of pending) if (p.localUrl) URL.revokeObjectURL(p.localUrl);
-      setPending([]); setUrlInput(""); setPName(""); setPDesc("");
+      setPending([]); setUrlInput(""); setPName(""); setPDesc(""); setPReq("");
       qc.invalidateQueries({ queryKey: ["photo-project", id] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Błąd"),
   });
+
+  // --- Gemini Vision helpers -------------------------------------------------
+  async function visionForPending(key: string) {
+    const item = pending.find((f) => f.key === key);
+    if (!item?.publicUrl) { toast.error("Poczekaj aż zdjęcie się wgra"); return; }
+    setPending((prev) => prev.map((f) => (f.key === key ? { ...f, aiBusy: true } : f)));
+    try {
+      const res = await visionFn({
+        data: {
+          projectId: id,
+          imageUrls: [item.publicUrl],
+          productName: pName.trim() || undefined,
+          currentText: item.prompt || undefined,
+        },
+      });
+      setPending((prev) => prev.map((f) => (f.key === key ? { ...f, prompt: res.text } : f)));
+      toast.success("Prompt dobrany na podstawie zdjęcia");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Błąd AI");
+    } finally {
+      setPending((prev) => prev.map((f) => (f.key === key ? { ...f, aiBusy: false } : f)));
+    }
+  }
+
+  async function visionForAddForm() {
+    const urls = [...readyUrls];
+    if (urlInput.trim()) urls.push(urlInput.trim());
+    if (!urls.length) { toast.error("Najpierw dodaj zdjęcie"); return; }
+    setPReqAiBusy(true);
+    try {
+      const res = await visionFn({
+        data: {
+          projectId: id,
+          imageUrls: urls.slice(0, 6),
+          productName: pName.trim() || undefined,
+          currentText: pReq.trim() || undefined,
+        },
+      });
+      setPReq(res.text);
+      toast.success("Prompt dobrany na podstawie zdjęć");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Błąd AI");
+    } finally {
+      setPReqAiBusy(false);
+    }
+  }
+
+  // Per-product prompt editor rendered in every product card.
+  function ProductPromptEditor({ product }: { product: PhotoProduct }) {
+    const [txt, setTxt] = useState(product.requirements_pl ?? "");
+    const [busy, setBusy] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const sources = product.source_image_urls?.length ? product.source_image_urls : [product.source_image_url];
+
+    async function runVision() {
+      setBusy(true);
+      try {
+        const res = await visionFn({
+          data: {
+            projectId: id,
+            imageUrls: sources.slice(0, 6),
+            productName: product.name ?? undefined,
+            currentText: txt || undefined,
+          },
+        });
+        setTxt(res.text);
+        toast.success("Prompt dobrany na podstawie zdjęć — zapisz, żeby użyć.");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Błąd AI");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function save() {
+      setSaving(true);
+      try {
+        await updProdFn({ data: { id: product.id, requirements_pl: txt.trim() || null } });
+        toast.success("Prompt produktu zapisany");
+        qc.invalidateQueries({ queryKey: ["photo-project", id] });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Błąd");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div className="mb-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase text-muted-foreground">Prompt (PL) tego produktu</div>
+          <div className="flex items-center gap-1">
+            <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void runVision()}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+              AI ze zdjęć
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={saving} onClick={() => void save()}>
+              Zapisz
+            </Button>
+          </div>
+        </div>
+        <Textarea
+          rows={2}
+          className="text-xs mt-1"
+          placeholder="Puste = użyte zostaną wymagania projektu."
+          value={txt}
+          onChange={(e) => setTxt(e.target.value)}
+        />
+      </div>
+    );
+  }
 
   const del = useMutation({
     mutationFn: (pid: string) => delFn({ data: { id: pid } }),
@@ -552,6 +690,56 @@ function PhotoProjectPage() {
               />
             </label>
             {pending.length > 0 && (
+              splitPerImage ? (
+              <div className="mt-3 space-y-2">
+                {pending.map((f) => (
+                  <div key={f.key} className="flex gap-3 items-start rounded-lg border p-2">
+                    <div className="relative w-20 shrink-0">
+                      <img src={f.localUrl} alt="" className="w-20 h-20 object-cover rounded-md border" />
+                      {f.status === "uploading" && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/70 rounded-md">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[11px] text-muted-foreground truncate">{f.name}</span>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            disabled={f.aiBusy || f.status !== "done"}
+                            onClick={() => void visionForPending(f.key)}
+                          >
+                            {f.aiBusy ? (
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            AI ze zdjęcia
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => removePending(f.key)}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <Textarea
+                        rows={2}
+                        className="text-xs"
+                        placeholder="Prompt (PL) tylko dla tego zdjęcia — puste = wymagania wspólne poniżej"
+                        value={f.prompt ?? ""}
+                        onChange={(e) =>
+                          setPending((prev) => prev.map((x) => (x.key === f.key ? { ...x, prompt: e.target.value } : x)))
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              ) : (
               <div className="mt-3 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
                 {pending.map((f) => (
                   <div key={f.key} className="relative group">
@@ -576,8 +764,18 @@ function PhotoProjectPage() {
                   </div>
                 ))}
               </div>
+              )
             )}
           </div>
+
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={splitPerImage}
+              onChange={(e) => setSplitPerImage(e.target.checked)}
+            />
+            Każde zdjęcie = osobny produkt (własny prompt per zdjęcie)
+          </label>
 
           <div>
             <Label className="text-xs">…lub wklej URL zdjęcia (opcjonalnie, dodatkowe źródło)</Label>
@@ -606,6 +804,35 @@ function PhotoProjectPage() {
                 onChange={(e) => setPDesc(e.target.value)}
               />
             </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs">
+                Wymagania (PL) dla {splitPerImage ? "zdjęć bez własnego promptu" : "tego produktu"} — nadpisują ustawienia projektu
+              </Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                disabled={pReqAiBusy}
+                onClick={() => void visionForAddForm()}
+              >
+                {pReqAiBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                )}
+                AI ze zdjęć (Vision)
+              </Button>
+            </div>
+            <Textarea
+              rows={3}
+              placeholder="np. Miniaturka: packshot na białym tle, produkt pod lekkim kątem. Wizualizacja: kuchnia, poranne światło, dłoń trzymająca produkt."
+              value={pReq}
+              onChange={(e) => setPReq(e.target.value)}
+            />
           </div>
 
           <div className="flex items-center justify-between">
@@ -673,6 +900,8 @@ function PhotoProjectPage() {
                   ))}
                 </div>
               </div>
+
+              <ProductPromptEditor product={p} />
 
               {/* Output grid — always 1 miniaturka + 5 wizualizacji */}
               <div className="grid grid-cols-3 gap-2">

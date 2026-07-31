@@ -19,6 +19,7 @@ export type PhotoProduct = {
   project_id: string;
   name: string | null;
   description: string | null;
+  requirements_pl: string | null;
   source_image_url: string;
   source_image_urls: string[];
   thumbnail_url: string | null;
@@ -37,6 +38,7 @@ function mapProduct(row: Record<string, unknown>): PhotoProduct {
     project_id: row.project_id as string,
     name: (row.name as string | null) ?? null,
     description: (row.description as string | null) ?? null,
+    requirements_pl: (row.requirements_pl as string | null) ?? null,
     source_image_url: row.source_image_url as string,
     source_image_urls: Array.isArray(row.source_image_urls)
       ? (row.source_image_urls as string[])
@@ -139,6 +141,7 @@ export const addPhotoProduct = createServerFn({ method: "POST" })
         projectId: z.string().uuid(),
         name: z.string().max(400).optional().nullable(),
         description: z.string().max(8000).optional().nullable(),
+        requirements_pl: z.string().max(4000).optional().nullable(),
         source_image_urls: z.array(z.string().url().max(2000)).min(1).max(50),
       })
       .parse(i),
@@ -151,6 +154,7 @@ export const addPhotoProduct = createServerFn({ method: "POST" })
         user_id: context.userId,
         name: data.name ?? null,
         description: data.description ?? null,
+        requirements_pl: data.requirements_pl?.trim() || null,
         source_image_url: data.source_image_urls[0],
         source_image_urls: data.source_image_urls,
       } as never)
@@ -167,6 +171,105 @@ export const deletePhotoProduct = createServerFn({ method: "POST" })
     const { error } = await context.supabase.from("photo_products" as never).delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// Per-product prompt override — lets the user write requirements for a single
+// photo/product instead of relying only on the project-wide field.
+export const updatePhotoProduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        name: z.string().max(400).nullable().optional(),
+        description: z.string().max(8000).nullable().optional(),
+        requirements_pl: z.string().max(4000).nullable().optional(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { id, ...patch } = data;
+    const { error } = await context.supabase
+      .from("photo_products" as never)
+      .update(patch as never)
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// --- Gemini Vision: propose per-photo requirements from the source images ---
+export const suggestProductPromptFromImages = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) =>
+    z
+      .object({
+        projectId: z.string().uuid(),
+        imageUrls: z.array(z.string().url().max(2000)).min(1).max(6),
+        productName: z.string().max(400).optional(),
+        currentText: z.string().max(4000).optional(),
+        instruction: z.string().max(1000).optional(),
+      })
+      .parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const apiKey = process.env.LOVABLE_API_KEY;
+    if (!apiKey) throw new Error("Brak konfiguracji AI (LOVABLE_API_KEY)");
+
+    const { data: project } = await context.supabase
+      .from("photo_projects" as never)
+      .select("id, name, style_prompt, requirements_pl")
+      .eq("id", data.projectId)
+      .maybeSingle();
+    if (!project) throw new Error("Nie znaleziono projektu");
+    const proj = project as { name?: string; style_prompt?: string | null; requirements_pl?: string | null };
+
+    const system =
+      "Jesteś dyrektorem artystycznym fotografii produktowej e-commerce. Piszesz po polsku. " +
+      "Oglądasz zdjęcia KONKRETNEGO produktu i piszesz wytyczne dopasowane do tego, co widzisz (kategoria, materiał, kolor, kształt, sposób użycia). " +
+      "Zwracasz WYŁĄCZNIE gotowy tekst do wklejenia w pole formularza — bez komentarzy, bez cudzysłowów, bez markdown. " +
+      "2–5 zdań: osobno co ma być na MINIATURCE (packshot na białym tle) i osobno na WIZUALIZACJI (realistyczna scena użycia). " +
+      "Produkt musi pozostać wierny oryginałowi: nie wymyślaj etykiet, logotypów ani zmian opakowania.";
+
+    const textParts = [
+      `PROJEKT: ${proj.name ?? "-"}`,
+      data.productName?.trim() ? `NAZWA PRODUKTU: ${data.productName.trim()}` : "",
+      proj.style_prompt?.trim() ? `STYL PROJEKTU: ${proj.style_prompt.trim()}` : "",
+      proj.requirements_pl?.trim() ? `WYMAGANIA PROJEKTU (kontekst):\n${proj.requirements_pl.trim()}` : "",
+      data.currentText?.trim() ? `AKTUALNA TREŚĆ POLA:\n${data.currentText.trim()}` : "",
+      data.instruction?.trim()
+        ? `POPRAW ZGODNIE Z INSTRUKCJĄ:\n${data.instruction.trim()}`
+        : "Na podstawie zdjęć napisz wytyczne dla tego produktu.",
+    ].filter(Boolean);
+
+    const content: Array<Record<string, unknown>> = [
+      { type: "text", text: textParts.join("\n\n") },
+      ...data.imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+    ];
+
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": apiKey,
+        "X-Lovable-AIG-SDK": "raw",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3.6-flash",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content },
+        ],
+      }),
+    });
+
+    if (res.status === 429) throw new Error("Limit zapytań AI przekroczony — spróbuj za chwilę.");
+    if (res.status === 402) throw new Error("Brak kredytów AI — doładuj w Ustawieniach.");
+    if (!res.ok) throw new Error(`Błąd AI (${res.status}): ${(await res.text()).slice(0, 300)}`);
+
+    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = (j.choices?.[0]?.message?.content ?? "").trim();
+    if (!text) throw new Error("AI nie zwróciło treści — spróbuj ponownie.");
+    return { text };
   });
 
 // Queue a per-image edit job. The worker pipeline (bulk_jobs → dispatcher →

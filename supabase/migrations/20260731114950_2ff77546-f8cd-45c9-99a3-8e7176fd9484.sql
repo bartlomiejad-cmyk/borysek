@@ -1,0 +1,1 @@
+ALTER TABLE public.photo_products ADD COLUMN IF NOT EXISTS requirements_pl text;

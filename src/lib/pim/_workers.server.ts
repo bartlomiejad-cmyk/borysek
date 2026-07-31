@@ -3552,7 +3552,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
 
   const { data: prodRow } = await supabaseAdmin
     .from("photo_products" as never)
-    .select("id, project_id, name, description, source_image_url, source_image_urls, generated_thumb_prompt, generated_lifestyle_prompt, prompt_source_hash")
+    .select("id, project_id, name, description, requirements_pl, source_image_url, source_image_urls, generated_thumb_prompt, generated_lifestyle_prompt, prompt_source_hash")
     .eq("id", photoProductId)
     .maybeSingle();
   if (!prodRow) throw new Error("Photo product not found");
@@ -3561,6 +3561,7 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
     project_id: string;
     name: string | null;
     description: string | null;
+    requirements_pl: string | null;
     source_image_url: string;
     source_image_urls: string[] | null;
     generated_thumb_prompt: string | null;
@@ -3594,7 +3595,8 @@ export async function runPhotoToolGenerate(photoProductId: string, ctx?: WorkerC
 
   const productDesc = (p.description ?? "").trim();
   const productName = (p.name ?? "product").trim();
-  const requirementsPl = (proj.requirements_pl ?? "").trim();
+  // Per-product requirements win over the project-wide field when present.
+  const requirementsPl = ((p.requirements_pl ?? "").trim() || (proj.requirements_pl ?? "").trim());
   const projectStyle = (proj.style_prompt ?? "").trim();
 
   // Build (or reuse cached) EN prompts translated from Polish requirements
