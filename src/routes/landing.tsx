@@ -34,6 +34,7 @@ function LandingPage() {
       <Navbar />
       <Hero />
       <HowSection />
+      <BeforeAfterShowcase />
     </main>
   );
 }
