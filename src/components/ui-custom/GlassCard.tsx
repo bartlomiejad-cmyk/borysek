@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 type GlassCardProps = {
@@ -6,6 +6,7 @@ type GlassCardProps = {
   padding?: "none" | "sm" | "md" | "lg";
   radius?: "card" | "lg";
   className?: string;
+  style?: CSSProperties;
   children?: ReactNode;
 };
 
@@ -21,6 +22,7 @@ export function GlassCard({
   padding = "md",
   radius = "card",
   className,
+  style,
   children,
 }: GlassCardProps) {
   return (
@@ -36,6 +38,7 @@ export function GlassCard({
           variant === "strong" ? "var(--glass-border-strong)" : "var(--glass-border)",
         borderRadius: radius === "lg" ? "var(--radius-card-lg)" : "var(--radius-card)",
         boxShadow: "var(--glass-highlight), var(--glass-shadow)",
+        ...style,
       }}
     >
       {children}
