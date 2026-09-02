@@ -7,6 +7,8 @@ import { HowSection } from "@/components/landing/HowSection";
 import { ProcessFlow } from "@/components/sections/ProcessFlow";
 import { BeforeAfterShowcase } from "@/components/sections/BeforeAfterShowcase";
 import { CaseStudies } from "@/components/sections/CaseStudies";
+import { OfferSection } from "@/components/sections/OfferSection";
+import { PlatformsSection } from "@/components/sections/PlatformsSection";
 
 export const Route = createFileRoute("/landing")({
   head: () => ({
@@ -48,6 +50,9 @@ function LandingPage() {
       <HowSection />
       <BeforeAfterShowcase />
       <ProcessFlow />
+      <OfferSection />
+      <PlatformsSection />
+      <div id="contact" className="scroll-mt-24" />
     </main>
   );
 }
