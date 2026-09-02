@@ -55,7 +55,7 @@ function LandingPage() {
       <ProcessFlow />
       <OfferSection />
       <PlatformsSection />
-      <PlatformsSection />
+
       <FaqSection />
       <ContactSection />
       <SiteFooter />
