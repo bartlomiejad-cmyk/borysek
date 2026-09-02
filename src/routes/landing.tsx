@@ -55,7 +55,10 @@ function LandingPage() {
       <ProcessFlow />
       <OfferSection />
       <PlatformsSection />
-      <div id="contact" className="scroll-mt-24" />
+      <PlatformsSection />
+      <FaqSection />
+      <ContactSection />
+      <SiteFooter />
     </main>
   );
 }
