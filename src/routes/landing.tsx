@@ -3,6 +3,7 @@ import { PageBackground } from "@/components/ui-custom/PageBackground";
 import { Navbar } from "@/components/landing/Navbar";
 import { Hero } from "@/components/landing/Hero";
 import { HowSection } from "@/components/landing/HowSection";
+import { BeforeAfterShowcase } from "@/components/sections/BeforeAfterShowcase";
 
 export const Route = createFileRoute("/landing")({
   head: () => ({
