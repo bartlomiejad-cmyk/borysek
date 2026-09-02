@@ -1,0 +1,46 @@
+import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+type GlassCardProps = {
+  variant?: "default" | "strong";
+  padding?: "none" | "sm" | "md" | "lg";
+  radius?: "card" | "lg";
+  className?: string;
+  children?: ReactNode;
+};
+
+const paddings: Record<NonNullable<GlassCardProps["padding"]>, string> = {
+  none: "",
+  sm: "p-4",
+  md: "p-6",
+  lg: "p-8 md:p-10",
+};
+
+export function GlassCard({
+  variant = "default",
+  padding = "md",
+  radius = "card",
+  className,
+  children,
+}: GlassCardProps) {
+  return (
+    <div
+      className={cn(
+        "relative border backdrop-blur-[20px]",
+        paddings[padding],
+        className,
+      )}
+      style={{
+        background: variant === "strong" ? "var(--glass-bg-strong)" : "var(--glass-bg)",
+        borderColor:
+          variant === "strong" ? "var(--glass-border-strong)" : "var(--glass-border)",
+        borderRadius: radius === "lg" ? "var(--radius-card-lg)" : "var(--radius-card)",
+        boxShadow: "var(--glass-highlight), var(--glass-shadow)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export default GlassCard;

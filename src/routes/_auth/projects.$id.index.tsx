@@ -324,7 +324,7 @@ function ProjectPage() {
   const updateSearch = (partial: Partial<typeof urlSearch>) => {
     navigate({
       to: ".",
-      search: (prev: typeof urlSearch) => ({ ...prev, ...partial }),
+      search: ((prev: Record<string, unknown>) => ({ ...prev, ...partial })) as never,
     });
   };
 
