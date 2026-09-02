@@ -9,6 +9,9 @@ import { BeforeAfterShowcase } from "@/components/sections/BeforeAfterShowcase";
 import { CaseStudies } from "@/components/sections/CaseStudies";
 import { OfferSection } from "@/components/sections/OfferSection";
 import { PlatformsSection } from "@/components/sections/PlatformsSection";
+import { FaqSection } from "@/components/sections/FaqSection";
+import { ContactSection } from "@/components/sections/ContactSection";
+import { SiteFooter } from "@/components/landing/SiteFooter";
 
 export const Route = createFileRoute("/landing")({
   head: () => ({
