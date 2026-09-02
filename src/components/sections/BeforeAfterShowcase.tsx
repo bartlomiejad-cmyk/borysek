@@ -55,6 +55,14 @@ export function BeforeAfterShowcase() {
             <Pill variant="neutral">Karta niekompletna: 3 z 8 pól</Pill>
           )}
         </div>
+
+        <p
+          className="mx-auto mt-8 max-w-2xl text-center lp-body"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Każdy opis powstaje z realnych, zweryfikowanych źródeł opisujących dokładnie ten
+          produkt, nie z wyobraźni modelu.
+        </p>
       </Container>
     </section>
   );
