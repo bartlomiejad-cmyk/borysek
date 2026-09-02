@@ -10,6 +10,7 @@ const PAUSE_MS = 2500;
 function WatchImage() {
   return (
     <div
+      aria-hidden
       className="flex h-full w-full items-center justify-center"
       style={{
         background:
@@ -33,7 +34,7 @@ function usePrefersReducedMotion() {
   return reduced;
 }
 
-/** step: 0 = empty, 1..TOTAL = fields filled by AI, TOTAL+1 = verified/published */
+/** step: 0 = pusta karta, 1..TOTAL = pola uzupełniane przez AI, TOTAL+1 = opublikowana */
 export function HeroDemo() {
   const reduced = usePrefersReducedMotion();
   const [step, setStep] = useState(0);
@@ -71,16 +72,15 @@ export function HeroDemo() {
     <div className="relative flex w-full items-center justify-center py-8">
       <div
         aria-hidden
-        className="pointer-events-none absolute h-[22rem] w-[22rem] rounded-full"
+        className="pointer-events-none absolute h-[13rem] w-[13rem] rounded-full opacity-30 sm:h-[22rem] sm:w-[22rem] sm:opacity-40"
         style={{
           background: "radial-gradient(closest-side, var(--accent), rgba(0,188,135,0))",
-          filter: "blur(100px)",
-          opacity: 0.4,
+          filter: "blur(90px)",
         }}
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute hidden h-[70%] w-[280px] border backdrop-blur-[20px] sm:block"
+        className="lp-glass pointer-events-none absolute hidden h-[70%] w-[280px] border sm:block"
         style={{
           transform: "translate(56px, 10px) scale(0.85)",
           opacity: 0.3,
@@ -91,7 +91,7 @@ export function HeroDemo() {
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute hidden h-[80%] w-[280px] border backdrop-blur-[20px] sm:block"
+        className="lp-glass pointer-events-none absolute hidden h-[80%] w-[280px] border sm:block"
         style={{
           transform: "translate(28px, 4px) scale(0.92)",
           opacity: 0.5,
@@ -100,15 +100,17 @@ export function HeroDemo() {
           borderRadius: "var(--radius-card)",
         }}
       />
-      <ProductCard
-        className="relative"
-        title={done ? "Gotowe do sprzedaży" : "Nowy"}
-        badge={done ? { text: "Opublikowano w sklepie", variant: "accent" } : undefined}
-        image={showImage ? <WatchImage /> : undefined}
-        fields={fields}
-        completeness={completeness}
-        highlight={done ? "accent" : "none"}
-      />
+      <div className="relative w-[240px] sm:w-[280px]">
+        <ProductCard
+          title={done ? "Gotowe do sprzedaży" : "Nowy"}
+          badge={done ? { text: "Opublikowano w sklepie", variant: "accent" } : undefined}
+          image={showImage ? <WatchImage /> : undefined}
+          fields={fields}
+          completeness={completeness}
+          highlight={done ? "accent" : "none"}
+          width="100%"
+        />
+      </div>
     </div>
   );
 }

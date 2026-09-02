@@ -17,7 +17,7 @@ function PlaceholderImage({ icon }: { icon: ShowcaseProduct["icon"] }) {
           "radial-gradient(120% 100% at 50% 0%, rgba(0,188,135,0.18), rgba(14,16,19,1) 70%)",
       }}
     >
-      <Icon className="h-12 w-12" strokeWidth={1.25} style={{ color: "var(--accent)" }} />
+      <Icon aria-hidden className="h-12 w-12" strokeWidth={1.25} style={{ color: "var(--accent)" }} />
     </div>
   );
 }
@@ -26,7 +26,7 @@ function CopyCard({ product, state }: { product: ShowcaseProduct; state: Showcas
   const sentences = product.copy.description.split(". ").slice(0, 2).join(". ");
   return (
     <div
-      className="mt-4 flex flex-col gap-3 p-4 backdrop-blur-[20px]"
+      className="lp-glass mt-4 flex flex-col gap-3 p-4"
       style={{
         background: "var(--glass-bg)",
         border: "1px solid var(--glass-border)",
@@ -108,7 +108,7 @@ export function ShowcaseCard({
     <div className="w-[280px] shrink-0 snap-center">
       <ProductCard
         title={state === "after" ? "GOTOWE DO SPRZEDAŻY" : "NOWY"}
-        badge={state === "after" ? { text: "AI Complete", variant: "accent" } : undefined}
+        badge={state === "after" ? { text: "Karta gotowa", variant: "accent" } : undefined}
         image={data.image ? <PlaceholderImage icon={product.icon} /> : undefined}
         fields={fields}
         completeness={data.completeness}

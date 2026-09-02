@@ -16,6 +16,10 @@ export type ProductCardProps = {
   completeness: number;
   highlight?: Highlight;
   width?: number | string;
+  /** Rozmycie tła: wyłączamy je w długich listach kart (wydajność). */
+  blur?: boolean;
+  /** Opis zdjęcia po polsku; puste = ilustracja dekoracyjna. */
+  imageAlt?: string;
   className?: string;
 };
 
@@ -115,6 +119,8 @@ export function ProductCard({
   completeness,
   highlight = "none",
   width = 280,
+  blur = true,
+  imageAlt = "",
   className,
 }: ProductCardProps) {
   const highlightColor =
@@ -129,7 +135,7 @@ export function ProductCard({
   return (
     <motion.div
       layout
-      className={cn("overflow-hidden backdrop-blur-[20px]", className)}
+      className={cn("overflow-hidden", blur && "lp-glass", className)}
       style={{
         width,
         background: "var(--glass-bg)",
@@ -174,11 +180,11 @@ export function ProductCard({
           style={{ borderRadius: 16, background: "var(--bg-elevated)" }}
         >
           {typeof image === "string" ? (
-            <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
+            <img src={image} alt={imageAlt} className="h-full w-full object-cover" loading="lazy" />
           ) : image ? (
             image
           ) : (
-            <Package className="h-8 w-8" style={{ color: "var(--text-muted)" }} />
+            <Package aria-hidden className="h-8 w-8" style={{ color: "var(--text-muted)" }} />
           )}
         </div>
       </div>

@@ -29,7 +29,7 @@ export function Navbar() {
 
   return (
     <header
-      className="sticky top-0 z-50 backdrop-blur-[20px]"
+      className="lp-glass sticky top-0 z-50"
       style={{
         height: 72,
         background: "var(--glass-bg)",
@@ -52,7 +52,7 @@ export function Navbar() {
           ))}
         </nav>
 
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden items-center gap-3 lg:flex">
           <AccentButton size="md" onClick={() => scrollTo("#contact")}>
             Bezpłatna próbka
           </AccentButton>
@@ -61,23 +61,28 @@ export function Navbar() {
         <button
           type="button"
           aria-label={open ? "Zamknij menu" : "Otwórz menu"}
+          aria-expanded={open}
+          aria-controls="mobile-menu"
           onClick={() => setOpen((v) => !v)}
-          className="flex h-11 w-11 items-center justify-center border md:hidden"
+          className="flex h-11 w-11 items-center justify-center border lg:hidden"
+
           style={{
             borderRadius: "var(--radius-button)",
             borderColor: "var(--glass-border-strong)",
             color: "var(--text-primary)",
           }}
         >
-          {open ? <Menu className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          {open ? <X aria-hidden className="h-5 w-5" /> : <Menu aria-hidden className="h-5 w-5" />}
         </button>
       </Container>
 
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex flex-col backdrop-blur-[20px] md:hidden"
+          id="mobile-menu"
+          className="lp-glass fixed inset-0 z-50 flex flex-col lg:hidden"
           style={{ background: "rgba(7,8,9,0.92)" }}
         >
+
           <div className="flex h-[72px] items-center justify-between px-6">
             <BrandMark />
             <button
@@ -91,7 +96,7 @@ export function Navbar() {
                 color: "var(--text-primary)",
               }}
             >
-              <X className="h-5 w-5" />
+              <X aria-hidden className="h-5 w-5" />
             </button>
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-6 pt-6">

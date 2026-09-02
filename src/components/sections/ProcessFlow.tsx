@@ -41,14 +41,14 @@ function ArrowButton({ dir, onClick }: { dir: "left" | "right"; onClick: () => v
       type="button"
       onClick={onClick}
       aria-label={dir === "left" ? "Poprzedni krok" : "Następny krok"}
-      className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border backdrop-blur-[20px] transition-colors hover:bg-white/10 md:flex motion-reduce:transition-none"
+      className="lp-glass hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors hover:bg-white/10 md:flex motion-reduce:transition-none"
       style={{
         borderColor: "var(--glass-border-strong)",
         background: "var(--glass-bg)",
         color: "var(--text-primary)",
       }}
     >
-      <Icon className="h-5 w-5" />
+      <Icon aria-hidden className="h-5 w-5" />
     </button>
   );
 }

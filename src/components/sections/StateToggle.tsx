@@ -25,7 +25,7 @@ export function StateToggle({
       <div
         role="tablist"
         aria-label="Porównanie karty produktu"
-        className="flex items-center gap-1 rounded-full p-1 backdrop-blur-[20px]"
+        className="lp-glass flex items-center gap-1 rounded-full p-1"
         style={{
           background: "var(--glass-bg)",
           border: "1px solid var(--glass-border)",

@@ -77,7 +77,7 @@ export function CaseStudyCard({
 
   return (
     <div
-      className="relative border backdrop-blur-[20px] p-6 md:p-10"
+      className="lp-glass relative border p-6 md:p-10"
       style={{
         background: "var(--glass-bg)",
         borderColor: "var(--glass-border)",

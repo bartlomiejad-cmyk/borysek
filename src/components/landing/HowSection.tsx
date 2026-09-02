@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
+import { Reveal } from "@/components/ui-custom/Reveal";
 import { FieldTile } from "./FieldTile";
 
 const TILES = [
@@ -24,33 +25,39 @@ const TILES = [
   { icon: ShoppingBag, label: "Opis Allegro", badge: "wersja marketplace" },
   { icon: Camera, label: "Packshot na białym tle", badge: "kontrola jakości" },
   { icon: Layers, label: "Warianty", badge: "kolor / rozmiar" },
-  { icon: ImageIcon, label: "Zdjęcia lifestyle", badge: "na życzenie", planned: true },
+  { icon: ImageIcon, label: "Zdjęcia aranżacyjne", badge: "na życzenie", planned: true },
 ];
 
 export function HowSection() {
   return (
     <section id="scope" className="py-20 md:py-28">
       <Container>
+        <Reveal>
         <SectionHeading
           eyebrow="Co dostajesz"
           title="Kompletna karta produktu. Od nazwy po zdjęcia."
           lead="Każde pole przygotowujemy osobno i osobno je sprawdzamy, więc możesz zaakceptować całość albo poprosić o poprawkę tylko tam, gdzie chcesz."
         />
+        </Reveal>
 
         <div className="mt-14 grid grid-cols-2 gap-8 sm:grid-cols-4 lg:grid-cols-5">
-          {TILES.map((tile) => (
-            <FieldTile key={tile.label} {...tile} />
+          {TILES.map((tile, i) => (
+            <Reveal key={tile.label} index={i}>
+              <FieldTile {...tile} />
+            </Reveal>
           ))}
         </div>
 
+        <Reveal>
         <p
-          className="mt-14 text-center lp-body"
+          className="lp-body mt-14 text-center"
           style={{ color: "var(--text-secondary)" }}
         >
           Treści piszemy po polsku zgodnie z tonem Twojej marki, na życzenie także po angielsku i
           niemiecku. Wszystkie powstają ze zweryfikowanych źródeł, z potwierdzeniem zgodności
           kodów EAN.
         </p>
+        </Reveal>
 
       </Container>
     </section>

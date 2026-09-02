@@ -24,12 +24,12 @@ export function Pill({ variant = "accent", icon: Icon, className, children }: Pi
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 border px-3 py-1 text-[0.8125rem] font-medium backdrop-blur-[20px]",
+        "inline-flex items-center gap-1.5 border px-3 py-1 text-[0.8125rem] font-medium",
         className,
       )}
       style={{ ...styles, borderRadius: "var(--radius-pill)", fontFamily: "var(--font-body)" }}
     >
-      {Icon ? <Icon className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+      {Icon ? <Icon aria-hidden className="h-3.5 w-3.5" strokeWidth={2} /> : null}
       {children}
     </span>
   );

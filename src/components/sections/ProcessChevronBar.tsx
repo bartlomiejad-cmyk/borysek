@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
+import { useReveal, REVEAL_STAGGER } from "@/components/ui-custom/Reveal";
 import { cn } from "@/lib/utils";
 import type { ProcessStep, SegmentTone } from "@/data/process-steps";
 
@@ -20,6 +21,7 @@ type Props = {
 
 export function ProcessChevronBar({ steps, activeIndex, onSelect, className, segmentWidth }: Props) {
   const reduced = useReducedMotion();
+  const reveal = useReveal();
 
   return (
     <div className={cn("flex items-start", className)}>
@@ -34,10 +36,10 @@ export function ProcessChevronBar({ steps, activeIndex, onSelect, className, seg
                 ? { width: segmentWidth, marginLeft: i === 0 ? 0 : -14 }
                 : { flex: 1, marginLeft: i === 0 ? 0 : -14 }
             }
-            initial={reduced ? false : { opacity: 0, scaleX: 0 }}
-            whileInView={{ opacity: 1, scaleX: 1 }}
-            viewport={{ once: true, amount: 0.4 }}
-            transition={{ duration: 0.4, delay: 0.6 + i * 0.06, ease: "easeOut" }}
+            initial={reveal.initial}
+            whileInView={reveal.whileInView}
+            viewport={reveal.viewport}
+            transition={{ ...reveal.transition, delay: reduced ? 0 : i * REVEAL_STAGGER }}
           >
             <button
               type="button"

@@ -3,25 +3,14 @@ import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
 import { Pill } from "@/components/ui-custom/Pill";
 import { GlassCard } from "@/components/ui-custom/GlassCard";
-
-type Platform = {
-  name: string;
-  mode: "api" | "file";
-};
-
-const platforms: Platform[] = [
-  { name: "Selly", mode: "api" },
-  { name: "Shoper", mode: "file" },
-  { name: "WooCommerce", mode: "file" },
-  { name: "BaseLinker", mode: "file" },
-  { name: "PrestaShop", mode: "file" },
-  { name: "Shopify", mode: "file" },
-];
+import { Reveal } from "@/components/ui-custom/Reveal";
+import { platforms } from "@/data/content";
 
 export function PlatformsSection() {
   return (
     <section id="platforms" className="relative py-24 lg:py-32">
       <Container>
+        <Reveal>
         <SectionHeading
           eyebrow="Platformy"
           title="Pracujemy z Twoim sklepem, jaki jest."
@@ -29,14 +18,17 @@ export function PlatformsSection() {
           align="left"
           className="mb-16"
         />
+        </Reveal>
 
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          {platforms.map((platform) => {
+          {platforms.map((platform, i) => {
             const isApi = platform.mode === "api";
             return (
+              <Reveal key={platform.name} index={i}>
               <GlassCard
-                key={platform.name}
+                blur={false}
                 padding="md"
+                className="h-full"
                 className="flex flex-col items-center gap-4 text-center"
                 style={{
                   borderColor: isApi ? "rgba(0, 188, 135, 0.5)" : undefined,
@@ -53,6 +45,7 @@ export function PlatformsSection() {
                   }}
                 >
                   <Store
+                    aria-hidden
                     className="h-5 w-5"
                     style={{ color: isApi ? "var(--accent)" : "var(--text-secondary)" }}
                   />
@@ -73,6 +66,7 @@ export function PlatformsSection() {
                   </Pill>
                 </div>
               </GlassCard>
+              </Reveal>
             );
           })}
         </div>

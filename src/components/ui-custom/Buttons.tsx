@@ -46,7 +46,7 @@ export function GhostButton({ size = "md", className, style, ...props }: BasePro
   return (
     <button
       {...props}
-      className={cn(base, sizeClass[size], "border backdrop-blur-[20px]", className)}
+      className={cn(base, sizeClass[size], "border", className)}
       style={{
         background: "transparent",
         borderColor: "var(--glass-border-strong)",
