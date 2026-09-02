@@ -32,6 +32,7 @@ function LandingPage() {
       <PageBackground />
       <Navbar />
       <Hero />
+      <HowSection />
     </main>
   );
 }
