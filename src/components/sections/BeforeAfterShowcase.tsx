@@ -11,7 +11,7 @@ import { ShowcaseCard } from "./ShowcaseCard";
 const AFTER_PILLS = [
   { icon: Plus, text: "+6 pól uzupełnionych" },
   { icon: Ruler, text: "Tytuł SEO w limicie 60 znaków" },
-  { icon: Send, text: "Opis gotowy do wklejenia w sklep" },
+  { icon: Send, text: "Opis opublikowany w sklepie" },
 ];
 
 export function BeforeAfterShowcase() {
@@ -23,8 +23,8 @@ export function BeforeAfterShowcase() {
         <SectionHeading
           align="center"
           eyebrow="Przed i po"
-          title="Ta sama karta. Po jednym przebiegu AI."
-          lead="Przełącz widok, żeby zobaczyć, co dokładnie się zmienia."
+          title="Ta sama karta. Po jednym przebiegu u nas."
+          lead="Przełącz widok, żeby zobaczyć, co dokładnie dostajesz."
         />
 
         <div className="mt-10 flex justify-center">

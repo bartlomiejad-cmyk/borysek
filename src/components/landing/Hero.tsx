@@ -4,7 +4,6 @@ import { Container } from "@/components/ui-custom/Container";
 import { Pill } from "@/components/ui-custom/Pill";
 import { AccentButton, GhostButton } from "@/components/ui-custom/Buttons";
 import { HeroDemo } from "@/components/landing/HeroDemo";
-import { shopIntegrations } from "@/data/demo-products";
 
 const rise = (i: number) => ({
   initial: { opacity: 0, y: 12 },
@@ -13,69 +12,38 @@ const rise = (i: number) => ({
   transition: { duration: 0.5, delay: i * 0.08, ease: "easeOut" as const },
 });
 
-const bullets = ["Bez karty na start", "Działa z Twoim sklepem", "Edytujesz przed publikacją"];
+const bullets = ["Bez zobowiązań", "Akceptujesz przed publikacją", "Publikujemy za Ciebie"];
 
-function TrustBar() {
-  return (
-    <motion.div {...rise(6)} className="mt-16 flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
-      <span className="lp-caption" style={{ color: "var(--text-muted)" }}>
-        Działa z
-      </span>
-      <div className="flex flex-wrap items-center gap-2.5">
-        {shopIntegrations.map((s) => (
-          <span
-            key={s.name}
-            className="inline-flex items-center gap-2 border px-3.5 py-1.5 text-sm backdrop-blur-[20px]"
-            style={{
-              borderRadius: "var(--radius-pill)",
-              background: "var(--glass-bg)",
-              borderColor: "var(--glass-border)",
-              color: "var(--text-secondary)",
-              fontFamily: "var(--font-body)",
-            }}
-          >
-            {s.available ? (
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-            ) : null}
-            {s.name}
-            <span className="text-xs" style={{ color: s.available ? "var(--accent)" : "var(--text-muted)" }}>
-              {s.available ? "dostępne" : "wkrótce"}
-            </span>
-          </span>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
+const scrollTo = (id: string) =>
+  document.querySelector(id)?.scrollIntoView({ behavior: "smooth" });
 
 export function Hero() {
   return (
-    <section id="top" className="relative pt-16 pb-20 md:pt-24">
+    <section id="top" className="relative pt-16 pb-16 md:pt-24">
       <Container>
         <div className="grid items-center gap-12 lg:grid-cols-[55fr_45fr]">
           <div className="flex flex-col items-start gap-6">
             <motion.div {...rise(0)}>
               <Pill variant="accent" icon={Sparkles}>
-                Generowanie oparte o Claude
+                Usługa dla sklepów internetowych
               </Pill>
             </motion.div>
 
             <motion.h1 {...rise(1)} className="lp-h1" style={{ color: "var(--text-primary)", textWrap: "balance" }}>
-              Kompletne karty produktowe w minuty, nie w dni.
+              Uzupełnimy karty produktowe w Twoim sklepie. Setki produktów, dni zamiast miesięcy.
             </motion.h1>
 
             <motion.p {...rise(2)} className="lp-lead max-w-xl" style={{ color: "var(--text-secondary)" }}>
-              Wklej adres produktu albo podepnij sklep. AI uzupełni nazwę, opis, cechy i SEO,
-              a Ty tylko sprawdzisz i wyślesz do sklepu jednym kliknięciem.
+              Dajesz nam dostęp do sklepu albo plik z produktami. Dostajesz gotowe nazwy, opisy,
+              cechy i SEO, sprawdzone przez ludzi i opublikowane w Twoim sklepie.
             </motion.p>
 
             <motion.div {...rise(3)} className="flex flex-wrap items-center gap-3">
-              <AccentButton size="lg">Wypróbuj za darmo</AccentButton>
-              <GhostButton
-                size="lg"
-                onClick={() => document.querySelector("#flow")?.scrollIntoView({ behavior: "smooth" })}
-              >
-                Zobacz, jak to działa
+              <AccentButton size="lg" onClick={() => scrollTo("#contact")}>
+                Bezpłatna próbka: 5 produktów
+              </AccentButton>
+              <GhostButton size="lg" onClick={() => scrollTo("#cases")}>
+                Zobacz realizacje
               </GhostButton>
             </motion.div>
 
@@ -97,8 +65,6 @@ export function Hero() {
             <HeroDemo />
           </motion.div>
         </div>
-
-        <TrustBar />
       </Container>
     </section>
   );

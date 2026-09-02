@@ -43,20 +43,12 @@ export function buildFields(filledCount: number, status: FieldStatus = "ai"): Pr
 export const emptyErgoWatch: ProductField[] = buildFields(0);
 export const completeErgoWatch: ProductField[] = buildFields(FIELD_ORDER.length, "verified");
 
-export const shopIntegrations = [
-  { name: "Selly", available: true },
-  { name: "Shoper", available: false },
-  { name: "WooCommerce", available: false },
-  { name: "BaseLinker", available: false },
-  { name: "PrestaShop", available: false },
-];
-
 export const navLinks = [
-  { label: "Jak działa", href: "#how" },
+  { label: "Realizacje", href: "#cases" },
+  { label: "Co dostajesz", href: "#scope" },
   { label: "Przed i po", href: "#before-after" },
-  { label: "Proces", href: "#flow" },
-  { label: "Integracje", href: "#integrations" },
-  { label: "Cennik", href: "#pricing" },
+  { label: "Jak pracujemy", href: "#flow" },
+  { label: "Oferta", href: "#offer" },
   { label: "FAQ", href: "#faq" },
 ];
 
