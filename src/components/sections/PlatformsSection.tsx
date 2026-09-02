@@ -28,8 +28,8 @@ export function PlatformsSection() {
               <GlassCard
                 blur={false}
                 padding="md"
-                className="h-full"
-                className="flex flex-col items-center gap-4 text-center"
+                className="flex h-full flex-col items-center gap-4 text-center"
+
                 style={{
                   borderColor: isApi ? "rgba(0, 188, 135, 0.5)" : undefined,
                   boxShadow: isApi
