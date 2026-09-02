@@ -31,7 +31,7 @@ function AuthLayout() {
     supabase.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? null));
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setEmail(session?.user.email ?? null);
-      if (event === "SIGNED_OUT") navigate({ to: "/login", search: {} });
+      if (event === "SIGNED_OUT") navigate({ to: "/login", search: { redirect: undefined } });
     });
     return () => sub.subscription.unsubscribe();
   }, [navigate]);
@@ -58,7 +58,7 @@ function AuthLayout() {
           <div className="mt-auto">
             <SidebarFooter email={email} onSignOut={async () => {
               await supabase.auth.signOut();
-              navigate({ to: "/login", search: {} });
+              navigate({ to: "/login", search: { redirect: undefined } });
             }} />
           </div>
         </aside>
@@ -81,7 +81,7 @@ function AuthLayout() {
                 <div className="mt-auto">
                   <SidebarFooter email={email} onSignOut={async () => {
                     await supabase.auth.signOut();
-                    navigate({ to: "/login", search: {} });
+                    navigate({ to: "/login", search: { redirect: undefined } });
                   }} />
                 </div>
               </SheetContent>
