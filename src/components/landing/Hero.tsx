@@ -35,7 +35,8 @@ export function Hero() {
 
             <motion.p {...rise(2)} className="lp-lead max-w-xl" style={{ color: "var(--text-secondary)" }}>
               Dajesz nam dostęp do sklepu albo plik z produktami. Dostajesz gotowe nazwy, opisy,
-              cechy i SEO, sprawdzone przez ludzi i opublikowane w Twoim sklepie.
+              cechy, treści SEO i zdjęcia produktowe, sprawdzone przez ludzi i opublikowane w
+              Twoim sklepie.
             </motion.p>
 
             <motion.div {...rise(3)} className="flex flex-wrap items-center gap-3">

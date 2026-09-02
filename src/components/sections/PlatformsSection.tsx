@@ -81,7 +81,8 @@ export function PlatformsSection() {
           className="mx-auto mt-12 max-w-xl text-center lp-body"
           style={{ color: "var(--text-secondary)" }}
         >
-          Inna platforma? Wystarczy eksport produktów z Twojego sklepu.
+          Inna platforma? Wystarczy eksport produktów z Twojego sklepu. Oddajemy plik w Twoim
+          oryginalnym układzie kolumn, gotowy do importu bez przeklejania.
         </p>
       </Container>
     </section>

@@ -25,7 +25,7 @@ const packages: Package[] = [
     price: "[CENA] zł",
     priceLabel: "za produkt",
     features: [
-      "nazwa, opis, cechy, kategoria",
+      "nazwa, opis, cechy, kategoria, packshot na białym tle",
       "tytuł i opis SEO",
       "weryfikacja przez redaktora",
       "publikacja przez API lub plik",
@@ -43,6 +43,7 @@ const packages: Package[] = [
       "wszystko z pakietu Start",
       "ton marki i słownik branżowy",
       "warianty produktów",
+      "opis Allegro",
       "drugi język w cenie",
     ],
     cta: "Zamów próbkę",
