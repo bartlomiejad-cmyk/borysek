@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
+import { Reveal } from "@/components/ui-custom/Reveal";
 import { processSteps } from "@/data/process-steps";
 import { ProcessStepCard } from "./ProcessStepCard";
 import { ProcessChevronBar } from "./ProcessChevronBar";
@@ -100,7 +101,7 @@ export function ProcessFlow() {
   return (
     <section id="flow" className="relative py-24 md:py-32">
       <Container>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <Reveal className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <SectionHeading
             eyebrow="Jak pracujemy"
             title="Od dostępu do sklepu do opublikowanej karty w ośmiu krokach."
@@ -109,7 +110,7 @@ export function ProcessFlow() {
           <div className="shrink-0 lg:pb-2">
             <Legend />
           </div>
-        </div>
+        </Reveal>
 
         <div className="mt-12 flex items-center gap-4">
           <ArrowButton dir="left" onClick={() => scrollBy(-CARD_STEP)} />
