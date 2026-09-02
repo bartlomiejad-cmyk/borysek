@@ -9,36 +9,28 @@ import {
   Type,
 } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
-import { GlassCard } from "@/components/ui-custom/GlassCard";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
 import { FieldTile } from "./FieldTile";
-import { StatCounter } from "./StatCounter";
 
 const TILES = [
   { icon: Type, label: "Nazwa", badge: "PL/EN/DE" },
   { icon: AlignLeft, label: "Opis", badge: "HTML" },
   { icon: ListChecks, label: "Cechy", badge: "lista" },
-  { icon: FolderTree, label: "Kategoria", badge: "auto" },
+  { icon: FolderTree, label: "Kategoria", badge: "drzewo sklepu" },
   { icon: Search, label: "Tytuł SEO", badge: "60 zn." },
   { icon: FileText, label: "Opis SEO", badge: "155 zn." },
   { icon: Layers, label: "Warianty", badge: "kolor / rozmiar" },
-  { icon: ImageIcon, label: "Zdjęcia lifestyle", badge: "dostępne" },
-];
-
-const STATS = [
-  { value: 20, prefix: "do ", suffix: "x", text: "szybciej niż ręczne uzupełnianie karty" },
-  { value: 1, suffix: " klik", text: "od akceptacji do publikacji w sklepie" },
-  { value: 100, suffix: "%", text: "pól przechodzi przez człowieka przed wysyłką" },
+  { icon: ImageIcon, label: "Zdjęcia lifestyle", badge: "na życzenie", planned: true },
 ];
 
 export function HowSection() {
   return (
-    <section id="how" className="py-20 md:py-28">
+    <section id="scope" className="py-20 md:py-28">
       <Container>
         <SectionHeading
-          eyebrow="Co uzupełnia AI"
-          title="Osiem pól produktu. Jeden przebieg."
-          lead="Każde pole trafia do karty osobno, więc możesz zaakceptować całość albo poprawić tylko to, co chcesz."
+          eyebrow="Co dostajesz"
+          title="Osiem pól karty produktu. Wszystkie w cenie."
+          lead="Każde pole przygotowujemy osobno i osobno je sprawdzamy, więc możesz zaakceptować całość albo poprosić o poprawkę tylko tam, gdzie chcesz."
         />
 
         <div className="mt-14 grid grid-cols-2 gap-8 sm:grid-cols-4 xl:grid-cols-8">
@@ -47,16 +39,14 @@ export function HowSection() {
           ))}
         </div>
 
-        <div className="mt-16 grid gap-6 md:grid-cols-3">
-          {STATS.map((stat) => (
-            <GlassCard key={stat.text} padding="lg">
-              <StatCounter value={stat.value} prefix={stat.prefix} suffix={stat.suffix} />
-              <p className="mt-4 lp-body" style={{ color: "var(--text-secondary)" }}>
-                {stat.text}
-              </p>
-            </GlassCard>
-          ))}
-        </div>
+        <p
+          className="mt-14 text-center lp-body"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Treści piszemy po polsku zgodnie z tonem Twojej marki. Na życzenie także po angielsku i
+          niemiecku.
+        </p>
+
       </Container>
     </section>
   );

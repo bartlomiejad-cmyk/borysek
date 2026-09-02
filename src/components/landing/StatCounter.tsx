@@ -2,18 +2,30 @@ import { useEffect, useRef, useState } from "react";
 import { useInView, useReducedMotion } from "framer-motion";
 
 type StatCounterProps = {
-  value: number;
+  /** Number animates from 0; a string (e.g. "[LICZBA]") renders as-is. */
+  value: number | string;
   prefix?: string;
   suffix?: string;
+  size?: string;
 };
 
-export function StatCounter({ value, prefix = "", suffix = "" }: StatCounterProps) {
+export function StatCounter({
+  value,
+  prefix = "",
+  suffix = "",
+  size = "clamp(2.5rem, 4vw, 3.5rem)",
+}: StatCounterProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, amount: 0.6 });
   const reduced = useReducedMotion();
-  const [display, setDisplay] = useState(reduced ? value : 0);
+  const numeric = typeof value === "number";
+  const [display, setDisplay] = useState(numeric && !reduced ? 0 : value);
 
   useEffect(() => {
+    if (!numeric) {
+      setDisplay(value);
+      return;
+    }
     if (!inView) return;
     if (reduced) {
       setDisplay(value);
@@ -25,12 +37,12 @@ export function StatCounter({ value, prefix = "", suffix = "" }: StatCounterProp
     const tick = (now: number) => {
       const t = Math.min((now - start) / duration, 1);
       const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(Math.round(value * eased));
+      setDisplay(Math.round((value as number) * eased));
       if (t < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [inView, reduced, value]);
+  }, [inView, reduced, value, numeric]);
 
   return (
     <span
@@ -38,7 +50,7 @@ export function StatCounter({ value, prefix = "", suffix = "" }: StatCounterProp
       className="block font-[Sora,system-ui] font-bold leading-none"
       style={{
         color: "var(--accent)",
-        fontSize: "clamp(2.5rem, 4vw, 3.5rem)",
+        fontSize: size,
         fontVariantNumeric: "tabular-nums",
       }}
     >

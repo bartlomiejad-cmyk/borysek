@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
-import { AccentButton, GhostButton } from "@/components/ui-custom/Buttons";
+import { AccentButton } from "@/components/ui-custom/Buttons";
 import { navLinks } from "@/data/demo-products";
+
+const scrollTo = (id: string) =>
+  document.querySelector(id)?.scrollIntoView({ behavior: "smooth" });
 
 function BrandMark() {
   return (
@@ -50,8 +53,9 @@ export function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
-          <GhostButton size="md">Zaloguj się</GhostButton>
-          <AccentButton size="md">Wypróbuj za darmo</AccentButton>
+          <AccentButton size="md" onClick={() => scrollTo("#contact")}>
+            Bezpłatna próbka
+          </AccentButton>
         </div>
 
         <button
@@ -110,11 +114,15 @@ export function Navbar() {
             ))}
           </nav>
           <div className="flex flex-col gap-3 px-6 pb-10">
-            <GhostButton size="lg" className="w-full" onClick={() => setOpen(false)}>
-              Zaloguj się
-            </GhostButton>
-            <AccentButton size="lg" className="w-full" onClick={() => setOpen(false)}>
-              Wypróbuj za darmo
+            <AccentButton
+              size="lg"
+              className="w-full"
+              onClick={() => {
+                setOpen(false);
+                scrollTo("#contact");
+              }}
+            >
+              Bezpłatna próbka
             </AccentButton>
           </div>
         </div>

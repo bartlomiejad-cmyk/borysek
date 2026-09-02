@@ -83,8 +83,8 @@ function StyleguidePage() {
         <section className="flex flex-col gap-6">
           <h3 className="lp-h3" style={{ color: "var(--text-primary)" }}>Przyciski</h3>
           <div className="flex flex-wrap items-center gap-4">
-            <AccentButton size="md">Wypróbuj za darmo</AccentButton>
-            <AccentButton size="lg">Wypróbuj za darmo</AccentButton>
+            <AccentButton size="md">Bezpłatna próbka</AccentButton>
+            <AccentButton size="lg">Bezpłatna próbka</AccentButton>
             <GhostButton size="md">Zobacz demo</GhostButton>
             <GhostButton size="lg">Zobacz demo</GhostButton>
           </div>
