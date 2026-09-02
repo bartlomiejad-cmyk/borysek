@@ -55,6 +55,7 @@ function ArrowButton({ dir, onClick }: { dir: "left" | "right"; onClick: () => v
 
 export function ProcessFlow() {
   const scroller = useRef<HTMLDivElement>(null);
+  const mobileBar = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(1);
 
   useEffect(() => {
@@ -72,6 +73,16 @@ export function ProcessFlow() {
     );
     cards.forEach((c) => observer.observe(c));
     return () => observer.disconnect();
+  }, []);
+
+  const syncMobileBar = useCallback(() => {
+    const root = scroller.current;
+    const bar = mobileBar.current;
+    if (!root || !bar) return;
+    const max = root.scrollWidth - root.clientWidth;
+    const barMax = bar.scrollWidth - bar.clientWidth;
+    if (max <= 0 || barMax <= 0) return;
+    bar.scrollLeft = (root.scrollLeft / max) * barMax;
   }, []);
 
   const scrollBy = useCallback((delta: number) => {
@@ -105,6 +116,7 @@ export function ProcessFlow() {
 
           <div
             ref={scroller}
+            onScroll={syncMobileBar}
             className="lp-no-scrollbar -mx-6 flex snap-x snap-mandatory gap-6 overflow-x-auto px-6 pb-2 md:mx-0 md:px-0"
           >
             {processSteps.map((step, i) => (
@@ -122,7 +134,10 @@ export function ProcessFlow() {
           className="mt-10 hidden md:flex"
         />
 
-        <div className="lp-no-scrollbar -mx-6 mt-8 overflow-x-auto px-6 md:hidden">
+        <div
+          ref={mobileBar}
+          className="lp-no-scrollbar pointer-events-auto -mx-6 mt-8 overflow-x-hidden px-6 md:hidden"
+        >
           <ProcessChevronBar
             steps={processSteps}
             activeIndex={active}
