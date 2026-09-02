@@ -78,7 +78,7 @@ function PricingCard({ pkg }: { pkg: Package }) {
   return (
     <div
       className={cn(
-        "relative flex flex-col overflow-hidden",
+        "relative flex flex-col",
         pkg.featured ? "lg:scale-[1.03]" : ""
       )}
       style={{
@@ -95,7 +95,10 @@ function PricingCard({ pkg }: { pkg: Package }) {
 
       <div
         className="flex flex-col items-center gap-3 px-6 pb-8 pt-10 text-center"
-        style={{ background: topGradient[pkg.variant] }}
+        style={{
+          background: topGradient[pkg.variant],
+          borderRadius: "var(--radius-card) var(--radius-card) 0 0",
+        }}
       >
         <span
           className="lp-caption"
