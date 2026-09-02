@@ -46,7 +46,7 @@ export function BeforeAfterShowcase() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <Pill variant="accent" icon={<Icon className="h-3.5 w-3.5" />}>
+                <Pill variant="accent" icon={Icon}>
                   {text}
                 </Pill>
               </motion.span>

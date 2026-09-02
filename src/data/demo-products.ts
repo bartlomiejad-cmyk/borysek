@@ -141,7 +141,7 @@ export const showcaseProducts: ShowcaseProduct[] = [
 export function fieldsFromValues(
   values: Record<string, string>,
   status: FieldStatus,
-  visibleCount = FIELD_ORDER.length,
+  visibleCount: number = FIELD_ORDER.length,
 ): ProductField[] {
   return FIELD_ORDER.map((label, i) => {
     const filled = values[label] !== undefined && i < visibleCount;
