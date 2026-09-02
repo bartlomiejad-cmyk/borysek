@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StyleguideRouteImport } from './routes/styleguide'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LandingRouteImport } from './routes/landing'
@@ -29,6 +30,11 @@ import { Route as AuthProjectsIdVerifyRouteImport } from './routes/_auth/project
 import { Route as ProjectsIdProductsPidPreviewRouteImport } from './routes/projects.$id.products.$pid_.preview'
 import { Route as AuthProjectsIdProductsPidRouteImport } from './routes/_auth/projects.$id.products.$pid'
 
+const StyleguideRoute = StyleguideRouteImport.update({
+  id: '/styleguide',
+  path: '/styleguide',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/styleguide': typeof StyleguideRoute
   '/.mcp/list-tools': typeof Char91DotmcpChar93ListToolsRoute
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/share/$token': typeof ShareTokenRouteWithChildren
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/styleguide': typeof StyleguideRoute
   '/.mcp/list-tools': typeof Char91DotmcpChar93ListToolsRoute
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/share/$token': typeof ShareTokenRouteWithChildren
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRoute
+  '/styleguide': typeof StyleguideRoute
   '/.mcp/list-tools': typeof Char91DotmcpChar93ListToolsRoute
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/share/$token': typeof ShareTokenRouteWithChildren
@@ -199,6 +208,7 @@ export interface FileRouteTypes {
     | '/landing'
     | '/login'
     | '/mcp'
+    | '/styleguide'
     | '/.mcp/list-tools'
     | '/.well-known/oauth-protected-resource'
     | '/share/$token'
@@ -219,6 +229,7 @@ export interface FileRouteTypes {
     | '/landing'
     | '/login'
     | '/mcp'
+    | '/styleguide'
     | '/.mcp/list-tools'
     | '/.well-known/oauth-protected-resource'
     | '/share/$token'
@@ -240,6 +251,7 @@ export interface FileRouteTypes {
     | '/landing'
     | '/login'
     | '/mcp'
+    | '/styleguide'
     | '/.mcp/list-tools'
     | '/.well-known/oauth-protected-resource'
     | '/share/$token'
@@ -262,6 +274,7 @@ export interface RootRouteChildren {
   LandingRoute: typeof LandingRoute
   LoginRoute: typeof LoginRoute
   McpRoute: typeof McpRoute
+  StyleguideRoute: typeof StyleguideRoute
   Char91DotmcpChar93ListToolsRoute: typeof Char91DotmcpChar93ListToolsRoute
   Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   ShareTokenRoute: typeof ShareTokenRouteWithChildren
@@ -273,6 +286,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/styleguide': {
+      id: '/styleguide'
+      path: '/styleguide'
+      fullPath: '/styleguide'
+      preLoaderRoute: typeof StyleguideRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mcp': {
       id: '/mcp'
       path: '/mcp'
@@ -447,6 +467,7 @@ const rootRouteChildren: RootRouteChildren = {
   LandingRoute: LandingRoute,
   LoginRoute: LoginRoute,
   McpRoute: McpRoute,
+  StyleguideRoute: StyleguideRoute,
   Char91DotmcpChar93ListToolsRoute: Char91DotmcpChar93ListToolsRoute,
   Char91DotwellKnownChar93OauthProtectedResourceRoute:
     Char91DotwellKnownChar93OauthProtectedResourceRoute,
