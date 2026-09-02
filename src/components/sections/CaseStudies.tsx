@@ -15,11 +15,13 @@ export function CaseStudies() {
   return (
     <section id="cases" className="py-20 md:py-28">
       <Container>
+        <Reveal>
         <SectionHeading
           eyebrow="Realizacje"
           title="Co zrobiliśmy u innych sklepów."
           lead="Każda realizacja to prawdziwy sklep, prawdziwe produkty i prawdziwe liczby. Nazwy klientów podajemy za ich zgodą."
         />
+        </Reveal>
 
         <div className="mt-14 flex flex-col gap-8">
           {visible.map((study, i) => (
