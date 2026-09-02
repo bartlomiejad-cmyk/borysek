@@ -4,6 +4,7 @@ import { Navbar } from "@/components/landing/Navbar";
 import { Hero } from "@/components/landing/Hero";
 import { ResultsBar } from "@/components/landing/ResultsBar";
 import { HowSection } from "@/components/landing/HowSection";
+import { ProcessFlow } from "@/components/sections/ProcessFlow";
 import { BeforeAfterShowcase } from "@/components/sections/BeforeAfterShowcase";
 
 export const Route = createFileRoute("/landing")({
@@ -45,6 +46,7 @@ function LandingPage() {
       <div id="cases" />
       <HowSection />
       <BeforeAfterShowcase />
+      <ProcessFlow />
     </main>
   );
 }
