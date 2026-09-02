@@ -6,6 +6,7 @@ import { ResultsBar } from "@/components/landing/ResultsBar";
 import { HowSection } from "@/components/landing/HowSection";
 import { ProcessFlow } from "@/components/sections/ProcessFlow";
 import { BeforeAfterShowcase } from "@/components/sections/BeforeAfterShowcase";
+import { CaseStudies } from "@/components/sections/CaseStudies";
 
 export const Route = createFileRoute("/landing")({
   head: () => ({
@@ -43,7 +44,7 @@ function LandingPage() {
       <Navbar />
       <Hero />
       <ResultsBar />
-      <div id="cases" />
+      <CaseStudies />
       <HowSection />
       <BeforeAfterShowcase />
       <ProcessFlow />

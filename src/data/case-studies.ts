@@ -1,0 +1,57 @@
+import { ergoWatchValues } from "./demo-products";
+
+/** Placeholders in square brackets are intentional — replace with real data only. */
+
+export type CaseProductState = {
+  values: Record<string, string>;
+  completeness: number;
+  image: boolean;
+};
+
+export type CaseStudy = {
+  id: string;
+  client: string;
+  industry: string;
+  platform: string;
+  productsCount: string;
+  durationDays: string;
+  scope: string[];
+  result: string;
+  quote?: { text: string; author: string; role: string };
+  before: CaseProductState;
+  after: CaseProductState;
+};
+
+function demoState(partial: boolean): CaseProductState {
+  if (partial) {
+    return {
+      values: { EAN: ergoWatchValues.EAN!, Nazwa: ergoWatchValues.Nazwa! },
+      completeness: 20,
+      image: false,
+    };
+  }
+  return { values: ergoWatchValues, completeness: 100, image: true };
+}
+
+export const caseStudies: CaseStudy[] = [1, 2, 3].map((n) => ({
+  id: `case-${n}`,
+  client: `[KLIENT ${n}]`,
+  industry: "[BRANŻA]",
+  platform: "[PLATFORMA]",
+  productsCount: "[LICZBA]",
+  durationDays: "[LICZBA]",
+  scope: [
+    "Nazwy i opisy",
+    "Cechy i kategorie",
+    "Tytuły i opisy SEO",
+    "Publikacja przez API",
+  ],
+  result: "[JEDNO ZDANIE O EFEKCIE]",
+  quote: {
+    text: "[CYTAT KLIENTA]",
+    author: "[IMIĘ I NAZWISKO]",
+    role: "[ROLA, FIRMA]",
+  },
+  before: demoState(true),
+  after: demoState(false),
+}));
