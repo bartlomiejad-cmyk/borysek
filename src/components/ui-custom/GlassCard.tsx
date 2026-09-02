@@ -5,6 +5,8 @@ type GlassCardProps = {
   variant?: "default" | "strong";
   padding?: "none" | "sm" | "md" | "lg";
   radius?: "card" | "lg";
+  /** Rozmycie tła włączamy tylko tam, gdzie karta leży na poświacie lub treści. */
+  blur?: boolean;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
@@ -21,17 +23,15 @@ export function GlassCard({
   variant = "default",
   padding = "md",
   radius = "card",
+  blur = true,
   className,
   style,
   children,
 }: GlassCardProps) {
   return (
     <div
-      className={cn(
-        "relative border backdrop-blur-[20px]",
-        paddings[padding],
-        className,
-      )}
+      className={cn("relative border", blur && "lp-glass", paddings[padding], className)}
+
       style={{
         background: variant === "strong" ? "var(--glass-bg-strong)" : "var(--glass-bg)",
         borderColor:

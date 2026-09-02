@@ -106,7 +106,7 @@ export function SiteFooter() {
         type="button"
         aria-label="Do góry"
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center border backdrop-blur-[20px] transition-colors motion-reduce:transition-none"
+        className="lp-glass fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center border transition-colors motion-reduce:transition-none"
         style={{
           borderRadius: 9999,
           borderColor: "var(--glass-border-strong)",
@@ -114,7 +114,7 @@ export function SiteFooter() {
           color: "var(--text-primary)",
         }}
       >
-        <ArrowUp className="h-5 w-5" />
+        <ArrowUp aria-hidden className="h-5 w-5" />
       </button>
     </footer>
   );

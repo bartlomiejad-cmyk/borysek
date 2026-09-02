@@ -7,14 +7,18 @@ import {
 import { Container } from "@/components/ui-custom/Container";
 import { GlassCard } from "@/components/ui-custom/GlassCard";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
-import { faqItems } from "@/data/faq";
+import { Reveal } from "@/components/ui-custom/Reveal";
+import { faqItems } from "@/data/content";
 
 export function FaqSection() {
   return (
     <section id="faq" className="scroll-mt-24 py-20 md:py-28">
       <Container className="flex flex-col gap-10">
-        <SectionHeading eyebrow="FAQ" title="Najczęstsze pytania" align="left" />
+        <Reveal>
+          <SectionHeading eyebrow="FAQ" title="Najczęstsze pytania" align="left" />
+        </Reveal>
 
+        <Reveal index={1}>
         <GlassCard padding="md" radius="lg" className="w-full max-w-[820px]">
           <Accordion type="single" collapsible className="w-full">
             {faqItems.map((item, i) => (
@@ -48,6 +52,7 @@ export function FaqSection() {
             ))}
           </Accordion>
         </GlassCard>
+        </Reveal>
       </Container>
     </section>
   );

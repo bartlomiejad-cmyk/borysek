@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
+import { Reveal } from "@/components/ui-custom/Reveal";
 import { processSteps } from "@/data/process-steps";
 import { ProcessStepCard } from "./ProcessStepCard";
 import { ProcessChevronBar } from "./ProcessChevronBar";
@@ -41,14 +42,14 @@ function ArrowButton({ dir, onClick }: { dir: "left" | "right"; onClick: () => v
       type="button"
       onClick={onClick}
       aria-label={dir === "left" ? "Poprzedni krok" : "Następny krok"}
-      className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border backdrop-blur-[20px] transition-colors hover:bg-white/10 md:flex motion-reduce:transition-none"
+      className="lp-glass hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors hover:bg-white/10 md:flex motion-reduce:transition-none"
       style={{
         borderColor: "var(--glass-border-strong)",
         background: "var(--glass-bg)",
         color: "var(--text-primary)",
       }}
     >
-      <Icon className="h-5 w-5" />
+      <Icon aria-hidden className="h-5 w-5" />
     </button>
   );
 }
@@ -100,7 +101,7 @@ export function ProcessFlow() {
   return (
     <section id="flow" className="relative py-24 md:py-32">
       <Container>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <Reveal className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <SectionHeading
             eyebrow="Jak pracujemy"
             title="Od dostępu do sklepu do opublikowanej karty w ośmiu krokach."
@@ -109,7 +110,7 @@ export function ProcessFlow() {
           <div className="shrink-0 lg:pb-2">
             <Legend />
           </div>
-        </div>
+        </Reveal>
 
         <div className="mt-12 flex items-center gap-4">
           <ArrowButton dir="left" onClick={() => scrollBy(-CARD_STEP)} />

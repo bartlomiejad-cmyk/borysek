@@ -19,7 +19,7 @@ export function FieldTile({ icon: Icon, label, badge, planned = false }: FieldTi
         }}
       >
         <div
-          className="flex h-full w-full items-center justify-center rounded-full border backdrop-blur-[20px]"
+          className="flex h-full w-full items-center justify-center rounded-full border"
           style={{
             background: "var(--glass-bg)",
             borderColor: "var(--glass-border)",
@@ -30,11 +30,11 @@ export function FieldTile({ icon: Icon, label, badge, planned = false }: FieldTi
             className="flex h-[72px] w-[72px] items-center justify-center rounded-full"
             style={{ background: "var(--bg-elevated)" }}
           >
-            <Icon size={32} style={{ color: planned ? "var(--text-muted)" : "var(--accent)" }} />
+            <Icon aria-hidden size={32} style={{ color: planned ? "var(--text-muted)" : "var(--accent)" }} />
           </span>
         </div>
         <span
-          className="absolute bottom-2 right-0 rounded-full border px-2.5 py-1 text-[11px] backdrop-blur-[20px] transition-shadow duration-300"
+          className="absolute bottom-2 right-0 rounded-full border px-2.5 py-1 text-[11px] transition-shadow duration-300"
           style={{
             background: planned ? "var(--glass-bg)" : "var(--glass-bg-strong)",
             borderColor: "var(--glass-border-strong)",

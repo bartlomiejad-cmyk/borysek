@@ -5,6 +5,7 @@ import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
 import { Pill } from "@/components/ui-custom/Pill";
 import { showcaseProducts } from "@/data/demo-products";
+import { Reveal } from "@/components/ui-custom/Reveal";
 import { StateToggle, type ShowcaseState } from "./StateToggle";
 import { ShowcaseCard } from "./ShowcaseCard";
 
@@ -20,20 +21,24 @@ export function BeforeAfterShowcase() {
   return (
     <section id="before-after" className="relative py-24 md:py-32">
       <Container>
+        <Reveal>
         <SectionHeading
           align="center"
           eyebrow="Przed i po"
           title="Ta sama karta. Po jednym przebiegu u nas."
           lead="Przełącz widok, żeby zobaczyć, co dokładnie dostajesz."
         />
+        </Reveal>
 
         <div className="mt-10 flex justify-center">
           <StateToggle value={state} onChange={setState} />
         </div>
 
         <div className="mt-12 -mx-6 flex snap-x snap-mandatory gap-6 overflow-x-auto px-6 pb-4 md:mx-0 md:grid md:grid-cols-2 md:justify-items-center md:overflow-visible md:px-0 lg:grid-cols-3">
-          {showcaseProducts.map((product) => (
-            <ShowcaseCard key={product.id} product={product} state={state} />
+          {showcaseProducts.map((product, i) => (
+            <Reveal key={product.id} index={i} className="snap-start">
+              <ShowcaseCard product={product} state={state} />
+            </Reveal>
           ))}
         </div>
 

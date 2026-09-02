@@ -1,9 +1,9 @@
-import { motion } from "framer-motion";
 import { useState } from "react";
 import { AccentButton, GhostButton } from "@/components/ui-custom/Buttons";
 import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
 import { caseStudies } from "@/data/case-studies";
+import { Reveal } from "@/components/ui-custom/Reveal";
 import { CaseStudyCard } from "./CaseStudyCard";
 
 const VISIBLE_COUNT = 3;
@@ -15,23 +15,19 @@ export function CaseStudies() {
   return (
     <section id="cases" className="py-20 md:py-28">
       <Container>
+        <Reveal>
         <SectionHeading
           eyebrow="Realizacje"
           title="Co zrobiliśmy u innych sklepów."
           lead="Każda realizacja to prawdziwy sklep, prawdziwe produkty i prawdziwe liczby. Nazwy klientów podajemy za ich zgodą."
         />
+        </Reveal>
 
         <div className="mt-14 flex flex-col gap-8">
           {visible.map((study, i) => (
-            <motion.div
-              key={study.id}
-              initial={{ opacity: 0, y: 32 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.5, delay: i * 0.08, ease: "easeOut" }}
-            >
+            <Reveal key={study.id} index={i}>
               <CaseStudyCard study={study} defaultOpen={i === 0} />
-            </motion.div>
+            </Reveal>
           ))}
         </div>
 

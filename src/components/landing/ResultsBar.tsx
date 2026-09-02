@@ -1,5 +1,6 @@
 import { Container } from "@/components/ui-custom/Container";
 import { GlassCard } from "@/components/ui-custom/GlassCard";
+import { Reveal } from "@/components/ui-custom/Reveal";
 import { StatCounter } from "./StatCounter";
 import { landingStats } from "@/data/stats";
 
@@ -7,6 +8,8 @@ export function ResultsBar() {
   return (
     <section className="pb-4">
       <Container>
+        <h2 className="sr-only">Wyniki w liczbach</h2>
+        <Reveal>
         <GlassCard padding="lg">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
             {landingStats.map((stat) => (
@@ -23,6 +26,7 @@ export function ResultsBar() {
             ))}
           </div>
         </GlassCard>
+        </Reveal>
       </Container>
     </section>
   );

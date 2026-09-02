@@ -13,34 +13,45 @@ import { FaqSection } from "@/components/sections/FaqSection";
 import { ContactSection } from "@/components/sections/ContactSection";
 import { SiteFooter } from "@/components/landing/SiteFooter";
 
+const TITLE =
+  "AI Product Platform. Karty produktowe dla Twojego sklepu, gotowe i opublikowane";
+const DESCRIPTION =
+  "Dajesz nam dostęp do sklepu albo plik z produktami. Oddajemy gotowe nazwy, opisy, cechy, SEO i zdjęcia, sprawdzone przez ludzi.";
+const URL = "https://borysek.lovable.app/landing";
+
 export const Route = createFileRoute("/landing")({
   head: () => ({
     meta: [
-      {
-        title:
-          "AI Product Platform. Karty produktowe dla Twojego sklepu, gotowe i opublikowane",
-      },
-      {
-        name: "description",
-        content:
-          "Dajesz nam dostęp do sklepu albo plik z produktami. Dostarczamy kompletne karty produktowe: nazwy, opisy, cechy, kategorie i SEO, sprawdzone przez ludzi i opublikowane w Twoim sklepie.",
-      },
-      {
-        property: "og:title",
-        content:
-          "AI Product Platform. Karty produktowe dla Twojego sklepu, gotowe i opublikowane",
-      },
-      {
-        property: "og:description",
-        content:
-          "Usługa uzupełniania kart produktowych dla sklepów internetowych: AI plus weryfikacja zespołu, publikacja przez API lub plik.",
-      },
+      { title: TITLE },
+      { name: "description", content: DESCRIPTION },
+      { property: "og:title", content: TITLE },
+      { property: "og:description", content: DESCRIPTION },
+      { property: "og:url", content: URL },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: TITLE },
+      { name: "twitter:description", content: DESCRIPTION },
+    ],
+    links: [{ rel: "canonical", href: URL }],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Service",
+          name: "AI Product Platform",
+          serviceType: "Uzupełnianie kart produktowych dla sklepów internetowych",
+          description: DESCRIPTION,
+          areaServed: { "@type": "Country", name: "Polska" },
+          url: URL,
+          provider: { "@type": "Organization", name: "AI Product Platform", url: URL },
+        }),
+      },
     ],
   }),
   component: LandingPage,
 });
+
 
 function LandingPage() {
   return (

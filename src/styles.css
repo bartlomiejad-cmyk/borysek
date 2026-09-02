@@ -310,3 +310,27 @@ html { scroll-behavior: smooth; }
     display: none;
   }
 }
+
+/* ── Landing: glass performance ───────────────────────────────
+   Blur only where the element actually sits on top of the glow
+   or other content. Lists use a flat translucent background. */
+@media (max-width: 767px) {
+  :root {
+    --glass-blur: 12px;
+  }
+}
+
+@utility lp-glass {
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  /* Safari: keeps blurred layers from flickering while scrolling */
+  transform: translateZ(0);
+}
+
+/* ── Landing: focus ring ─────────────────────────────────────── */
+.lp-surface :focus-visible,
+.lp-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

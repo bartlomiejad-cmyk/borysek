@@ -114,7 +114,7 @@ export const processSteps: ProcessStep[] = [
     statuses: WITH_COPY,
     tone: "accent",
     caption: "Zdjęcia",
-    description: "Zdjęcia lifestyle, jeśli zamówisz",
+    description: "Zdjęcia aranżacyjne, jeśli zamówisz",
   },
   {
     id: "approval",
