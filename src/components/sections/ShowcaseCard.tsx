@@ -84,7 +84,7 @@ export function ShowcaseCard({
 }) {
   const reduced = useReducedMotion();
   const total = FIELD_ORDER.length;
-  const [visible, setVisible] = useState(total);
+  const [visible, setVisible] = useState<number>(total);
 
   useEffect(() => {
     if (reduced) {
