@@ -636,6 +636,33 @@ export type Database = {
         }
         Relationships: []
       }
+      sample_requests: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          message: string | null
+          products_range: string
+          store_url: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          message?: string | null
+          products_range: string
+          store_url: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          message?: string | null
+          products_range?: string
+          store_url?: string
+        }
+        Relationships: []
+      }
       scrape_cache: {
         Row: {
           images: Json | null
