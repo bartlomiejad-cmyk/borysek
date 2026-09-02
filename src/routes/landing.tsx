@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageBackground } from "@/components/ui-custom/PageBackground";
 import { Navbar } from "@/components/landing/Navbar";
 import { Hero } from "@/components/landing/Hero";
+import { HowSection } from "@/components/landing/HowSection";
 
 export const Route = createFileRoute("/landing")({
   head: () => ({
