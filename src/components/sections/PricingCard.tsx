@@ -79,7 +79,7 @@ export function PricingCard({ pkg }: { pkg: OfferPackage }) {
 
   return (
     <div
-      className={cn("relative flex flex-col", pkg.featured ? "lg:scale-[1.03]" : "")}
+      className={cn("relative flex flex-col overflow-visible", pkg.featured ? "lg:scale-[1.03]" : "")}
       style={{
         borderRadius: "var(--radius-card)",
         border: pkg.variant === "catalog" ? "1px solid var(--glass-border-strong)" : undefined,
@@ -87,7 +87,7 @@ export function PricingCard({ pkg }: { pkg: OfferPackage }) {
       }}
     >
       {pkg.featured ? (
-        <div className="absolute -top-3 left-1/2 z-10 -translate-x-1/2">
+        <div className="absolute -top-3 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap">
           <Pill variant="accent">Najczęściej wybierany</Pill>
         </div>
       ) : null}

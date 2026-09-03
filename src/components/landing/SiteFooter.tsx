@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
 import { contactEmail, contactPhone, isSet } from "@/data/content";
@@ -31,7 +32,31 @@ const columns: FooterColumn[] = [
   },
 ];
 
+/** Pokazuje przycisk dopiero po przewinięciu poniżej sekcji hero. */
+function useScrolledPastHero() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      const hero = document.querySelector<HTMLElement>("[data-hero]");
+      const threshold = hero?.offsetHeight ?? window.innerHeight;
+      setVisible(window.scrollY > threshold);
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => {
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
+  }, []);
+
+  return visible;
+}
+
 export function SiteFooter() {
+  const showTop = useScrolledPastHero();
+
   return (
     <footer
       className="relative"
@@ -108,7 +133,11 @@ export function SiteFooter() {
         type="button"
         aria-label="Do góry"
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="lp-glass fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center border transition-colors motion-reduce:transition-none"
+        tabIndex={showTop ? 0 : -1}
+        aria-hidden={!showTop}
+        className={`lp-glass fixed bottom-4 right-4 z-40 flex h-12 w-12 items-center justify-center border transition-opacity duration-300 motion-reduce:transition-none md:bottom-6 md:right-6 ${
+          showTop ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
         style={{
           borderRadius: 9999,
           borderColor: "var(--glass-border-strong)",

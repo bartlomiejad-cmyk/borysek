@@ -23,7 +23,7 @@ const TILES = [
   { icon: Search, label: "Tytuł SEO", badge: "60 zn." },
   { icon: FileText, label: "Opis SEO", badge: "155 zn." },
   { icon: ShoppingBag, label: "Opis Allegro", badge: "wersja marketplace" },
-  { icon: Camera, label: "Packshot na białym tle", badge: "kontrola jakości" },
+  { icon: Camera, label: "Packshot", badge: "białe tło" },
   { icon: Layers, label: "Warianty", badge: "kolor / rozmiar" },
   { icon: ImageIcon, label: "Zdjęcia aranżacyjne", badge: "na życzenie", planned: true },
 ];
