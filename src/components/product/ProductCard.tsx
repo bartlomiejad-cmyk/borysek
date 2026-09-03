@@ -3,18 +3,17 @@ import { Package } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Pill } from "@/components/ui-custom/Pill";
-import type { ProductField } from "@/data/demo-products";
+import { FIELD_ORDER, type ProductField } from "@/data/demo-products";
 import { FieldRow } from "./ProductCardField";
 
-type Highlight = "accent" | "amber" | "none";
+type Highlight = "accent" | "human" | "none";
 
 export type ProductCardProps = {
   title: string;
   stepNumber?: number;
-  badge?: { text: string; variant?: "accent" | "amber" | "neutral" };
+  badge?: { text: string; variant?: "accent" | "neutral" };
   image?: ReactNode | string;
   fields: ProductField[];
-  completeness: number;
   highlight?: Highlight;
   width?: number | string;
   /** Rozmycie tła: wyłączamy je w długich listach kart (wydajność). */
@@ -24,8 +23,24 @@ export type ProductCardProps = {
   className?: string;
 };
 
-const barColor = (value: number) =>
-  value < 30 ? "var(--danger)" : value < 80 ? "var(--amber)" : "var(--accent)";
+function Segments({ filled, total }: { filled: number; total: number }) {
+  return (
+    <span className="flex items-center gap-1" aria-hidden>
+      {Array.from({ length: total }).map((_, i) => (
+        <motion.span
+          key={i}
+          initial={false}
+          animate={{ opacity: 1 }}
+          className="h-[6px] w-[6px] rounded-full border"
+          style={{
+            background: i < filled ? "var(--accent)" : "transparent",
+            borderColor: i < filled ? "var(--accent)" : "var(--glass-border-strong)",
+          }}
+        />
+      ))}
+    </span>
+  );
+}
 
 export function ProductCard({
   title,
@@ -33,21 +48,21 @@ export function ProductCard({
   badge,
   image,
   fields,
-  completeness,
   highlight = "none",
   width = 280,
   blur = true,
   imageAlt = "",
   className,
 }: ProductCardProps) {
+  const total = fields.length || FIELD_ORDER.length;
+  const filled = fields.filter((f) => f.status !== "empty").length;
   const highlightColor =
-    highlight === "accent" ? "var(--accent)" : highlight === "amber" ? "var(--amber)" : null;
-  const highlightSoft =
     highlight === "accent"
-      ? "var(--accent-soft)"
-      : highlight === "amber"
-        ? "var(--amber-soft)"
-        : "transparent";
+      ? "var(--accent)"
+      : highlight === "human"
+        ? "var(--text-secondary)"
+        : null;
+  const highlightSoft = highlight === "accent" ? "var(--accent-soft)" : "transparent";
 
   return (
     <motion.div
@@ -63,10 +78,7 @@ export function ProductCard({
         boxShadow: "var(--glass-highlight), var(--glass-shadow)",
       }}
     >
-      <div
-        className="flex flex-col gap-2 px-5 py-4"
-        style={{ background: highlightSoft }}
-      >
+      <div className="flex flex-col gap-2 px-5 py-4" style={{ background: highlightSoft }}>
         <div className="flex items-center gap-2">
           {typeof stepNumber === "number" ? (
             <span
@@ -112,19 +124,11 @@ export function ProductCard({
         ))}
       </ul>
 
-      <div className="px-5 pb-4">
-        <div className="h-[3px] w-full overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
-          <motion.div
-            className="h-full rounded-full"
-            initial={false}
-            animate={{ width: `${Math.max(0, Math.min(100, completeness))}%` }}
-            transition={{ duration: 0.4, ease: "easeOut" }}
-            style={{ background: barColor(completeness) }}
-          />
-        </div>
-        <p className="lp-caption mt-2" style={{ color: "var(--text-muted)" }}>
-          {Math.round(completeness)}% kompletności
+      <div className="flex items-center justify-between gap-3 px-5 pb-4">
+        <p className="lp-caption" style={{ color: "var(--text-muted)" }}>
+          {filled} z {total} pól
         </p>
+        <Segments filled={filled} total={total} />
       </div>
     </motion.div>
   );
