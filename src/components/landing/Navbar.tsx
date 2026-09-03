@@ -3,6 +3,9 @@ import { Menu, X } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
 import { AccentButton } from "@/components/ui-custom/Buttons";
 import { navLinks } from "@/data/demo-products";
+import { SHOW_CASE_STUDIES } from "@/data/case-studies";
+
+const visibleLinks = navLinks.filter((l) => SHOW_CASE_STUDIES || l.href !== "#cases");
 
 const scrollTo = (id: string) =>
   document.querySelector(id)?.scrollIntoView({ behavior: "smooth" });
@@ -40,7 +43,7 @@ export function Navbar() {
         <BrandMark />
 
         <nav className="hidden items-center gap-7 lg:flex">
-          {navLinks.map((l) => (
+          {visibleLinks.map((l) => (
             <a
               key={l.href}
               href={l.href}
@@ -100,7 +103,7 @@ export function Navbar() {
             </button>
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-6 pt-6">
-            {navLinks.map((l) => (
+            {visibleLinks.map((l) => (
               <a
                 key={l.href}
                 href={l.href}
