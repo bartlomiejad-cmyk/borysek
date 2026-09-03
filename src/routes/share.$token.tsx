@@ -31,8 +31,6 @@ export const Route = createFileRoute("/share/$token")({
         href: "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
       },
     ],
-  }),
-  head: () => ({
     meta: [
       { title: "Udostępniona lista produktów" },
       { name: "robots", content: "noindex" },

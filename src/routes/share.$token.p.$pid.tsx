@@ -21,8 +21,6 @@ export const Route = createFileRoute("/share/$token/p/$pid")({
         href: "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
       },
     ],
-  }),
-  head: () => ({
     meta: [
       { title: "Karta produktu — podgląd" },
       { name: "robots", content: "noindex" },
