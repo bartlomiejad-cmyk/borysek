@@ -12,11 +12,13 @@ function ScanBeam() {
   const reduced = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const [run, setRun] = useState(0);
+  const [height, setHeight] = useState(0);
 
   useEffect(() => {
     if (reduced) return;
     const el = ref.current;
     if (!el) return;
+    setHeight(el.offsetHeight);
     let first: ReturnType<typeof setTimeout> | null = null;
     let interval: ReturnType<typeof setInterval> | null = null;
     const stop = () => {
@@ -57,7 +59,7 @@ function ScanBeam() {
             willChange: "transform",
           }}
           initial={{ y: 0 }}
-          animate={{ y: "calc(100vh + 140px)" }}
+          animate={{ y: height + BEAM_H }}
           transition={{ duration: BEAM_MS / 1000, ease: "easeInOut" }}
         />
       ) : null}

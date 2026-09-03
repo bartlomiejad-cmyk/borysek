@@ -8,7 +8,7 @@ import { showcaseProducts } from "@/data/demo-products";
 import { Reveal } from "@/components/ui-custom/Reveal";
 import { StateToggle, type ShowcaseState } from "./StateToggle";
 import { ShowcaseCard } from "./ShowcaseCard";
-import { ConfettiLayer } from "@/components/landing/ConfettiLayer";
+import { SectionAtmosphere } from "@/components/landing/SectionAtmosphere";
 
 const AFTER_PILLS = [
   { icon: Plus, text: "+8 pól uzupełnionych" },
@@ -21,7 +21,7 @@ export function BeforeAfterShowcase() {
 
   return (
     <section id="before-after" className="relative overflow-hidden lp-section">
-      <ConfettiLayer seed={22} />
+      <SectionAtmosphere />
       <div className="relative" style={{ zIndex: 1 }}>
       <Container>
         <Reveal>
