@@ -20,14 +20,18 @@ function CardHeader({ pkg }: { pkg: OfferPackage }) {
     <div
       className="relative flex h-[180px] flex-col items-center justify-center gap-2 px-6 text-center"
       style={{
+        paddingTop: 44,
         background: topGradient[pkg.variant],
         borderRadius: "var(--radius-card) var(--radius-card) 0 0",
       }}
     >
       {pkg.featured ? (
         <span
-          className="absolute right-[14px] top-[14px] whitespace-nowrap px-3 py-1 text-[0.8125rem] font-medium"
+          className="absolute whitespace-nowrap px-3 py-1 text-[0.8125rem] font-medium"
           style={{
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
             background: "rgba(7,8,9,0.28)",
             color: "var(--accent-ink)",
             borderRadius: "var(--radius-pill)",
@@ -37,6 +41,7 @@ function CardHeader({ pkg }: { pkg: OfferPackage }) {
           Najczęściej wybierany
         </span>
       ) : null}
+
 
       <span className="lp-caption" style={{ color: secondary }}>
         {pkg.caption}
