@@ -50,8 +50,8 @@ export function PlatformsSection() {
                   >
                     {platform.name}
                   </span>
-                  <Pill variant={isApi ? "accent" : "neutral"}>
-                    {isApi ? "Publikacja przez API" : "Plik CSV lub XML"}
+                  <Pill variant="neutral">
+                    {isUpload ? "Wgrywamy za Ciebie" : "Plik CSV lub XLSX"}
                   </Pill>
                 </div>
               </GlassCard>
