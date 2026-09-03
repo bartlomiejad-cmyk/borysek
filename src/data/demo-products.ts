@@ -1,3 +1,5 @@
+import { Armchair, Coffee, Headphones, type LucideIcon } from "lucide-react";
+
 export type FieldStatus = "empty" | "ai" | "verified";
 
 export type ProductField = {
@@ -28,144 +30,146 @@ export type ShowcaseProduct = {
   id: string;
   name: string;
   industry: string;
-  imageMain: string | null;
-  imageScene: string | null;
+  icon: LucideIcon;
   before: { values: Record<string, string>; image: boolean };
   after: { values: Record<string, string>; image: boolean };
   copy: { seoTitle: string; description: string };
 };
 
-/* 1. Chemia gospodarcza */
+/* 1. Ekspres do kawy (hero, flow) */
 
-export const tigroValues: Record<string, string> = {
-  Nazwa: "Tigro Worki na śmieci LDPE 120 l 25 szt. czarne mocne",
-  EAN: "5906154012072",
-  Kategoria: "Worki na śmieci",
+export const espressoValues: Record<string, string> = {
+  Nazwa: "Ekspres ciśnieniowy automatyczny 15 bar, 1,8 l, czarny",
+  EAN: "5901234123457",
+  Kategoria: "Ekspresy do kawy",
   Cechy: "6 cech",
   Opis:
-    "Worki na śmieci Tigro o pojemności 120 litrów wykonane zostały z elastycznej folii LDPE w kolorze czarnym. Produkt charakteryzuje się podwyższoną wytrzymałością, co pozwala na bezpieczne składowanie i transportowanie odpadów.",
-  "Tytuł SEO": "Worki na śmieci Tigro LDPE 120 l, 25 szt., czarne",
+    "Automatyczny ekspres ciśnieniowy przygotowuje espresso, cappuccino i latte jednym przyciskiem. Ceramiczny młynek stożkowy mieli ziarna bezpośrednio przed parzeniem, a ciśnienie 15 bar wydobywa pełny aromat kawy.",
+  "Tytuł SEO": "Ekspres ciśnieniowy automatyczny 15 bar z młynkiem, 1,8 l",
   "Opis SEO":
-    "Worki na śmieci Tigro LDPE 120 l, 25 sztuk, czarne, wymiary 70 x 110 cm, podwyższona wytrzymałość.",
-  "Słowa kluczowe": "worki na śmieci 120 l, worki LDPE, Tigro",
+    "Automatyczny ekspres ciśnieniowy 15 bar z ceramicznym młynkiem i spieniaczem mleka. Zbiornik 1,8 l, czarna obudowa, kawa jednym przyciskiem.",
+  "Słowa kluczowe": "ekspres automatyczny, ekspres ciśnieniowy 15 bar, ekspres z młynkiem",
   Packshot: "białe tło",
   "Opis Allegro":
-    "Worki na śmieci Tigro 120 l z folii LDPE, 25 sztuk w rolce, wymiary 70 x 110 cm, kolor czarny.",
+    "Ekspres ciśnieniowy automatyczny 15 bar, zbiornik 1,8 l, ceramiczny młynek stożkowy, automatyczny spieniacz mleka, kolor czarny.",
 };
 
-export const tigroFeatures: Array<[string, string]> = [
-  ["Marka", "Tigro"],
-  ["Pojemność", "120 l"],
-  ["Materiał", "LDPE"],
+export const espressoFeatures: Array<[string, string]> = [
+  ["Typ", "automatyczny"],
+  ["Ciśnienie", "15 bar"],
+  ["Zbiornik na wodę", "1,8 l"],
+  ["Młynek", "ceramiczny, stożkowy"],
+  ["Spieniacz", "automatyczny"],
   ["Kolor", "czarny"],
-  ["Wymiary", "70 x 110 cm"],
-  ["Liczba sztuk", "25"],
 ];
 
-/* 2. Kosmetyki */
+/* 2. Słuchawki */
 
-export const palmoliveValues: Record<string, string> = {
-  Nazwa: "Palmolive Joyful Blooming Mydło w płynie 300 ml",
-  EAN: "8718951378353",
-  Kategoria: "Mydła w płynie",
-  Cechy: "4 cechy",
-  Opis:
-    "Palmolive Joyful Blooming to mydło w płynie przeznaczone do codziennej higieny rąk. Produkt charakteryzuje się delikatną formułą myjącą, która skutecznie usuwa zanieczyszczenia z powierzchni skóry.",
-  "Tytuł SEO": "Palmolive Joyful Blooming mydło w płynie 300 ml z dozownikiem",
-  "Opis SEO":
-    "Mydło w płynie Palmolive Joyful Blooming 300 ml w opakowaniu z dozownikiem, do codziennej higieny rąk.",
-  "Słowa kluczowe": "mydło w płynie 300 ml, Palmolive, mydło z dozownikiem",
-  Packshot: "białe tło",
-  "Opis Allegro":
-    "Palmolive Joyful Blooming mydło w płynie 300 ml, opakowanie z dozownikiem, delikatna formuła myjąca.",
-};
-
-/* 3. Części motocyklowe */
-
-export const athenaValues: Record<string, string> = {
-  Nazwa: "Wydech Athena Racing Pro Minarelli leżące P400485120012",
-  EAN: "P400485120012",
-  Kategoria: "Układy wydechowe",
+export const headphonesValues: Record<string, string> = {
+  Nazwa: "Słuchawki bezprzewodowe nauszne z ANC, 40 h pracy, grafitowe",
+  EAN: "5901234123464",
+  Kategoria: "Słuchawki bezprzewodowe",
   Cechy: "6 cech",
   Opis:
-    "Wydech Athena Racing Pro to pełny układ wydechowy typu 1-into-1, zaprojektowany z myślą o skuterach wyposażonych w silnik Minarelli leżący. Konstrukcja wykonana z tytanu zapewnia redukcję masy oraz poprawę osiągów pojazdu.",
-  "Tytuł SEO": "Wydech Athena Racing Pro do silników Minarelli leżących",
+    "Nauszne słuchawki bezprzewodowe z aktywną redukcją szumów izolują od hałasu otoczenia w podróży i w biurze. Akumulator wystarcza na 40 godzin słuchania, a składana konstrukcja mieści się w dołączonym etui.",
+  "Tytuł SEO": "Słuchawki bezprzewodowe nauszne ANC, 40 h, Bluetooth 5.3",
   "Opis SEO":
-    "Tytanowy układ wydechowy Athena Racing Pro 1-into-1 do silników Minarelli leżących, kod producenta P400485120012.",
-  "Słowa kluczowe": "wydech Athena Racing Pro, Minarelli leżące, P400485120012",
+    "Nauszne słuchawki bezprzewodowe z aktywną redukcją szumów i 40 godzinami pracy. Bluetooth 5.3, ładowanie USB-C, składana konstrukcja.",
+  "Słowa kluczowe": "słuchawki ANC, słuchawki bezprzewodowe nauszne, słuchawki bluetooth 40h",
   Packshot: "białe tło",
   "Opis Allegro":
-    "Pełny układ wydechowy Athena Racing Pro 1-into-1, tytan, do silników Minarelli leżących, kod P400485120012.",
+    "Nauszne słuchawki bezprzewodowe z aktywną redukcją szumów, do 40 h pracy, Bluetooth 5.3, ładowanie USB-C, kolor grafitowy.",
 };
 
-export const athenaFeatures: Array<[string, string]> = [
-  ["Marka", "Athena"],
-  ["Model", "Racing Pro"],
-  ["Materiał", "tytan"],
-  ["Typ", "pełny układ 1-into-1"],
-  ["Kod producenta", "P400485120012"],
-  ["Kompatybilność", "8 modeli (Aprilia, Italjet, Malaguti, Yamaha)"],
+export const headphonesFeatures: Array<[string, string]> = [
+  ["Konstrukcja", "nauszne, zamknięte"],
+  ["Redukcja szumów", "aktywna (ANC)"],
+  ["Czas pracy", "do 40 h"],
+  ["Łączność", "Bluetooth 5.3"],
+  ["Ładowanie", "USB-C"],
+  ["Kolor", "grafitowy"],
+];
+
+/* 3. Fotel biurowy */
+
+export const chairValues: Record<string, string> = {
+  Nazwa: "Fotel biurowy ergonomiczny z siatki, podłokietniki 4D, szary",
+  EAN: "5901234123471",
+  Kategoria: "Fotele biurowe",
+  Cechy: "6 cech",
+  Opis:
+    "Ergonomiczny fotel biurowy z oparciem z oddychającej siatki i regulowanym podparciem odcinka lędźwiowego. Mechanizm synchroniczny dopasowuje kąt oparcia do siedziska, a podłokietniki 4D ustawisz w czterech kierunkach.",
+  "Tytuł SEO": "Fotel biurowy ergonomiczny siatkowy z podłokietnikami 4D",
+  "Opis SEO":
+    "Ergonomiczny fotel biurowy z siatkowym oparciem, podparciem lędźwi i podłokietnikami 4D. Mechanizm synchroniczny, obciążenie do 130 kg.",
+  "Słowa kluczowe": "fotel ergonomiczny, fotel biurowy siatkowy, fotel z podłokietnikami 4D",
+  Packshot: "białe tło",
+  "Opis Allegro":
+    "Ergonomiczny fotel biurowy z siatkowym oparciem, podłokietniki regulowane 4D, mechanizm synchroniczny, obciążenie do 130 kg, kolor szary.",
+};
+
+export const chairFeatures: Array<[string, string]> = [
+  ["Oparcie", "siatka z podparciem lędźwi"],
+  ["Podłokietniki", "regulowane 4D"],
+  ["Mechanizm", "synchroniczny"],
+  ["Regulacja wysokości", "siłownik gazowy"],
+  ["Maks. obciążenie", "130 kg"],
+  ["Kolor", "szary"],
 ];
 
 export const showcaseProducts: ShowcaseProduct[] = [
   {
-    id: "tigro-worki",
-    name: "Worki na śmieci Tigro 120 l",
-    industry: "Chemia gospodarcza",
-    imageMain: null,
-    imageScene:
-      "https://dzmexgqkqtskuunonyws.supabase.co/storage/v1/object/public/regenerated-images/visualizations/94885fb6-64dc-4b46-89fd-3e170b69fbdd-1784532662691-1-a1.jpg",
+    id: "ekspres",
+    name: "Ekspres ciśnieniowy automatyczny 15 bar",
+    industry: "AGD",
+    icon: Coffee,
     before: {
       values: {
-        Nazwa: "WORKI NA ŚMIECI TIGRO LDPE 120L A25 25SZT CZARNE BIO MOCNE",
-        EAN: "5906154012072",
+        Nazwa: "EKSPRES CISNIENIOWY AUTOMAT 15BAR 1,8L CZARNY",
+        EAN: "5901234123457",
       },
       image: false,
     },
-    after: { values: tigroValues, image: true },
+    after: { values: espressoValues, image: true },
     copy: {
-      seoTitle: tigroValues["Tytuł SEO"]!,
-      description: tigroValues["Opis"]!,
+      seoTitle: espressoValues["Tytuł SEO"]!,
+      description: espressoValues["Opis"]!,
     },
   },
   {
-    id: "palmolive-mydlo",
-    name: "Palmolive Joyful Blooming 300 ml",
-    industry: "Kosmetyki",
-    imageMain: null,
-    imageScene: null,
+    id: "sluchawki",
+    name: "Słuchawki bezprzewodowe nauszne z ANC",
+    industry: "Elektronika",
+    icon: Headphones,
     before: {
       values: {
-        Nazwa: "Palmolive Joyful Blooming Mydło w Płynie 300ml",
-        EAN: "8718951378353",
+        Nazwa: "SLUCHAWKI BT ANC NAUSZNE 40H GRAFIT",
+        EAN: "5901234123464",
       },
       image: false,
     },
-    after: { values: palmoliveValues, image: true },
+    after: { values: headphonesValues, image: true },
     copy: {
-      seoTitle: palmoliveValues["Tytuł SEO"]!,
-      description: palmoliveValues["Opis"]!,
+      seoTitle: headphonesValues["Tytuł SEO"]!,
+      description: headphonesValues["Opis"]!,
     },
   },
   {
-    id: "athena-wydech",
-    name: "Wydech Athena Racing Pro",
-    industry: "Części motocyklowe",
-    imageMain:
-      "https://dzmexgqkqtskuunonyws.supabase.co/storage/v1/object/public/regenerated-images/9aa16c1c-4c59-422e-916a-613d0f964ae2.png",
-    imageScene:
-      "https://dzmexgqkqtskuunonyws.supabase.co/storage/v1/object/public/regenerated-images/visualizations/9aa16c1c-4c59-422e-916a-613d0f964ae2-1784533802377-1-a1.jpg",
+    id: "fotel",
+    name: "Fotel biurowy ergonomiczny z siatki",
+    industry: "Meble biurowe",
+    icon: Armchair,
     before: {
       values: {
-        Nazwa: "Wydech Athena Racing Pro, Minarelli leżące P400485120012",
-        EAN: "P400485120012",
+        Nazwa: "FOTEL BIUROWY ERGO SIATKA PODLOKIETNIKI 4D SZARY",
+        EAN: "5901234123471",
       },
       image: false,
     },
-    after: { values: athenaValues, image: true },
+    after: { values: chairValues, image: true },
     copy: {
-      seoTitle: athenaValues["Tytuł SEO"]!,
-      description: athenaValues["Opis"]!,
+      seoTitle: chairValues["Tytuł SEO"]!,
+      description: chairValues["Opis"]!,
     },
   },
 ];
@@ -194,7 +198,7 @@ export function buildFields(filledCount: number, status: FieldStatus = "ai"): Pr
   return FIELD_ORDER.map((label, i) => ({
     label,
     long: LONG_FIELDS.has(label),
-    value: i < filledCount ? tigroValues[label] : undefined,
+    value: i < filledCount ? espressoValues[label] : undefined,
     status: i < filledCount ? status : ("empty" as FieldStatus),
   }));
 }
@@ -212,14 +216,14 @@ export const navLinks = [
 export type WideField = { label: string; value: string | null };
 
 export const heroWideFields: WideField[] = [
-  { label: "Nazwa", value: "Tigro Worki na śmieci LDPE 120 l" },
-  { label: "EAN", value: "5906154012072" },
-  { label: "Kategoria", value: "Worki na śmieci" },
+  { label: "Nazwa", value: "Ekspres ciśnieniowy automatyczny" },
+  { label: "EAN", value: "5901234123457" },
+  { label: "Kategoria", value: "Ekspresy do kawy" },
   { label: "Cechy", value: "6 cech" },
   { label: "Opis", value: null },
-  { label: "Tytuł SEO", value: "Worki Tigro LDPE 120 l, 25 szt." },
+  { label: "Tytuł SEO", value: "Ekspres 15 bar z młynkiem, 1,8 l" },
   { label: "Opis SEO", value: null },
-  { label: "Frazy SEO", value: "worki na śmieci 120 l, LDPE" },
+  { label: "Frazy SEO", value: "ekspres automatyczny, 15 bar" },
   { label: "Packshot", value: "białe tło" },
   { label: "Allegro", value: null },
 ];

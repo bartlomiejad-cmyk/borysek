@@ -354,3 +354,99 @@ html { scroll-behavior: smooth; }
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* ── Landing: ruch (aurora, dryf tła, confetti, hover flow) ──── */
+@keyframes lp-aurora-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(24px, -18px, 0) scale(1.08); }
+}
+@keyframes lp-aurora-b {
+  from { transform: translate3d(0, 0, 0) scale(1.06); }
+  to   { transform: translate3d(-20px, 24px, 0) scale(1); }
+}
+@keyframes lp-card-float {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-8px); }
+}
+@keyframes lp-shine {
+  from { transform: translateX(-120%) skewX(-18deg); }
+  to   { transform: translateX(260%) skewX(-18deg); }
+}
+@keyframes lp-drift-a {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(60px, 40px, 0); }
+}
+@keyframes lp-drift-b {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-60px, -40px, 0); }
+}
+@keyframes lp-confetti-fall {
+  from { transform: translate3d(0, -10%, 0); }
+  to   { transform: translate3d(0, 110%, 0); }
+}
+@keyframes lp-confetti-sway {
+  0%   { transform: translateX(-14px) rotate(0deg); }
+  100% { transform: translateX(14px) rotate(360deg); }
+}
+@keyframes lp-spin-once {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.lp-aurora-a { animation: lp-aurora-a 14s ease-in-out infinite alternate; will-change: transform; }
+.lp-aurora-b { animation: lp-aurora-b 18s ease-in-out infinite alternate; will-change: transform; }
+.lp-card-float { animation: lp-card-float 7s ease-in-out infinite alternate; will-change: transform; }
+.lp-shine-run { animation: lp-shine 900ms ease-in-out 1 both; }
+.lp-drift-a { animation: lp-drift-a 22s ease-in-out infinite alternate; will-change: transform; }
+.lp-drift-b { animation: lp-drift-b 28s ease-in-out infinite alternate; will-change: transform; }
+@media (max-width: 767px) {
+  .lp-drift-a, .lp-drift-b { animation: none; }
+}
+
+.lp-confetti-fall { animation-name: lp-confetti-fall; animation-timing-function: linear; animation-iteration-count: infinite; will-change: transform; }
+.lp-confetti-sway { animation-name: lp-confetti-sway; animation-timing-function: ease-in-out; animation-iteration-count: infinite; animation-direction: alternate; will-change: transform; }
+
+/* Hover kart „Jak pracujemy” (tylko urządzenia z myszą) */
+.lp-step-card { transition: background 220ms ease, border-color 220ms ease, transform 220ms ease; }
+.lp-step-num { transition: background 220ms ease, color 220ms ease, border-color 220ms ease; }
+.lp-step-pill, .lp-step-preview, .lp-step-preview-pill { transition: background 220ms ease, color 220ms ease, border-color 220ms ease; }
+@media (hover: hover) and (pointer: fine) {
+  .lp-step-card:hover {
+    background: var(--accent) !important;
+    border-color: var(--accent-hover) !important;
+    transform: perspective(900px) translateY(-6px) rotateX(4deg) rotateY(-4deg);
+    transform-origin: center;
+  }
+  .lp-step-card:hover .lp-step-title,
+  .lp-step-card:hover .lp-step-text { color: #04110c !important; }
+  .lp-step-card:hover .lp-step-num {
+    background: #04110c !important;
+    color: var(--accent) !important;
+    border-color: #04110c !important;
+    animation: lp-spin-once 600ms ease-in-out 1;
+  }
+  .lp-step-card:hover .lp-step-pill {
+    background: rgba(4, 17, 12, 0.18) !important;
+    color: #04110c !important;
+    border-color: transparent !important;
+  }
+  .lp-step-card:hover .lp-step-preview {
+    background: rgba(4, 17, 12, 0.16) !important;
+    border-color: rgba(4, 17, 12, 0.24) !important;
+  }
+  .lp-step-card:hover .lp-step-preview * { color: #04110c !important; }
+  .lp-step-card:hover .lp-step-preview-pill {
+    background: #04110c !important;
+    color: var(--accent) !important;
+  }
+  .lp-step-card:hover .lp-step-preview-pill * { color: var(--accent) !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-aurora-a, .lp-aurora-b, .lp-card-float, .lp-shine-run,
+  .lp-drift-a, .lp-drift-b, .lp-confetti-fall, .lp-confetti-sway,
+  .lp-step-card, .lp-step-card:hover .lp-step-num {
+    animation: none !important;
+  }
+  .lp-step-card { transition: none !important; }
+}
