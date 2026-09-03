@@ -40,9 +40,8 @@ function CaseProductCard({
     <div className="flex flex-col items-center gap-2">
       <div style={{ zoom: 0.78 }}>
         <ProductCard
-          title="Ergo Watch PRO"
+          title="Karta produktu"
           fields={fields}
-          completeness={state.completeness}
           highlight={after ? "accent" : "none"}
           width={240}
         />

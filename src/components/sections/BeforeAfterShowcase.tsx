@@ -10,7 +10,7 @@ import { StateToggle, type ShowcaseState } from "./StateToggle";
 import { ShowcaseCard } from "./ShowcaseCard";
 
 const AFTER_PILLS = [
-  { icon: Plus, text: "+6 pól uzupełnionych" },
+  { icon: Plus, text: "+8 pól uzupełnionych" },
   { icon: Ruler, text: "Tytuł SEO w limicie 60 znaków" },
   { icon: Send, text: "Opis opublikowany w sklepie" },
 ];
@@ -57,7 +57,7 @@ export function BeforeAfterShowcase() {
               </motion.span>
             ))
           ) : (
-            <Pill variant="neutral">Karta niekompletna: 3 z 8 pól</Pill>
+            <Pill variant="neutral">Karta niekompletna: 2 z 10 pól</Pill>
           )}
         </div>
 
