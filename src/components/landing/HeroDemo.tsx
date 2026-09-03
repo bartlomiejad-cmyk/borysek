@@ -1,26 +1,11 @@
 import { useEffect, useState } from "react";
-import { Watch } from "lucide-react";
 import { ProductCard } from "@/components/product/ProductCard";
-import { buildFields, FIELD_ORDER } from "@/data/demo-products";
+import { ProductPlaceholderImage } from "@/components/product/ProductIcon";
+import { buildFields, FIELD_ORDER, heroProduct } from "@/data/demo-products";
 
 const TOTAL = FIELD_ORDER.length;
-const STEP_MS = 650;
+const STEP_MS = 520;
 const PAUSE_MS = 2500;
-
-function WatchImage() {
-  return (
-    <div
-      aria-hidden
-      className="flex h-full w-full items-center justify-center"
-      style={{
-        background:
-          "radial-gradient(120% 100% at 50% 0%, rgba(0,188,135,0.18), rgba(14,16,19,1) 70%)",
-      }}
-    >
-      <Watch className="h-12 w-12" strokeWidth={1.25} style={{ color: "var(--accent)" }} />
-    </div>
-  );
-}
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -65,7 +50,6 @@ export function HeroDemo() {
   const done = step > TOTAL;
   const filled = Math.min(step, TOTAL);
   const fields = done ? buildFields(TOTAL, "verified") : buildFields(filled, "ai");
-  const completeness = done ? 100 : Math.max(10, Math.round((filled / TOTAL) * 100));
   const showImage = filled >= 4;
 
   return (
@@ -104,9 +88,8 @@ export function HeroDemo() {
         <ProductCard
           title={done ? "Gotowe do sprzedaży" : "Nowy"}
           badge={done ? { text: "Opublikowano w sklepie", variant: "accent" } : undefined}
-          image={showImage ? <WatchImage /> : undefined}
+          image={showImage ? <ProductPlaceholderImage icon={heroProduct.icon} /> : undefined}
           fields={fields}
-          completeness={completeness}
           highlight={done ? "accent" : "none"}
           width="100%"
         />
