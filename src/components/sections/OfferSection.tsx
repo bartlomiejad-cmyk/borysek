@@ -13,7 +13,7 @@ const mobileOrderClass: Record<number, string> = {
 
 export function OfferSection() {
   return (
-    <section id="offer" className="relative py-24 lg:py-32">
+    <section id="offer" className="relative py-20 md:py-32">
       <Container>
         <Reveal>
           <SectionHeading

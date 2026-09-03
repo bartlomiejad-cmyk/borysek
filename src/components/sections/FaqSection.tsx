@@ -12,7 +12,7 @@ import { faqItems } from "@/data/content";
 
 export function FaqSection() {
   return (
-    <section id="faq" className="scroll-mt-24 py-20 md:py-28">
+    <section id="faq" className="scroll-mt-24 py-20 md:py-32">
       <Container className="flex flex-col gap-10">
         <Reveal>
           <SectionHeading eyebrow="FAQ" title="Najczęstsze pytania" align="left" />

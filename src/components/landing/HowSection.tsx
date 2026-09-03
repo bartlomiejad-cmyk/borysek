@@ -30,7 +30,7 @@ const TILES = [
 
 export function HowSection() {
   return (
-    <section id="scope" className="py-20 md:py-28">
+    <section id="scope" className="py-20 md:py-32">
       <Container>
         <Reveal>
         <SectionHeading

@@ -8,7 +8,7 @@ const benefits = ["Bez zobowiązań", "Do 2 dni roboczych", "Gotowe do publikacj
 
 export function ContactSection() {
   return (
-    <section id="contact" className="scroll-mt-24 py-20 md:py-28">
+    <section id="contact" className="scroll-mt-24 py-20 md:py-32">
       <Container>
         <Reveal>
         <GlassCard
