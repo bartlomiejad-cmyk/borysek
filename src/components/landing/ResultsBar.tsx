@@ -8,7 +8,7 @@ export function ResultsBar() {
   return (
     <section className="pb-4">
       <Container>
-        <h2 className="sr-only">Wyniki w liczbach</h2>
+        <h2 className="sr-only">Jak to działa w liczbach</h2>
         <Reveal>
         <GlassCard padding="lg">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4">

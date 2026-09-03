@@ -14,7 +14,7 @@ export function PlatformsSection() {
         <SectionHeading
           eyebrow="Platformy"
           title="Pracujemy z Twoim sklepem, jaki jest."
-          lead="Tam, gdzie mamy integrację, publikujemy przez API. Wszędzie indziej oddajemy plik gotowy do importu."
+          lead="Publikujemy przez import w panelu Twojego sklepu albo oddajemy plik gotowy do wgrania. Bez integracji, bez wtyczek."
           align="left"
           className="mb-16"
         />
@@ -22,33 +22,22 @@ export function PlatformsSection() {
 
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           {platforms.map((platform, i) => {
-            const isApi = platform.mode === "api";
+            const isUpload = platform.mode === "upload";
             return (
               <Reveal key={platform.name} index={i}>
               <GlassCard
                 blur={false}
                 padding="md"
                 className="flex h-full flex-col items-center gap-4 text-center"
-
-                style={{
-                  borderColor: isApi ? "rgba(0, 188, 135, 0.5)" : undefined,
-                  boxShadow: isApi
-                    ? "0 0 28px rgba(0, 188, 135, 0.08), var(--glass-highlight), var(--glass-shadow)"
-                    : undefined,
-                }}
               >
                 <div
                   className="flex h-12 w-12 items-center justify-center rounded-full"
                   style={{
-                    background: isApi ? "var(--accent-soft)" : "var(--glass-bg-strong)",
+                    background: "var(--glass-bg-strong)",
                     border: "1px solid var(--glass-border)",
                   }}
                 >
-                  <Store
-                    aria-hidden
-                    className="h-5 w-5"
-                    style={{ color: isApi ? "var(--accent)" : "var(--text-secondary)" }}
-                  />
+                  <Store aria-hidden className="h-5 w-5" style={{ color: "var(--text-secondary)" }} />
                 </div>
                 <div className="flex flex-col items-center gap-2">
                   <span
@@ -61,8 +50,8 @@ export function PlatformsSection() {
                   >
                     {platform.name}
                   </span>
-                  <Pill variant={isApi ? "accent" : "neutral"}>
-                    {isApi ? "Publikacja przez API" : "Plik CSV lub XML"}
+                  <Pill variant="neutral">
+                    {isUpload ? "Wgrywamy za Ciebie" : "Plik CSV lub XLSX"}
                   </Pill>
                 </div>
               </GlassCard>

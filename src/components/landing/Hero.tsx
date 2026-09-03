@@ -4,6 +4,7 @@ import { Pill } from "@/components/ui-custom/Pill";
 import { AccentButton, GhostButton } from "@/components/ui-custom/Buttons";
 import { Reveal } from "@/components/ui-custom/Reveal";
 import { HeroDemo } from "@/components/landing/HeroDemo";
+import { SHOW_CASE_STUDIES } from "@/data/case-studies";
 
 const bullets = ["Bez zobowiązań", "Akceptujesz przed publikacją", "Publikujemy za Ciebie"];
 
@@ -44,8 +45,11 @@ export function Hero() {
               <AccentButton size="lg" onClick={() => scrollTo("#contact")}>
                 Bezpłatna próbka: 5 produktów
               </AccentButton>
-              <GhostButton size="lg" onClick={() => scrollTo("#cases")}>
-                Zobacz realizacje
+              <GhostButton
+                size="lg"
+                onClick={() => scrollTo(SHOW_CASE_STUDIES ? "#cases" : "#before-after")}
+              >
+                {SHOW_CASE_STUDIES ? "Zobacz realizacje" : "Zobacz przed i po"}
               </GhostButton>
             </Reveal>
 

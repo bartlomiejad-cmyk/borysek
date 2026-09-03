@@ -1,14 +1,14 @@
-/** Placeholders in square brackets are intentional — replace with real data only. */
+/** Fakty o procesie pokazywane w pasku pod hero (bez animacji licznika). */
 export type LandingStat = {
-  /** Number to animate, or a "[LICZBA]" style placeholder shown as-is. */
+  /** Number to animate, or a plain string shown as-is. */
   value: number | string;
   suffix?: string;
   text: string;
 };
 
 export const landingStats: LandingStat[] = [
-  { value: "[LICZBA]", text: "produktów opisanych dla klientów" },
-  { value: "[LICZBA]", text: "sklepów, z którymi pracowaliśmy" },
-  { value: "[LICZBA]", text: "branż: od elektroniki po kosmetyki" },
-  { value: "[LICZBA]", suffix: " dni", text: "średnio od dostępu do publikacji" },
+  { value: "2-3", text: "zweryfikowane źródła na każdy produkt" },
+  { value: "10", text: "elementów kompletnej karty produktu" },
+  { value: "5", text: "produktów w bezpłatnej próbce" },
+  { value: "2 dni", text: "robocze na przygotowanie próbki" },
 ];

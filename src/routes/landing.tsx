@@ -7,6 +7,7 @@ import { HowSection } from "@/components/landing/HowSection";
 import { ProcessFlow } from "@/components/sections/ProcessFlow";
 import { BeforeAfterShowcase } from "@/components/sections/BeforeAfterShowcase";
 import { CaseStudies } from "@/components/sections/CaseStudies";
+import { SHOW_CASE_STUDIES } from "@/data/case-studies";
 import { OfferSection } from "@/components/sections/OfferSection";
 import { PlatformsSection } from "@/components/sections/PlatformsSection";
 import { FaqSection } from "@/components/sections/FaqSection";
@@ -60,7 +61,7 @@ function LandingPage() {
       <Navbar />
       <Hero />
       <ResultsBar />
-      <CaseStudies />
+      {SHOW_CASE_STUDIES ? <CaseStudies /> : null}
       <HowSection />
       <BeforeAfterShowcase />
       <ProcessFlow />

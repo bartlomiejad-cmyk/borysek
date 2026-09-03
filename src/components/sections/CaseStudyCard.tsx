@@ -130,7 +130,7 @@ export function CaseStudyCard({
                       „{study.quote.text}"
                     </p>
                     <footer className="lp-caption" style={{ color: "var(--text-muted)" }}>
-                      {study.quote.author} — {study.quote.role}
+                      {study.quote.author}, {study.quote.role}
                     </footer>
                   </blockquote>
                 ) : null}

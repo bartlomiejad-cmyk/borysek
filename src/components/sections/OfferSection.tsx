@@ -38,7 +38,8 @@ export function OfferSection() {
             className="lp-body mx-auto mt-12 max-w-xl text-center"
             style={{ color: "var(--text-muted)" }}
           >
-            Próbka 5 produktów jest bezpłatna i nie zobowiązuje do zamówienia.
+            Cenę podajemy po bezpłatnej próbce, gdy znamy Twój asortyment. Próbka nie zobowiązuje
+            do zamówienia.
           </p>
         </Reveal>
       </Container>

@@ -1,5 +1,7 @@
 import { ArrowUp } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
+import { contactEmail, contactPhone, isSet } from "@/data/content";
+import { SHOW_CASE_STUDIES } from "@/data/case-studies";
 
 type FooterColumn = { heading: string; links: { label: string; href: string }[] };
 
@@ -7,7 +9,7 @@ const columns: FooterColumn[] = [
   {
     heading: "Usługa",
     links: [
-      { label: "Realizacje", href: "#cases" },
+      ...(SHOW_CASE_STUDIES ? [{ label: "Realizacje", href: "#cases" }] : []),
       { label: "Przed i po", href: "#before-after" },
       { label: "Oferta", href: "#offer" },
     ],
@@ -15,8 +17,8 @@ const columns: FooterColumn[] = [
   {
     heading: "Kontakt",
     links: [
-      { label: "[ADRES E-MAIL]", href: "mailto:[ADRES E-MAIL]" },
-      { label: "[TELEFON]", href: "tel:[TELEFON]" },
+      ...(isSet(contactEmail) ? [{ label: contactEmail, href: `mailto:${contactEmail}` }] : []),
+      ...(isSet(contactPhone) ? [{ label: contactPhone, href: `tel:${contactPhone}` }] : []),
       { label: "LinkedIn", href: "#" },
     ],
   },
@@ -97,7 +99,7 @@ export function SiteFooter() {
             © 2026 AI Product Platform. Wszystkie prawa zastrzeżone.
           </p>
           <p className="lp-caption" style={{ color: "var(--text-muted)" }}>
-            Dane przetwarzane w UE.
+            Dane przetwarzamy zgodnie z RODO.
           </p>
         </div>
       </Container>

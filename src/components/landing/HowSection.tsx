@@ -16,7 +16,7 @@ import { Reveal } from "@/components/ui-custom/Reveal";
 import { FieldTile } from "./FieldTile";
 
 const TILES = [
-  { icon: Type, label: "Nazwa", badge: "PL/EN/DE" },
+  { icon: Type, label: "Nazwa", badge: "ton marki" },
   { icon: AlignLeft, label: "Opis", badge: "HTML" },
   { icon: ListChecks, label: "Cechy", badge: "lista" },
   { icon: FolderTree, label: "Kategoria", badge: "drzewo sklepu" },
@@ -53,9 +53,8 @@ export function HowSection() {
           className="lp-body mt-14 text-center"
           style={{ color: "var(--text-secondary)" }}
         >
-          Treści piszemy po polsku zgodnie z tonem Twojej marki, na życzenie także po angielsku i
-          niemiecku. Wszystkie powstają ze zweryfikowanych źródeł, z potwierdzeniem zgodności
-          kodów EAN.
+          Treści piszemy po polsku, zgodnie z tonem Twojej marki. Wszystkie powstają ze
+          zweryfikowanych źródeł, z potwierdzeniem zgodności kodów EAN.
         </p>
         </Reveal>
 

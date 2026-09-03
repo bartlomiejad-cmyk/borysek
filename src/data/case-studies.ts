@@ -1,6 +1,9 @@
 import { ergoWatchValues } from "./demo-products";
 
-/** Placeholders in square brackets are intentional — replace with real data only. */
+/** Placeholders in square brackets are intentional: replace with real data only. */
+
+/** Sekcja "Realizacje" jest ukryta, dopóki nie mamy prawdziwych danych. */
+export const SHOW_CASE_STUDIES = false;
 
 export type CaseProductState = {
   values: Record<string, string>;
@@ -44,7 +47,7 @@ export const caseStudies: CaseStudy[] = [1, 2, 3].map((n) => ({
     "Nazwy i opisy",
     "Cechy i kategorie",
     "Tytuły i opisy SEO",
-    "Publikacja przez API",
+    "Publikacja w sklepie",
   ],
   result: "[JEDNO ZDANIE O EFEKCIE]",
   quote: {
