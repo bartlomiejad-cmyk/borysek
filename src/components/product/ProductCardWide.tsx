@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, Package } from "lucide-react";
+import { Check, Package, type LucideIcon } from "lucide-react";
 import { heroWideFields } from "@/data/demo-products";
 
 const CELL_H = 50;
@@ -70,16 +70,14 @@ function Cell({ label, value, filled }: { label: string; value: string | null; f
 export type ProductCardWideProps = {
   /** Liczba wypełnionych komórek (0..10). */
   filled: number;
-  /** Zdjęcie produktu; brak = placeholder z ikoną Package. */
-  image?: string | null;
-  imageAlt?: string;
+  /** Ikona produktu pokazywana w polu obrazu. */
+  icon?: LucideIcon;
   showImage?: boolean;
 };
 
 export function ProductCardWide({
   filled,
-  image = null,
-  imageAlt = "",
+  icon: Icon = Package,
   showImage = true,
 }: ProductCardWideProps) {
   const total = heroWideFields.length;
@@ -118,13 +116,12 @@ export function ProductCardWide({
           marginTop: 14,
           height: 150,
           borderRadius: 14,
-          background: "var(--bg-elevated)",
+          background:
+            "radial-gradient(closest-side, rgba(0,188,135,0.22), rgba(0,188,135,0) 100%), var(--bg-elevated)",
         }}
       >
-        {showImage && image ? (
-          <img src={image} alt={imageAlt} loading="lazy" className="h-full w-full object-cover" />
-        ) : showImage ? (
-          <Package aria-hidden className="h-10 w-10" strokeWidth={1.25} style={{ color: "var(--accent)" }} />
+        {showImage ? (
+          <Icon aria-hidden style={{ height: 44, width: 44, color: "var(--accent)" }} strokeWidth={1.25} />
         ) : null}
       </div>
 

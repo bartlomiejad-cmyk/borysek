@@ -3,6 +3,7 @@ import { SectionHeading } from "@/components/ui-custom/SectionHeading";
 import { Reveal } from "@/components/ui-custom/Reveal";
 import { offerPackages } from "@/data/content";
 import { PricingCard } from "./PricingCard";
+import { ConfettiLayer } from "@/components/landing/ConfettiLayer";
 
 /** Na mobile pakiet Sklep jest pierwszy; od md wracamy do kolejności z danych. */
 const mobileOrderClass: Record<number, string> = {
@@ -13,7 +14,9 @@ const mobileOrderClass: Record<number, string> = {
 
 export function OfferSection() {
   return (
-    <section id="offer" className="relative lp-section">
+    <section id="offer" className="relative overflow-hidden lp-section">
+      <ConfettiLayer seed={33} />
+      <div className="relative" style={{ zIndex: 1 }}>
       <Container>
         <Reveal>
           <SectionHeading
@@ -42,6 +45,7 @@ export function OfferSection() {
           </p>
         </Reveal>
       </Container>
+      </div>
     </section>
   );
 }

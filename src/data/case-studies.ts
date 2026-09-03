@@ -1,4 +1,4 @@
-import { tigroValues } from "./demo-products";
+import { espressoValues } from "./demo-products";
 
 /** Placeholders in square brackets are intentional: replace with real data only. */
 
@@ -27,11 +27,11 @@ export type CaseStudy = {
 function demoState(partial: boolean): CaseProductState {
   if (partial) {
     return {
-      values: { EAN: tigroValues.EAN!, Nazwa: tigroValues.Nazwa! },
+      values: { EAN: espressoValues.EAN!, Nazwa: espressoValues.Nazwa! },
       image: false,
     };
   }
-  return { values: tigroValues, image: true };
+  return { values: espressoValues, image: true };
 }
 
 export const caseStudies: CaseStudy[] = [1, 2, 3].map((n) => ({

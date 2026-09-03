@@ -9,7 +9,7 @@ function StepCard({ step }: { step: ProcessStep }) {
   const accent = step.actor === "ai";
   return (
     <article
-      className="lp-glass grid h-full"
+      className="lp-glass lp-step-card grid h-full"
       style={{
         gridTemplateRows: "32px 28px 44px 1fr 120px",
         alignItems: "start",
@@ -22,7 +22,7 @@ function StepCard({ step }: { step: ProcessStep }) {
     >
       <div className="flex items-center justify-between gap-3">
         <span
-          className="flex items-center justify-center rounded-full border text-[13px]"
+          className="lp-step-num flex items-center justify-center rounded-full border text-[13px]"
           style={{
             height: 28,
             width: 28,
@@ -35,7 +35,7 @@ function StepCard({ step }: { step: ProcessStep }) {
           {step.index}
         </span>
         <span
-          className="inline-flex items-center justify-center text-[0.8125rem] font-medium"
+          className="lp-step-pill inline-flex items-center justify-center text-[0.8125rem] font-medium"
           style={{
             width: 84,
             height: 26,
@@ -51,14 +51,14 @@ function StepCard({ step }: { step: ProcessStep }) {
       </div>
 
       <h3
-        className="w-full truncate whitespace-nowrap text-[18px]"
+        className="lp-step-title w-full truncate whitespace-nowrap text-[18px]"
         style={{ fontFamily: "var(--font-display)", color: "var(--text-primary)", fontWeight: 600 }}
       >
         {step.title}
       </h3>
 
       <p
-        className="text-[14px] leading-relaxed"
+        className="lp-step-text text-[14px] leading-relaxed"
         style={{
           color: "var(--text-secondary)",
           display: "-webkit-box",

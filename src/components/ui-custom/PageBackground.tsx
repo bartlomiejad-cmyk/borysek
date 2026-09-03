@@ -17,7 +17,7 @@ export function PageBackground() {
       />
       {/* Accent blobs */}
       <div
-        className="fixed -z-10 rounded-full"
+        className="lp-drift-a fixed -z-10 rounded-full"
         style={{
           top: "-12rem",
           right: "-10rem",
@@ -30,7 +30,7 @@ export function PageBackground() {
         }}
       />
       <div
-        className="fixed -z-10 hidden rounded-full md:block"
+        className="lp-drift-b fixed -z-10 hidden rounded-full md:block"
         style={{
           top: "60%",
           left: "-14rem",

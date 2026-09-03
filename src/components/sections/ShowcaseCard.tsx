@@ -92,12 +92,8 @@ export function ShowcaseCard({
       <ProductCard
         title={state === "after" ? "GOTOWE DO SPRZEDAŻY" : "NOWY"}
         badge={state === "after" ? { text: "Karta gotowa", variant: "accent" } : undefined}
-        image={
-          state === "after" && (product.imageMain ?? product.imageScene)
-            ? (product.imageMain ?? product.imageScene)!
-            : <ProductPlaceholderImage />
-        }
-        imageAlt={state === "after" ? product.name : ""}
+        image={<ProductPlaceholderImage icon={product.icon} />}
+        imageAlt=""
         fields={fields}
         highlight={state === "after" ? "accent" : "none"}
         width="100%"

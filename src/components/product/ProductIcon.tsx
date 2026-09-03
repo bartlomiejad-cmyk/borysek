@@ -1,17 +1,17 @@
-import { Package } from "lucide-react";
+import { Package, type LucideIcon } from "lucide-react";
 
-/** Placeholder packshotu: ciemny gradient z ikoną Package. */
-export function ProductPlaceholderImage() {
+/** Placeholder packshotu: ikona produktu 44px na zielonej poświacie. */
+export function ProductPlaceholderImage({ icon: Icon = Package }: { icon?: LucideIcon }) {
   return (
     <div
       aria-hidden
       className="flex h-full w-full items-center justify-center"
       style={{
         background:
-          "radial-gradient(120% 100% at 50% 0%, rgba(0,188,135,0.18), rgba(14,16,19,1) 70%)",
+          "radial-gradient(closest-side, rgba(0,188,135,0.22), rgba(0,188,135,0) 100%), var(--bg-elevated)",
       }}
     >
-      <Package className="h-12 w-12" strokeWidth={1.25} style={{ color: "var(--accent)" }} />
+      <Icon style={{ color: "var(--accent)", height: 44, width: 44 }} strokeWidth={1.25} />
     </div>
   );
 }

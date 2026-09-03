@@ -1,11 +1,11 @@
-import { Check, Package } from "lucide-react";
+import { Check, Coffee } from "lucide-react";
 import type { ProcessPreview } from "@/data/process-steps";
 
 /** Rama podglądu: 120px, treść u góry, jedna pigułka 24px na dole. */
 function PreviewFrame({ children, pill }: { children: React.ReactNode; pill: string }) {
   return (
     <div
-      className="lp-glass flex w-full flex-col justify-between"
+      className="lp-glass lp-step-preview flex w-full flex-col justify-between"
       style={{
         height: 120,
         background: "var(--glass-bg-strong)",
@@ -16,7 +16,7 @@ function PreviewFrame({ children, pill }: { children: React.ReactNode; pill: str
     >
       <div className="flex w-full min-w-0 flex-col gap-1.5 overflow-hidden">{children}</div>
       <span
-        className="inline-flex w-fit items-center whitespace-nowrap px-2.5 text-[11px] font-medium"
+        className="lp-step-preview-pill inline-flex w-fit items-center whitespace-nowrap px-2.5 text-[11px] font-medium"
         style={{
           height: 24,
           background: "var(--accent-soft)",
@@ -59,7 +59,7 @@ function CheckLine({ text }: { text: string }) {
 function FilePreview() {
   return (
     <PreviewFrame pill="CSV">
-      {["nazwa; WORKI NA ŚMIECI TIGRO LDPE 120L", "ean; 5906154012072"].map((r) => (
+      {["nazwa; EKSPRES CISNIENIOWY AUTOMAT 15BAR", "ean; 5901234123457"].map((r) => (
         <span
           key={r}
           className="w-full truncate whitespace-nowrap text-[12px]"
@@ -88,7 +88,7 @@ function CopyPreview() {
   return (
     <PreviewFrame pill="SEO">
       <Line>
-        <span className="truncate">Worki na śmieci Tigro LDPE 120 l</span>
+        <span className="truncate">Ekspres ciśnieniowy automatyczny 15 bar</span>
       </Line>
       <span
         className="block rounded-full"
@@ -106,7 +106,7 @@ function PhotoPreview() {
           className="flex shrink-0 items-center justify-center"
           style={{ height: 36, width: 36, background: "#ffffff", borderRadius: 8 }}
         >
-          <Package
+          <Coffee
             aria-hidden
             className="h-[18px] w-[18px]"
             strokeWidth={1.5}
