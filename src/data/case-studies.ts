@@ -7,7 +7,6 @@ export const SHOW_CASE_STUDIES = false;
 
 export type CaseProductState = {
   values: Record<string, string>;
-  completeness: number;
   image: boolean;
 };
 
@@ -29,11 +28,10 @@ function demoState(partial: boolean): CaseProductState {
   if (partial) {
     return {
       values: { EAN: tigroValues.EAN!, Nazwa: tigroValues.Nazwa! },
-      completeness: 20,
       image: false,
     };
   }
-  return { values: tigroValues, completeness: 100, image: true };
+  return { values: tigroValues, image: true };
 }
 
 export const caseStudies: CaseStudy[] = [1, 2, 3].map((n) => ({
