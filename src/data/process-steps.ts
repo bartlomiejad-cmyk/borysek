@@ -141,7 +141,7 @@ export const processSteps: ProcessStep[] = [
     statuses: ALL_VERIFIED,
     tone: "publish",
     caption: "Publikacja",
-    description: "Publikujemy w Twoim sklepie przez API lub oddajemy plik",
+    description: "Publikujemy w Twoim sklepie przez import w panelu albo oddajemy gotowy plik",
   },
 ];
 

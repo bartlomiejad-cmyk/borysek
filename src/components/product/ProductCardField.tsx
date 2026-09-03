@@ -77,7 +77,7 @@ export function FieldRow({ field }: { field: ProductField }) {
               color: field.status === "empty" ? "var(--text-muted)" : "var(--text-primary)",
             }}
           >
-            {field.status === "empty" ? "—" : field.value}
+            {field.status === "empty" ? "brak" : field.value}
           </motion.span>
         )}
       </span>
