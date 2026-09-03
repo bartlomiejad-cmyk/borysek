@@ -27,8 +27,8 @@ export const processSteps: ProcessStep[] = [
   {
     id: "input",
     index: 1,
-    title: "Dane od Ciebie",
-    sentence: "Eksport produktów ze sklepu albo dostęp do panelu.",
+    title: "Twoje dane",
+    sentence: "Eksport produktów ze sklepu albo dostęp do panelu. Nic więcej.",
     actor: "you",
     preview: "file",
   },
@@ -36,8 +36,7 @@ export const processSteps: ProcessStep[] = [
     id: "sources",
     index: 2,
     title: "Źródła i EAN",
-    sentence:
-      "Znajdujemy w internecie strony opisujące dokładnie ten produkt i potwierdzamy je po kodzie EAN.",
+    sentence: "Strony opisujące dokładnie ten produkt, potwierdzone po kodzie EAN.",
     actor: "ai",
     preview: "sources",
   },
@@ -45,8 +44,7 @@ export const processSteps: ProcessStep[] = [
     id: "copy",
     index: 3,
     title: "Treści karty",
-    sentence:
-      "Nazwa, opis, cechy, kategoria, tytuł i opis SEO, słowa kluczowe, opis Allegro.",
+    sentence: "Nazwa, opis, cechy, kategoria, tytuł i opis SEO, frazy, opis Allegro.",
     actor: "ai",
     preview: "copy",
   },
@@ -54,14 +52,14 @@ export const processSteps: ProcessStep[] = [
     id: "photos",
     index: 4,
     title: "Zdjęcia",
-    sentence: "Packshot na białym tle i zdjęcia aranżacyjne produktu w scenerii.",
+    sentence: "Packshot na białym tle i aranżacja produktu w scenerii.",
     actor: "ai",
     preview: "photo",
   },
   {
     id: "qc",
     index: 5,
-    title: "Kontrola jakości i redaktor",
+    title: "Kontrola i redaktor",
     sentence: "Automatyczne testy każdej karty, potem redaktor czyta i poprawia.",
     actor: "human",
     preview: "qc",
@@ -69,9 +67,10 @@ export const processSteps: ProcessStep[] = [
   {
     id: "publish",
     index: 6,
-    title: "Twoja akceptacja i publikacja",
-    sentence: "Akceptujesz w podglądzie lub arkuszu. Wgrywamy do sklepu albo oddajemy plik.",
+    title: "Akceptacja i wgranie",
+    sentence: "Akceptujesz w podglądzie. Wgrywamy do sklepu albo oddajemy plik.",
     actor: "human",
     preview: "publish",
   },
 ];
+
