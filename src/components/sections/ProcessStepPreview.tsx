@@ -1,32 +1,24 @@
-import { Check } from "lucide-react";
-import { ProductIconGlyph } from "@/components/product/ProductIcon";
-import { heroProduct } from "@/data/demo-products";
+import { Check, Package } from "lucide-react";
 import type { ProcessPreview } from "@/data/process-steps";
 
-/** Wspólna rama podglądu: glass strong, 168px, treść u góry, pigułka na dole. */
-function PreviewFrame({
-  children,
-  pill,
-}: {
-  children: React.ReactNode;
-  pill: string;
-}) {
+/** Rama podglądu: 120px, treść u góry, jedna pigułka 24px na dole. */
+function PreviewFrame({ children, pill }: { children: React.ReactNode; pill: string }) {
   return (
     <div
-      className="lp-glass flex h-[168px] flex-col items-start justify-start"
+      className="lp-glass flex w-full flex-col justify-between"
       style={{
+        height: 120,
         background: "var(--glass-bg-strong)",
         border: "1px solid var(--glass-border-strong)",
         borderRadius: 14,
         padding: 14,
       }}
     >
-      <div className="flex w-full flex-1 flex-col items-start gap-2 overflow-hidden">
-        {children}
-      </div>
+      <div className="flex w-full min-w-0 flex-col gap-1.5 overflow-hidden">{children}</div>
       <span
-        className="mt-2 inline-flex h-6 items-center whitespace-nowrap px-2.5 text-[11px] font-medium"
+        className="inline-flex w-fit items-center whitespace-nowrap px-2.5 text-[11px] font-medium"
         style={{
+          height: 24,
           background: "var(--accent-soft)",
           color: "var(--accent)",
           borderRadius: "var(--radius-pill)",
@@ -39,26 +31,38 @@ function PreviewFrame({
   );
 }
 
-function CheckRow({ text }: { text: string }) {
+function Line({ children }: { children: React.ReactNode }) {
   return (
     <span
-      className="flex w-full items-center gap-2 truncate text-[12px]"
-      style={{ color: "var(--text-secondary)" }}
+      className="flex w-full min-w-0 items-center gap-2 truncate whitespace-nowrap text-[13px]"
+      style={{ color: "var(--text-secondary)", fontFamily: "var(--font-body)" }}
     >
-      <Check aria-hidden className="h-3 w-3 shrink-0" strokeWidth={3} style={{ color: "var(--accent)" }} />
-      {text}
+      {children}
     </span>
   );
 }
 
+function CheckLine({ text }: { text: string }) {
+  return (
+    <Line>
+      <Check
+        aria-hidden
+        className="h-[14px] w-[14px] shrink-0"
+        strokeWidth={3}
+        style={{ color: "var(--accent)" }}
+      />
+      <span className="truncate">{text}</span>
+    </Line>
+  );
+}
+
 function FilePreview() {
-  const rows = ["nazwa;WORKI TIGRO 120L", "ean;5906154012072", "kod;TIG-120-25"];
   return (
     <PreviewFrame pill="CSV">
-      {rows.map((r) => (
+      {["nazwa; WORKI NA ŚMIECI TIGRO LDPE 120L", "ean; 5906154012072"].map((r) => (
         <span
           key={r}
-          className="w-full truncate text-[12px]"
+          className="w-full truncate whitespace-nowrap text-[12px]"
           style={{
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
             color: "var(--text-muted)",
@@ -74,9 +78,8 @@ function FilePreview() {
 function SourcesPreview() {
   return (
     <PreviewFrame pill="EAN zgodny">
-      {["producent.pl", "partner.pl", "katalog.pl"].map((d) => (
-        <CheckRow key={d} text={d} />
-      ))}
+      <CheckLine text="producent.pl" />
+      <CheckLine text="sklep-partner.pl" />
     </PreviewFrame>
   );
 }
@@ -84,16 +87,13 @@ function SourcesPreview() {
 function CopyPreview() {
   return (
     <PreviewFrame pill="SEO">
-      <span className="w-full truncate text-[12px]" style={{ color: "var(--text-secondary)" }}>
-        Worki na śmieci Tigro 120 l, folia LDPE
-      </span>
-      {[92, 68].map((w) => (
-        <span
-          key={w}
-          className="block h-1.5 rounded-full"
-          style={{ width: `${w}%`, background: "var(--accent)", opacity: 0.75 }}
-        />
-      ))}
+      <Line>
+        <span className="truncate">Worki na śmieci Tigro LDPE 120 l</span>
+      </Line>
+      <span
+        className="block rounded-full"
+        style={{ height: 5, width: "70%", background: "var(--accent)", opacity: 0.85 }}
+      />
     </PreviewFrame>
   );
 }
@@ -101,20 +101,21 @@ function CopyPreview() {
 function PhotoPreview() {
   return (
     <PreviewFrame pill="zdjęcia">
-      <div className="flex w-full items-center gap-3">
+      <div className="flex w-full min-w-0 items-center gap-3">
         <span
-          className="flex h-12 w-12 shrink-0 items-center justify-center"
-          style={{ background: "#ffffff", borderRadius: 10 }}
+          className="flex shrink-0 items-center justify-center"
+          style={{ height: 36, width: 36, background: "#ffffff", borderRadius: 8 }}
         >
-          <ProductIconGlyph icon={heroProduct.icon} className="h-6 w-6" color="var(--bg-base)" />
+          <Package
+            aria-hidden
+            className="h-[18px] w-[18px]"
+            strokeWidth={1.5}
+            style={{ color: "var(--bg-base)" }}
+          />
         </span>
-        <span
-          className="min-w-0 text-[11px] leading-snug"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          packshot
-          <br />i aranżacja
-        </span>
+        <Line>
+          <span className="truncate">packshot i aranżacja</span>
+        </Line>
       </div>
     </PreviewFrame>
   );
@@ -123,9 +124,8 @@ function PhotoPreview() {
 function QcPreview() {
   return (
     <PreviewFrame pill="redaktor">
-      {["kompletność", "zgodność z EAN", "białe tło"].map((t) => (
-        <CheckRow key={t} text={t} />
-      ))}
+      <CheckLine text="kompletność" />
+      <CheckLine text="zgodność z EAN" />
     </PreviewFrame>
   );
 }
@@ -133,11 +133,13 @@ function QcPreview() {
 function PublishPreview() {
   return (
     <PreviewFrame pill="publikacja">
-      <div className="flex w-full items-center gap-2">
+      <div className="flex w-full min-w-0 items-center gap-2">
         <span
           aria-hidden
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px]"
+          className="flex shrink-0 items-center justify-center rounded-full border text-[10px]"
           style={{
+            height: 22,
+            width: 22,
             borderColor: "var(--glass-border-strong)",
             color: "var(--text-secondary)",
             fontFamily: "var(--font-body)",
@@ -145,9 +147,7 @@ function PublishPreview() {
         >
           Ty
         </span>
-        <span className="truncate text-[12px]" style={{ color: "var(--text-secondary)" }}>
-          Zatwierdzone
-        </span>
+        <CheckLine text="Zatwierdzone" />
       </div>
     </PreviewFrame>
   );

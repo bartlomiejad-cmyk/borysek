@@ -24,13 +24,12 @@ export type FieldLabel = (typeof FIELD_ORDER)[number];
 
 export const LONG_FIELDS = new Set<string>(["Opis", "Opis SEO", "Opis Allegro"]);
 
-export type ProductIcon = "trash" | "droplets" | "wrench";
-
 export type ShowcaseProduct = {
   id: string;
   name: string;
   industry: string;
-  icon: ProductIcon;
+  imageMain: string | null;
+  imageScene: string | null;
   before: { values: Record<string, string>; image: boolean };
   after: { values: Record<string, string>; image: boolean };
   copy: { seoTitle: string; description: string };
@@ -113,7 +112,9 @@ export const showcaseProducts: ShowcaseProduct[] = [
     id: "tigro-worki",
     name: "Worki na śmieci Tigro 120 l",
     industry: "Chemia gospodarcza",
-    icon: "trash",
+    imageMain: null,
+    imageScene:
+      "https://dzmexgqkqtskuunonyws.supabase.co/storage/v1/object/public/regenerated-images/visualizations/94885fb6-64dc-4b46-89fd-3e170b69fbdd-1784532662691-1-a1.jpg",
     before: {
       values: {
         Nazwa: "WORKI NA ŚMIECI TIGRO LDPE 120L A25 25SZT CZARNE BIO MOCNE",
@@ -131,7 +132,8 @@ export const showcaseProducts: ShowcaseProduct[] = [
     id: "palmolive-mydlo",
     name: "Palmolive Joyful Blooming 300 ml",
     industry: "Kosmetyki",
-    icon: "droplets",
+    imageMain: null,
+    imageScene: null,
     before: {
       values: {
         Nazwa: "Palmolive Joyful Blooming Mydło w Płynie 300ml",
@@ -149,7 +151,10 @@ export const showcaseProducts: ShowcaseProduct[] = [
     id: "athena-wydech",
     name: "Wydech Athena Racing Pro",
     industry: "Części motocyklowe",
-    icon: "wrench",
+    imageMain:
+      "https://dzmexgqkqtskuunonyws.supabase.co/storage/v1/object/public/regenerated-images/9aa16c1c-4c59-422e-916a-613d0f964ae2.png",
+    imageScene:
+      "https://dzmexgqkqtskuunonyws.supabase.co/storage/v1/object/public/regenerated-images/visualizations/9aa16c1c-4c59-422e-916a-613d0f964ae2-1784533802377-1-a1.jpg",
     before: {
       values: {
         Nazwa: "Wydech Athena Racing Pro, Minarelli leżące P400485120012",
@@ -201,4 +206,20 @@ export const navLinks = [
   { label: "Jak pracujemy", href: "#flow" },
   { label: "Oferta", href: "#offer" },
   { label: "FAQ", href: "#faq" },
+];
+
+/** Pola karty w hero (wariant „wide"): 10 komórek w siatce 2 x 5. */
+export type WideField = { label: string; value: string | null };
+
+export const heroWideFields: WideField[] = [
+  { label: "Nazwa", value: "Tigro Worki na śmieci LDPE 120 l" },
+  { label: "EAN", value: "5906154012072" },
+  { label: "Kategoria", value: "Worki na śmieci" },
+  { label: "Cechy", value: "6 cech" },
+  { label: "Opis", value: null },
+  { label: "Tytuł SEO", value: "Worki Tigro LDPE 120 l, 25 szt." },
+  { label: "Opis SEO", value: null },
+  { label: "Frazy SEO", value: "worki na śmieci 120 l, LDPE" },
+  { label: "Packshot", value: "białe tło" },
+  { label: "Allegro", value: null },
 ];

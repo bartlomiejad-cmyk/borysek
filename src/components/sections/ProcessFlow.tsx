@@ -1,60 +1,78 @@
 import { Container } from "@/components/ui-custom/Container";
 import { SectionHeading } from "@/components/ui-custom/SectionHeading";
 import { Reveal } from "@/components/ui-custom/Reveal";
-import { Pill } from "@/components/ui-custom/Pill";
 import { ACTOR_LABEL, processSteps, type ProcessStep } from "@/data/process-steps";
 import { StepPreview } from "./ProcessStepPreview";
 
-const GRID = "grid gap-6 md:grid-cols-3 lg:grid-cols-6";
-
 function StepCard({ step }: { step: ProcessStep }) {
   const human = step.actor === "human";
+  const accent = step.actor === "ai";
   return (
     <article
-      className="lp-glass flex h-full flex-col p-5"
+      className="lp-glass grid h-full"
       style={{
+        gridTemplateRows: "32px 28px 44px 1fr 120px",
+        alignItems: "start",
+        padding: 22,
+        borderRadius: 20,
         background: "var(--glass-bg)",
-        border: human ? "1.5px solid var(--text-secondary)" : "1px solid var(--glass-border)",
-        borderRadius: "var(--radius-card)",
+        border: human ? "1.5px solid rgba(179,186,193,0.6)" : "1px solid var(--glass-border)",
         boxShadow: "var(--glass-highlight), var(--glass-shadow)",
       }}
     >
-      <div className="flex h-8 items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <span
-          className="flex h-7 w-7 items-center justify-center rounded-full border text-[12px]"
+          className="flex items-center justify-center rounded-full border text-[13px]"
           style={{
+            height: 28,
+            width: 28,
             borderColor: "var(--glass-border-strong)",
             color: "var(--text-secondary)",
-            fontFamily: "var(--font-body)",
+            fontFamily: "var(--font-display)",
+            fontWeight: 600,
           }}
         >
           {step.index}
         </span>
-        <Pill
-          variant={step.actor === "ai" ? "accent" : "neutral"}
-          className="w-[88px] justify-center"
+        <span
+          className="inline-flex items-center justify-center text-[0.8125rem] font-medium"
+          style={{
+            width: 84,
+            height: 26,
+            borderRadius: "var(--radius-pill)",
+            background: accent ? "var(--accent-soft)" : "var(--glass-bg)",
+            color: accent ? "var(--accent)" : "var(--text-secondary)",
+            border: accent ? "1px solid transparent" : "1px solid var(--glass-border)",
+            fontFamily: "var(--font-body)",
+          }}
         >
           {ACTOR_LABEL[step.actor]}
-        </Pill>
+        </span>
       </div>
 
       <h3
-        className="mt-4 flex min-h-[64px] items-start text-[1.125rem] leading-snug"
+        className="w-full truncate whitespace-nowrap text-[18px]"
         style={{ fontFamily: "var(--font-display)", color: "var(--text-primary)", fontWeight: 600 }}
       >
         {step.title}
       </h3>
 
       <p
-        className="min-h-[96px] text-[14px] leading-relaxed"
-        style={{ color: "var(--text-secondary)" }}
+        className="text-[14px] leading-relaxed"
+        style={{
+          color: "var(--text-secondary)",
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
       >
         {step.sentence}
       </p>
 
-      <div className="mt-auto">
-        <StepPreview preview={step.preview} />
-      </div>
+      <span aria-hidden />
+
+      <StepPreview preview={step.preview} />
     </article>
   );
 }
@@ -71,33 +89,15 @@ export function ProcessFlow() {
           />
         </Reveal>
 
-        {/* Oś czasu: pozioma na desktopie, pionowa na mobile */}
-        <div className="lp-section-body relative">
-          <div
-            aria-hidden
-            className="absolute left-0 top-[7px] hidden h-px w-full md:block"
-            style={{ background: "var(--glass-border-strong)" }}
-          />
-          <div className={`${GRID} hidden md:grid`} aria-hidden>
-            {processSteps.map((s) => (
-              <span key={s.id} className="flex justify-center">
-                <span
-                  className="h-[7px] w-[7px] rounded-full"
-                  style={{
-                    background: s.actor === "ai" ? "var(--accent)" : "var(--text-secondary)",
-                  }}
-                />
-              </span>
-            ))}
-          </div>
-
-          <div className={`${GRID} mt-6`}>
-            {processSteps.map((step, i) => (
-              <Reveal key={step.id} index={i} className="h-full">
-                <StepCard step={step} />
-              </Reveal>
-            ))}
-          </div>
+        <div
+          className="lp-section-body grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+          style={{ gap: 20 }}
+        >
+          {processSteps.map((step, i) => (
+            <Reveal key={step.id} index={i} className="h-full">
+              <StepCard step={step} />
+            </Reveal>
+          ))}
         </div>
       </Container>
     </section>
