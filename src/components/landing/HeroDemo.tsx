@@ -64,9 +64,9 @@ export function HeroDemo() {
       />
       <div
         aria-hidden
-        className="lp-glass pointer-events-none absolute hidden h-[70%] w-[280px] border sm:block"
+        className="lp-glass pointer-events-none absolute hidden h-[70%] w-[380px] border sm:block"
         style={{
-          transform: "translate(56px, 10px) scale(0.85)",
+          transform: "translate(0, 22px) scale(0.86)",
           opacity: 0.3,
           background: "var(--glass-bg)",
           borderColor: "var(--glass-border)",
@@ -75,16 +75,16 @@ export function HeroDemo() {
       />
       <div
         aria-hidden
-        className="lp-glass pointer-events-none absolute hidden h-[80%] w-[280px] border sm:block"
+        className="lp-glass pointer-events-none absolute hidden h-[80%] w-[400px] border sm:block"
         style={{
-          transform: "translate(28px, 4px) scale(0.92)",
+          transform: "translate(0, 12px) scale(0.94)",
           opacity: 0.5,
           background: "var(--glass-bg)",
           borderColor: "var(--glass-border)",
           borderRadius: "var(--radius-card)",
         }}
       />
-      <div className="relative w-[240px] sm:w-[280px]">
+      <div className="relative w-full max-w-[420px] lg:w-[420px]">
         <ProductCard
           title={done ? "Gotowe do sprzedaży" : "Nowy"}
           badge={done ? { text: "Opublikowano w sklepie", variant: "accent" } : undefined}
@@ -92,6 +92,7 @@ export function HeroDemo() {
           fields={fields}
           highlight={done ? "accent" : "none"}
           width="100%"
+          hero
         />
       </div>
     </div>

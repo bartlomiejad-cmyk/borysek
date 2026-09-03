@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Container } from "@/components/ui-custom/Container";
 import { AccentButton } from "@/components/ui-custom/Buttons";
@@ -29,14 +29,25 @@ function BrandMark() {
 
 export function Navbar() {
   const [open, setOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <header
-      className="lp-glass sticky top-0 z-50"
+      className={`sticky top-0 z-50 ${scrolled ? "scrolled" : ""}`}
       style={{
         height: 72,
-        background: "var(--glass-bg)",
+        background: scrolled ? "rgba(7,8,9,0.92)" : "rgba(7,8,9,0.72)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
         borderBottom: "1px solid var(--glass-border)",
+        transition: "background 200ms ease",
       }}
     >
       <Container className="flex h-[72px] items-center justify-between gap-6">

@@ -19,7 +19,7 @@ export function BeforeAfterShowcase() {
   const [state, setState] = useState<ShowcaseState>("after");
 
   return (
-    <section id="before-after" className="relative py-20 md:py-32">
+    <section id="before-after" className="relative lp-section">
       <Container>
         <Reveal>
         <SectionHeading

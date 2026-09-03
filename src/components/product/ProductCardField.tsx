@@ -53,18 +53,26 @@ function LongValue({ status }: { status: ProductField["status"] }) {
   );
 }
 
-export function FieldRow({ field }: { field: ProductField }) {
+export function FieldRow({ field, hero = false }: { field: ProductField; hero?: boolean }) {
   return (
     <motion.li
       layout
-      className="flex items-center gap-3 py-1.5"
-      style={{ fontFamily: "var(--font-body)" }}
+      className="flex items-center gap-3"
+      style={{
+        fontFamily: "var(--font-body)",
+        height: hero ? 30 : undefined,
+        paddingTop: hero ? 0 : 6,
+        paddingBottom: hero ? 0 : 6,
+      }}
     >
-      <span className="w-[68px] shrink-0 text-[12px]" style={{ color: "var(--text-muted)" }}>
+      <span
+        className="w-[68px] shrink-0 text-[12px]"
+        style={{ color: "var(--text-muted)" }}
+      >
         {field.label}
       </span>
       <span className="min-w-0 flex-1">
-        {field.long ? (
+        {field.long && !hero ? (
           <LongValue status={field.status} />
         ) : (
           <motion.span

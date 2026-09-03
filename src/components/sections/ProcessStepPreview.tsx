@@ -1,115 +1,155 @@
-import { Check, Store } from "lucide-react";
-import { Pill } from "@/components/ui-custom/Pill";
+import { Check } from "lucide-react";
 import { ProductIconGlyph } from "@/components/product/ProductIcon";
 import { heroProduct } from "@/data/demo-products";
 import type { ProcessPreview } from "@/data/process-steps";
 
-const boxStyle = {
-  background: "var(--bg-elevated)",
-  border: "1px solid var(--glass-border)",
-  borderRadius: 12,
-} as const;
-
-function FilePreview() {
-  const rows = ["nazwa;WORKI TIGRO 120L", "ean;5906154012072", "kod;TIG-120-25"];
+/** Wspólna rama podglądu: glass strong, 168px, treść u góry, pigułka na dole. */
+function PreviewFrame({
+  children,
+  pill,
+}: {
+  children: React.ReactNode;
+  pill: string;
+}) {
   return (
-    <div className="flex flex-col gap-1 p-3" style={boxStyle}>
-      {rows.map((r) => (
-        <span
-          key={r}
-          className="truncate text-[11px]"
-          style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "var(--text-muted)" }}
-        >
-          {r}
-        </span>
-      ))}
+    <div
+      className="lp-glass flex h-[168px] flex-col items-start justify-start"
+      style={{
+        background: "var(--glass-bg-strong)",
+        border: "1px solid var(--glass-border-strong)",
+        borderRadius: 14,
+        padding: 14,
+      }}
+    >
+      <div className="flex w-full flex-1 flex-col items-start gap-2 overflow-hidden">
+        {children}
+      </div>
+      <span
+        className="mt-2 inline-flex h-6 items-center whitespace-nowrap px-2.5 text-[11px] font-medium"
+        style={{
+          background: "var(--accent-soft)",
+          color: "var(--accent)",
+          borderRadius: "var(--radius-pill)",
+          fontFamily: "var(--font-body)",
+        }}
+      >
+        {pill}
+      </span>
     </div>
   );
 }
 
 function CheckRow({ text }: { text: string }) {
   return (
-    <span className="flex items-center gap-2 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-      <Check aria-hidden className="h-3 w-3" strokeWidth={3} style={{ color: "var(--accent)" }} />
+    <span
+      className="flex w-full items-center gap-2 truncate text-[12px]"
+      style={{ color: "var(--text-secondary)" }}
+    >
+      <Check aria-hidden className="h-3 w-3 shrink-0" strokeWidth={3} style={{ color: "var(--accent)" }} />
       {text}
     </span>
   );
 }
 
+function FilePreview() {
+  const rows = ["nazwa;WORKI TIGRO 120L", "ean;5906154012072", "kod;TIG-120-25"];
+  return (
+    <PreviewFrame pill="CSV">
+      {rows.map((r) => (
+        <span
+          key={r}
+          className="w-full truncate text-[12px]"
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            color: "var(--text-muted)",
+          }}
+        >
+          {r}
+        </span>
+      ))}
+    </PreviewFrame>
+  );
+}
+
 function SourcesPreview() {
   return (
-    <div className="flex flex-col gap-2 p-3" style={boxStyle}>
-      {["producent.pl", "sklep-partner.pl", "katalog-branzowy.pl"].map((d) => (
+    <PreviewFrame pill="EAN zgodny">
+      {["producent.pl", "partner.pl", "katalog.pl"].map((d) => (
         <CheckRow key={d} text={d} />
       ))}
-      <span className="mt-1">
-        <Pill variant="accent">EAN zgodny</Pill>
-      </span>
-    </div>
+    </PreviewFrame>
   );
 }
 
 function CopyPreview() {
   return (
-    <div className="flex flex-col gap-2 p-3" style={boxStyle}>
-      <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-        Worki na śmieci Tigro 120 l, folia LDPE...
+    <PreviewFrame pill="SEO">
+      <span className="w-full truncate text-[12px]" style={{ color: "var(--text-secondary)" }}>
+        Worki na śmieci Tigro 120 l, folia LDPE
       </span>
-      {[92, 78, 56].map((w) => (
+      {[92, 68].map((w) => (
         <span
           key={w}
           className="block h-1.5 rounded-full"
           style={{ width: `${w}%`, background: "var(--accent)", opacity: 0.75 }}
         />
       ))}
-      <span className="mt-1">
-        <Pill variant="accent">SEO</Pill>
-      </span>
-    </div>
+    </PreviewFrame>
   );
 }
 
 function PhotoPreview() {
   return (
-    <div className="flex items-center gap-3 p-3" style={boxStyle}>
-      <span
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md"
-        style={{ background: "#ffffff" }}
-      >
-        <ProductIconGlyph icon={heroProduct.icon} className="h-6 w-6" color="#0e1013" />
-      </span>
-      <Pill variant="neutral">packshot</Pill>
-    </div>
+    <PreviewFrame pill="zdjęcia">
+      <div className="flex w-full items-center gap-3">
+        <span
+          className="flex h-12 w-12 shrink-0 items-center justify-center"
+          style={{ background: "#ffffff", borderRadius: 10 }}
+        >
+          <ProductIconGlyph icon={heroProduct.icon} className="h-6 w-6" color="var(--bg-base)" />
+        </span>
+        <span
+          className="min-w-0 text-[11px] leading-snug"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          packshot
+          <br />i aranżacja
+        </span>
+      </div>
+    </PreviewFrame>
   );
 }
 
 function QcPreview() {
   return (
-    <div className="flex flex-col gap-2 p-3" style={boxStyle}>
+    <PreviewFrame pill="redaktor">
       {["kompletność", "zgodność z EAN", "białe tło"].map((t) => (
         <CheckRow key={t} text={t} />
       ))}
-      <span
-        className="mt-1 flex h-7 w-7 items-center justify-center rounded-full border text-[10px]"
-        style={{
-          borderColor: "var(--glass-border-strong)",
-          color: "var(--text-secondary)",
-          fontFamily: "var(--font-body)",
-        }}
-        aria-label="Redaktor"
-      >
-        RD
-      </span>
-    </div>
+    </PreviewFrame>
   );
 }
 
 function PublishPreview() {
   return (
-    <div className="flex items-center gap-3 p-3" style={boxStyle}>
-      <Pill variant="accent">Zatwierdzone</Pill>
-      <Store aria-hidden className="h-5 w-5" strokeWidth={1.5} style={{ color: "var(--text-secondary)" }} />
-    </div>
+    <PreviewFrame pill="publikacja">
+      <div className="flex w-full items-center gap-2">
+        <span
+          aria-hidden
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px]"
+          style={{
+            borderColor: "var(--glass-border-strong)",
+            color: "var(--text-secondary)",
+            fontFamily: "var(--font-body)",
+          }}
+        >
+          Ty
+        </span>
+        <span className="truncate text-[12px]" style={{ color: "var(--text-secondary)" }}>
+          Zatwierdzone
+        </span>
+      </div>
+    </PreviewFrame>
   );
 }
 

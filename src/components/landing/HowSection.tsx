@@ -25,12 +25,12 @@ const TILES = [
   { icon: ShoppingBag, label: "Opis Allegro", badge: "wersja marketplace" },
   { icon: Camera, label: "Packshot", badge: "białe tło" },
   { icon: Layers, label: "Warianty", badge: "kolor / rozmiar" },
-  { icon: ImageIcon, label: "Zdjęcia aranżacyjne", badge: "na życzenie", planned: true },
+  { icon: ImageIcon, label: "Zdjęcia aranżacyjne", badge: "AI" },
 ];
 
 export function HowSection() {
   return (
-    <section id="scope" className="py-20 md:py-32">
+    <section id="scope" className="lp-section">
       <Container>
         <Reveal>
         <SectionHeading
@@ -40,7 +40,7 @@ export function HowSection() {
         />
         </Reveal>
 
-        <div className="mt-14 grid grid-cols-2 gap-8 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="lp-section-body grid grid-cols-2 gap-8 sm:grid-cols-4 lg:grid-cols-5">
           {TILES.map((tile, i) => (
             <Reveal key={tile.label} index={i}>
               <FieldTile {...tile} />
@@ -50,7 +50,7 @@ export function HowSection() {
 
         <Reveal>
         <p
-          className="lp-body mt-14 text-center"
+          className="lp-body mt-12 text-center"
           style={{ color: "var(--text-secondary)" }}
         >
           Treści piszemy po polsku, zgodnie z tonem Twojej marki. Wszystkie powstają ze

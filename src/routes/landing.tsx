@@ -10,7 +10,6 @@ import { CaseStudies } from "@/components/sections/CaseStudies";
 import { SHOW_CASE_STUDIES } from "@/data/case-studies";
 import { OfferSection } from "@/components/sections/OfferSection";
 import { PlatformsSection } from "@/components/sections/PlatformsSection";
-import { FaqSection } from "@/components/sections/FaqSection";
 import { ContactSection } from "@/components/sections/ContactSection";
 import { SiteFooter } from "@/components/landing/SiteFooter";
 
@@ -68,7 +67,6 @@ function LandingPage() {
       <OfferSection />
       <PlatformsSection />
 
-      <FaqSection />
       <ContactSection />
       <SiteFooter />
     </main>
