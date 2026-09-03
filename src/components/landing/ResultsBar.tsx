@@ -1,14 +1,14 @@
 import { Container } from "@/components/ui-custom/Container";
 import { GlassCard } from "@/components/ui-custom/GlassCard";
 import { Reveal } from "@/components/ui-custom/Reveal";
-import { ConfettiLayer } from "./ConfettiLayer";
+import { SectionAtmosphere } from "./SectionAtmosphere";
 import { StatCounter } from "./StatCounter";
 import { landingStats } from "@/data/stats";
 
 export function ResultsBar() {
   return (
     <section className="relative overflow-hidden pb-4">
-      <ConfettiLayer seed={11} />
+      <SectionAtmosphere />
       <div className="relative" style={{ zIndex: 1 }}>
       <Container>
         <h2 className="sr-only">Jak to działa w liczbach</h2>

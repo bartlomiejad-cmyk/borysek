@@ -1,8 +1,16 @@
+import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Check, Package, type LucideIcon } from "lucide-react";
 import { heroWideFields } from "@/data/demo-products";
+import type { WideCellStatus } from "@/data/process-steps";
 
 const CELL_H = 50;
+
+export type WideCell = {
+  label: string;
+  value: string | null;
+  status: WideCellStatus;
+};
 
 function Bars() {
   return (
@@ -18,7 +26,8 @@ function Bars() {
   );
 }
 
-function Cell({ label, value, filled }: { label: string; value: string | null; filled: boolean }) {
+function Cell({ label, value, status }: WideCell) {
+  const filled = status !== "empty";
   return (
     <div className="flex min-w-0 flex-col justify-center" style={{ height: CELL_H }}>
       <span
@@ -52,7 +61,15 @@ function Cell({ label, value, filled }: { label: string; value: string | null; f
             </motion.span>
           )}
         </span>
-        {filled ? (
+        {status === "verified" ? (
+          <span
+            aria-hidden
+            className="flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full"
+            style={{ background: "var(--accent)" }}
+          >
+            <Check className="h-[10px] w-[10px]" strokeWidth={3.5} style={{ color: "#04110C" }} />
+          </span>
+        ) : filled ? (
           <Check
             aria-hidden
             className="h-[14px] w-[14px] shrink-0"
@@ -68,19 +85,41 @@ function Cell({ label, value, filled }: { label: string; value: string | null; f
 }
 
 export type ProductCardWideProps = {
-  /** Liczba wypełnionych komórek (0..10). */
-  filled: number;
-  /** Ikona produktu pokazywana w polu obrazu. */
+  /** Tryb hero: liczba wypełnionych komórek (0..10). */
+  filled?: number;
+  /** Tryb sterowany: pełny opis komórek. */
+  cells?: WideCell[];
   icon?: LucideIcon;
   showImage?: boolean;
+  /** Treść pola obrazu (scena kroku). Zastępuje ikonę. */
+  scene?: ReactNode;
+  caption?: string;
+  pill?: string;
+  pillAccent?: boolean;
+  accentBorder?: boolean;
 };
 
 export function ProductCardWide({
-  filled,
+  filled = 0,
+  cells,
   icon: Icon = Package,
   showImage = true,
+  scene,
+  caption = "GOTOWE DO SPRZEDAŻY",
+  pill = "Opublikowano",
+  pillAccent = true,
+  accentBorder = true,
 }: ProductCardWideProps) {
-  const total = heroWideFields.length;
+  const list: WideCell[] =
+    cells ??
+    heroWideFields.map((f, i) => ({
+      label: f.label,
+      value: f.value,
+      status: i < filled ? ("ai" as WideCellStatus) : ("empty" as WideCellStatus),
+    }));
+  const total = list.length;
+  const done = list.filter((c) => c.status !== "empty").length;
+
   return (
     <div
       className="lp-glass w-full"
@@ -89,29 +128,31 @@ export function ProductCardWide({
         padding: 20,
         borderRadius: 24,
         background: "var(--glass-bg)",
-        border: "1.5px solid var(--accent)",
+        border: accentBorder ? "1.5px solid var(--accent)" : "1px solid var(--glass-border-strong)",
         boxShadow: "var(--glass-highlight), var(--glass-shadow)",
+        transition: "border-color 300ms ease",
       }}
     >
       <div className="flex items-center justify-between gap-3" style={{ height: 28 }}>
         <span className="lp-caption truncate" style={{ color: "var(--text-secondary)" }}>
-          GOTOWE DO SPRZEDAŻY
+          {caption}
         </span>
         <span
           className="inline-flex shrink-0 items-center px-3 py-1 text-[0.8125rem] font-medium"
           style={{
-            background: "var(--accent-soft)",
-            color: "var(--accent)",
+            background: pillAccent ? "var(--accent-soft)" : "var(--glass-bg-strong)",
+            color: pillAccent ? "var(--accent)" : "var(--text-secondary)",
+            border: pillAccent ? "1px solid transparent" : "1px solid var(--glass-border)",
             borderRadius: "var(--radius-pill)",
             fontFamily: "var(--font-body)",
           }}
         >
-          Opublikowano
+          {pill}
         </span>
       </div>
 
       <div
-        className="relative flex w-full items-center justify-center overflow-hidden"
+        className="relative w-full overflow-hidden"
         style={{
           marginTop: 14,
           height: 150,
@@ -120,37 +161,42 @@ export function ProductCardWide({
             "radial-gradient(closest-side, rgba(0,188,135,0.22), rgba(0,188,135,0) 100%), var(--bg-elevated)",
         }}
       >
-        {showImage ? (
-          <Icon aria-hidden style={{ height: 44, width: 44, color: "var(--accent)" }} strokeWidth={1.25} />
-        ) : null}
+        {scene ? (
+          scene
+        ) : (
+          <div className="flex h-full w-full items-center justify-center">
+            {showImage ? (
+              <Icon
+                aria-hidden
+                style={{ height: 44, width: 44, color: "var(--accent)" }}
+                strokeWidth={1.25}
+              />
+            ) : null}
+          </div>
+        )}
       </div>
 
-      <div
-        className="grid grid-cols-2"
-        style={{ marginTop: 12, columnGap: 16, rowGap: 8 }}
-      >
-        {heroWideFields.map((f, i) => (
-          <Cell key={f.label} label={f.label} value={f.value} filled={i < filled} />
+      <div className="grid grid-cols-2" style={{ marginTop: 12, columnGap: 16, rowGap: 8 }}>
+        {list.map((c) => (
+          <Cell key={c.label} label={c.label} value={c.value} status={c.status} />
         ))}
       </div>
 
-      <div
-        className="mt-2 flex items-center justify-between gap-3"
-        style={{ height: 24 }}
-      >
+      <div className="mt-2 flex items-center justify-between gap-3" style={{ height: 24 }}>
         <span className="lp-caption" style={{ color: "var(--text-muted)" }}>
-          {filled} z {total} pól
+          {done} z {total} pól
         </span>
         <span className="flex items-center gap-1" aria-hidden>
-          {heroWideFields.map((f, i) => (
+          {list.map((c) => (
             <span
-              key={f.label}
+              key={c.label}
               className="rounded-full border"
               style={{
                 height: 6,
                 width: 6,
-                background: i < filled ? "var(--accent)" : "transparent",
-                borderColor: i < filled ? "var(--accent)" : "var(--glass-border-strong)",
+                background: c.status !== "empty" ? "var(--accent)" : "transparent",
+                borderColor:
+                  c.status !== "empty" ? "var(--accent)" : "var(--glass-border-strong)",
               }}
             />
           ))}
