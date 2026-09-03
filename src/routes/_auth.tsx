@@ -8,6 +8,14 @@ import { LogOut, FlaskConical, FolderKanban, ShieldCheck, Menu, Sparkles } from 
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_auth")({
+  head: () => ({
+    links: [
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
+      },
+    ],
+  }),
   beforeLoad: async ({ location }) => {
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
