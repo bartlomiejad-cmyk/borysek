@@ -311,6 +311,26 @@ html { scroll-behavior: smooth; }
   }
 }
 
+/* ── Landing: jednolity rytm sekcji ──────────────────────────── */
+@utility lp-section {
+  padding-top: 56px;
+  padding-bottom: 56px;
+  scroll-margin-top: 88px;
+  @media (min-width: 768px) {
+    padding-top: 88px;
+    padding-bottom: 88px;
+  }
+}
+
+/* Odstęp nagłówek sekcji → treść */
+@utility lp-section-body {
+  margin-top: 28px;
+  @media (min-width: 768px) {
+    margin-top: 40px;
+  }
+}
+
+
 /* ── Landing: glass performance ───────────────────────────────
    Blur only where the element actually sits on top of the glow
    or other content. Lists use a flat translucent background. */

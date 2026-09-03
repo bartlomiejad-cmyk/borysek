@@ -54,7 +54,7 @@ export const processSteps: ProcessStep[] = [
     id: "photos",
     index: 4,
     title: "Zdjęcia",
-    sentence: "Packshot na białym tle w standardzie. Zdjęcia aranżacyjne na życzenie.",
+    sentence: "Packshot na białym tle i zdjęcia aranżacyjne produktu w scenerii.",
     actor: "ai",
     preview: "photo",
   },

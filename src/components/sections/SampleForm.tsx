@@ -78,7 +78,7 @@ function SuccessCard() {
   );
 }
 
-export function SampleForm() {
+export function SampleForm({ footer }: { footer?: ReactNode }) {
   const [sent, setSent] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const submit = useServerFn(submitSampleRequest);
@@ -98,7 +98,7 @@ export function SampleForm() {
     errors[name] ? ({ "aria-invalid": true, "aria-describedby": `${name}-error` } as const) : {};
 
   return (
-    <GlassCard padding="md">
+    <GlassCard variant="strong" padding="md">
       <form
         noValidate
         aria-label="Formularz zamówienia bezpłatnej próbki"
@@ -174,6 +174,8 @@ export function SampleForm() {
         <AccentButton size="lg" type="submit" className="w-full" disabled={isSubmitting}>
           {isSubmitting ? "Wysyłanie..." : "Zamów bezpłatną próbkę"}
         </AccentButton>
+
+        {footer}
 
         <p
           role="alert"

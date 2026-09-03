@@ -1,8 +1,6 @@
 import { Check } from "lucide-react";
 import { AccentButton, GhostButton } from "@/components/ui-custom/Buttons";
-import { Pill } from "@/components/ui-custom/Pill";
 import type { OfferPackage } from "@/data/content";
-import { cn } from "@/lib/utils";
 
 const topGradient: Record<OfferPackage["variant"], string> = {
   start: "linear-gradient(180deg, #2A3340 0%, #1B2028 100%)",
@@ -20,12 +18,26 @@ function CardHeader({ pkg }: { pkg: OfferPackage }) {
 
   return (
     <div
-      className="flex flex-col items-center gap-3 px-6 pb-8 pt-10 text-center"
+      className="relative flex h-[180px] flex-col items-center justify-center gap-2 px-6 text-center"
       style={{
         background: topGradient[pkg.variant],
         borderRadius: "var(--radius-card) var(--radius-card) 0 0",
       }}
     >
+      {pkg.featured ? (
+        <span
+          className="absolute right-[14px] top-[14px] whitespace-nowrap px-3 py-1 text-[0.8125rem] font-medium"
+          style={{
+            background: "rgba(7,8,9,0.28)",
+            color: "var(--accent-ink)",
+            borderRadius: "var(--radius-pill)",
+            fontFamily: "var(--font-body)",
+          }}
+        >
+          Najczęściej wybierany
+        </span>
+      ) : null}
+
       <span className="lp-caption" style={{ color: secondary }}>
         {pkg.caption}
       </span>
@@ -41,7 +53,6 @@ function CardHeader({ pkg }: { pkg: OfferPackage }) {
 
       {pkg.price === null ? (
         <span
-          className="mt-2"
           style={{
             fontFamily: "var(--font-display)",
             fontWeight: 600,
@@ -52,7 +63,7 @@ function CardHeader({ pkg }: { pkg: OfferPackage }) {
           {pkg.priceNote}
         </span>
       ) : (
-        <div className="mt-2 flex items-baseline gap-2">
+        <div className="flex items-baseline gap-2">
           <span
             style={{
               fontFamily: "var(--font-display)",
@@ -79,19 +90,15 @@ export function PricingCard({ pkg }: { pkg: OfferPackage }) {
 
   return (
     <div
-      className={cn("relative flex flex-col overflow-visible", pkg.featured ? "lg:scale-[1.03]" : "")}
+      className="relative flex h-full flex-col overflow-hidden"
       style={{
         borderRadius: "var(--radius-card)",
-        border: pkg.variant === "catalog" ? "1px solid var(--glass-border-strong)" : undefined,
-        boxShadow: pkg.featured ? "0 0 40px rgba(0, 188, 135, 0.12)" : undefined,
+        border: pkg.featured
+          ? "1.5px solid var(--accent)"
+          : "1px solid var(--glass-border-strong)",
+        boxShadow: pkg.featured ? "0 0 40px var(--accent-glow)" : undefined,
       }}
     >
-      {pkg.featured ? (
-        <div className="absolute -top-3 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap">
-          <Pill variant="accent">Najczęściej wybierany</Pill>
-        </div>
-      ) : null}
-
       <CardHeader pkg={pkg} />
 
       <div

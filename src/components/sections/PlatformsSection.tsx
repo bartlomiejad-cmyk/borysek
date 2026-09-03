@@ -8,21 +8,19 @@ import { platforms } from "@/data/content";
 
 export function PlatformsSection() {
   return (
-    <section id="platforms" className="relative py-20 md:py-32">
+    <section id="platforms" className="relative lp-section">
       <Container>
         <Reveal>
         <SectionHeading
           eyebrow="Platformy"
           title="Pracujemy z Twoim sklepem, jaki jest."
-          lead="Publikujemy przez import w panelu Twojego sklepu albo oddajemy plik gotowy do wgrania. Bez integracji, bez wtyczek."
+          lead="Wgranie gotowych kart do Twojego sklepu jest w cenie, niezależnie od platformy. Bez integracji, bez wtyczek."
           align="left"
-          className="mb-16"
         />
         </Reveal>
 
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+        <div className="lp-section-body grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           {platforms.map((platform, i) => {
-            const isUpload = platform.mode === "upload";
             return (
               <Reveal key={platform.name} index={i}>
               <GlassCard
@@ -50,9 +48,7 @@ export function PlatformsSection() {
                   >
                     {platform.name}
                   </span>
-                  <Pill variant="neutral">
-                    {isUpload ? "Wgrywamy za Ciebie" : "Plik CSV lub XLSX"}
-                  </Pill>
+                  <Pill variant="neutral">Wgranie w cenie</Pill>
                 </div>
               </GlassCard>
               </Reveal>
@@ -64,8 +60,8 @@ export function PlatformsSection() {
           className="mx-auto mt-12 max-w-xl text-center lp-body"
           style={{ color: "var(--text-secondary)" }}
         >
-          Inna platforma? Wystarczy eksport produktów z Twojego sklepu. Oddajemy plik w Twoim
-          oryginalnym układzie kolumn, gotowy do importu bez przeklejania.
+          Inna platforma? Wystarczy eksport produktów z Twojego sklepu. Wgramy gotowe karty albo
+          oddamy plik w Twoim oryginalnym układzie kolumn.
         </p>
       </Container>
     </section>

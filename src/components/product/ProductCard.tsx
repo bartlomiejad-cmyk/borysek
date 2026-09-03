@@ -20,6 +20,8 @@ export type ProductCardProps = {
   blur?: boolean;
   /** Opis zdjęcia po polsku; puste = ilustracja dekoracyjna. */
   imageAlt?: string;
+  /** Wariant hero: szersza karta, zdjęcie 16:10, zwarte wiersze pól. */
+  hero?: boolean;
   className?: string;
 };
 
@@ -52,6 +54,7 @@ export function ProductCard({
   width = 280,
   blur = true,
   imageAlt = "",
+  hero = false,
   className,
 }: ProductCardProps) {
   const total = fields.length || FIELD_ORDER.length;
@@ -105,7 +108,7 @@ export function ProductCard({
 
       <div className="px-5">
         <div
-          className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden"
+          className={`relative flex w-full items-center justify-center overflow-hidden ${hero ? "aspect-[16/10]" : "aspect-[4/3]"}`}
           style={{ borderRadius: 16, background: "var(--bg-elevated)" }}
         >
           {typeof image === "string" ? (
@@ -118,9 +121,9 @@ export function ProductCard({
         </div>
       </div>
 
-      <ul className="flex flex-col px-5 py-4">
+      <ul className={`flex flex-col px-5 ${hero ? "py-3" : "py-4"}`}>
         {fields.map((f) => (
-          <FieldRow key={f.label} field={f} />
+          <FieldRow key={f.label} field={f} hero={hero} />
         ))}
       </ul>
 
