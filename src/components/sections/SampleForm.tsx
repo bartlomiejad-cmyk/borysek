@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Check } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { GlassCard } from "@/components/ui-custom/GlassCard";
+import { contactEmail, isSet } from "@/data/content";
 import { AccentButton } from "@/components/ui-custom/Buttons";
 import {
   sampleRequestSchema,
@@ -112,7 +113,7 @@ export function SampleForm() {
           }
         })}
       >
-        <Field id="storeUrl" label="Adres Twojego sklepu" error={errors.storeUrl?.message}>
+        <Field id="storeUrl" label="Adres sklepu (jeśli masz)" error={errors.storeUrl?.message}>
           <input
             id="storeUrl"
             type="url"
@@ -183,9 +184,11 @@ export function SampleForm() {
           {serverError ?? ""}
         </p>
 
-        <p className="lp-caption" style={{ color: "var(--text-muted)" }}>
-          Zamiast formularza możesz napisać na [ADRES E-MAIL].
-        </p>
+        {isSet(contactEmail) ? (
+          <p className="lp-caption" style={{ color: "var(--text-muted)" }}>
+            Zamiast formularza możesz napisać na {contactEmail}.
+          </p>
+        ) : null}
       </form>
     </GlassCard>
   );

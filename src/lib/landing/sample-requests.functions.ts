@@ -5,11 +5,15 @@ import type { Database } from "@/integrations/supabase/types";
 
 export const sampleRequestSchema = z.object({
   storeUrl: z
-    .string()
-    .trim()
-    .min(1, { message: "Podaj adres swojego sklepu" })
-    .max(300, { message: "Adres jest za długi" })
-    .url({ message: "Podaj poprawny adres, np. https://twojsklep.pl" }),
+    .union([
+      z.literal(""),
+      z
+        .string()
+        .trim()
+        .max(300, { message: "Adres jest za długi" })
+        .url({ message: "Podaj poprawny adres, np. https://twojsklep.pl" }),
+    ])
+    .optional(),
   productsRange: z.enum(["do 100", "100 do 1 000", "ponad 1 000"], {
     message: "Wybierz liczbę produktów",
   }),
@@ -40,7 +44,7 @@ export const submitSampleRequest = createServerFn({ method: "POST" })
     );
 
     const { error } = await supabase.from("sample_requests").insert({
-      store_url: data.storeUrl,
+      store_url: data.storeUrl?.length ? data.storeUrl : "",
       products_range: data.productsRange,
       email: data.email,
       message: data.message?.length ? data.message : null,
