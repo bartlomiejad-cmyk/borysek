@@ -74,7 +74,7 @@ function FilePreview() {
 function SourcesPreview() {
   return (
     <PreviewFrame pill="EAN zgodny">
-      {["producent.pl", "sklep-partner.pl", "katalog-branzowy.pl"].map((d) => (
+      {["producent.pl", "partner.pl", "katalog.pl"].map((d) => (
         <CheckRow key={d} text={d} />
       ))}
     </PreviewFrame>
@@ -103,13 +103,13 @@ function PhotoPreview() {
     <PreviewFrame pill="zdjęcia">
       <div className="flex w-full items-center gap-3">
         <span
-          className="flex h-14 w-14 shrink-0 items-center justify-center"
+          className="flex h-12 w-12 shrink-0 items-center justify-center"
           style={{ background: "#ffffff", borderRadius: 10 }}
         >
-          <ProductIconGlyph icon={heroProduct.icon} className="h-7 w-7" color="var(--bg-base)" />
+          <ProductIconGlyph icon={heroProduct.icon} className="h-6 w-6" color="var(--bg-base)" />
         </span>
         <span
-          className="min-w-0 text-[12px] leading-snug"
+          className="min-w-0 text-[11px] leading-snug"
           style={{ color: "var(--text-secondary)" }}
         >
           packshot
