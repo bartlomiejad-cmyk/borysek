@@ -8,127 +8,165 @@ export type ProductField = {
 };
 
 export const FIELD_ORDER = [
-  "EAN",
   "Nazwa",
-  "Kolor",
-  "Materiał",
+  "EAN",
   "Kategoria",
+  "Cechy",
   "Opis",
   "Tytuł SEO",
   "Opis SEO",
+  "Słowa kluczowe",
+  "Packshot",
+  "Opis Allegro",
 ] as const;
 
-export const ergoWatchValues: Record<string, string> = {
-  EAN: "9921214440024",
-  Nazwa: "Ergo Watch PRO",
-  Kolor: "Czarny",
-  Materiał: "Stal",
-  Kategoria: "Smartwatche",
-  Opis: "Smartwatch z pomiarem tętna i GPS",
-  "Tytuł SEO": "Ergo Watch PRO, smartwatch ze stali",
-  "Opis SEO": "Smartwatch Ergo Watch PRO: GPS, tętno, stal",
-};
+export type FieldLabel = (typeof FIELD_ORDER)[number];
 
-export const LONG_FIELDS = new Set(["Opis", "Opis SEO"]);
+export const LONG_FIELDS = new Set<string>(["Opis", "Opis SEO", "Opis Allegro"]);
 
-export function buildFields(filledCount: number, status: FieldStatus = "ai"): ProductField[] {
-  return FIELD_ORDER.map((label, i) => ({
-    label,
-    long: LONG_FIELDS.has(label),
-    value: i < filledCount ? ergoWatchValues[label] : undefined,
-    status: i < filledCount ? status : ("empty" as FieldStatus),
-  }));
-}
-
-export const emptyErgoWatch: ProductField[] = buildFields(0);
-export const completeErgoWatch: ProductField[] = buildFields(FIELD_ORDER.length, "verified");
-
-export const navLinks = [
-  { label: "Realizacje", href: "#cases" },
-  { label: "Co dostajesz", href: "#scope" },
-  { label: "Przed i po", href: "#before-after" },
-  { label: "Jak pracujemy", href: "#flow" },
-  { label: "Oferta", href: "#offer" },
-  { label: "FAQ", href: "#faq" },
-];
+export type ProductIcon = "trash" | "droplets" | "wrench";
 
 export type ShowcaseProduct = {
   id: string;
   name: string;
-  icon: "watch" | "lamp" | "backpack";
-  before: { values: Record<string, string>; completeness: number; image: boolean };
-  after: { values: Record<string, string>; completeness: number; image: boolean };
+  industry: string;
+  icon: ProductIcon;
+  before: { values: Record<string, string>; image: boolean };
+  after: { values: Record<string, string>; image: boolean };
   copy: { seoTitle: string; description: string };
 };
 
-const nordLampValues: Record<string, string> = {
-  EAN: "5901234098761",
-  Nazwa: "Lampa biurkowa Nord LED",
-  Kolor: "Biały",
-  Materiał: "Aluminium",
-  Kategoria: "Oświetlenie biurowe",
-  Opis: "Lampa LED z regulacją barwy światła",
-  "Tytuł SEO": "Lampa biurkowa LED Nord z regulacją barwy",
-  "Opis SEO": "Nord LED: trzy barwy światła i ściemnianie dotykowe",
+/* 1. Chemia gospodarcza */
+
+export const tigroValues: Record<string, string> = {
+  Nazwa: "Tigro Worki na śmieci LDPE 120 l 25 szt. czarne mocne",
+  EAN: "5906154012072",
+  Kategoria: "Worki na śmieci",
+  Cechy: "6 cech",
+  Opis:
+    "Worki na śmieci Tigro o pojemności 120 litrów wykonane zostały z elastycznej folii LDPE w kolorze czarnym. Produkt charakteryzuje się podwyższoną wytrzymałością, co pozwala na bezpieczne składowanie i transportowanie odpadów.",
+  "Tytuł SEO": "Worki na śmieci Tigro LDPE 120 l, 25 szt., czarne",
+  "Opis SEO":
+    "Worki na śmieci Tigro LDPE 120 l, 25 sztuk, czarne, wymiary 70 x 110 cm, podwyższona wytrzymałość.",
+  "Słowa kluczowe": "worki na śmieci 120 l, worki LDPE, Tigro",
+  Packshot: "białe tło",
+  "Opis Allegro":
+    "Worki na śmieci Tigro 120 l z folii LDPE, 25 sztuk w rolce, wymiary 70 x 110 cm, kolor czarny.",
 };
 
-const ventoBackpackValues: Record<string, string> = {
-  EAN: "5903872110458",
-  Nazwa: "Plecak miejski Vento 22L",
-  Kolor: "Grafitowy",
-  Materiał: "Poliester z recyklingu",
-  Kategoria: "Plecaki",
-  Opis: "Plecak 22 l z kieszenią na laptopa 16 cali",
-  "Tytuł SEO": "Plecak miejski Vento 22 l na laptopa 16 cali",
-  "Opis SEO": "Vento 22L: kieszeń na laptopa i pokrowiec przeciwdeszczowy",
+export const tigroFeatures: Array<[string, string]> = [
+  ["Marka", "Tigro"],
+  ["Pojemność", "120 l"],
+  ["Materiał", "LDPE"],
+  ["Kolor", "czarny"],
+  ["Wymiary", "70 x 110 cm"],
+  ["Liczba sztuk", "25"],
+];
+
+/* 2. Kosmetyki */
+
+export const palmoliveValues: Record<string, string> = {
+  Nazwa: "Palmolive Joyful Blooming Mydło w płynie 300 ml",
+  EAN: "8718951378353",
+  Kategoria: "Mydła w płynie",
+  Cechy: "4 cechy",
+  Opis:
+    "Palmolive Joyful Blooming to mydło w płynie przeznaczone do codziennej higieny rąk. Produkt charakteryzuje się delikatną formułą myjącą, która skutecznie usuwa zanieczyszczenia z powierzchni skóry.",
+  "Tytuł SEO": "Palmolive Joyful Blooming mydło w płynie 300 ml z dozownikiem",
+  "Opis SEO":
+    "Mydło w płynie Palmolive Joyful Blooming 300 ml w opakowaniu z dozownikiem, do codziennej higieny rąk.",
+  "Słowa kluczowe": "mydło w płynie 300 ml, Palmolive, mydło z dozownikiem",
+  Packshot: "białe tło",
+  "Opis Allegro":
+    "Palmolive Joyful Blooming mydło w płynie 300 ml, opakowanie z dozownikiem, delikatna formuła myjąca.",
 };
 
-function pick(values: Record<string, string>, labels: string[]): Record<string, string> {
-  return Object.fromEntries(labels.map((l) => [l, values[l]!]));
-}
+/* 3. Części motocyklowe */
+
+export const athenaValues: Record<string, string> = {
+  Nazwa: "Wydech Athena Racing Pro Minarelli leżące P400485120012",
+  EAN: "P400485120012",
+  Kategoria: "Układy wydechowe",
+  Cechy: "6 cech",
+  Opis:
+    "Wydech Athena Racing Pro to pełny układ wydechowy typu 1-into-1, zaprojektowany z myślą o skuterach wyposażonych w silnik Minarelli leżący. Konstrukcja wykonana z tytanu zapewnia redukcję masy oraz poprawę osiągów pojazdu.",
+  "Tytuł SEO": "Wydech Athena Racing Pro do silników Minarelli leżących",
+  "Opis SEO":
+    "Tytanowy układ wydechowy Athena Racing Pro 1-into-1 do silników Minarelli leżących, kod producenta P400485120012.",
+  "Słowa kluczowe": "wydech Athena Racing Pro, Minarelli leżące, P400485120012",
+  Packshot: "białe tło",
+  "Opis Allegro":
+    "Pełny układ wydechowy Athena Racing Pro 1-into-1, tytan, do silników Minarelli leżących, kod P400485120012.",
+};
+
+export const athenaFeatures: Array<[string, string]> = [
+  ["Marka", "Athena"],
+  ["Model", "Racing Pro"],
+  ["Materiał", "tytan"],
+  ["Typ", "pełny układ 1-into-1"],
+  ["Kod producenta", "P400485120012"],
+  ["Kompatybilność", "8 modeli (Aprilia, Italjet, Malaguti, Yamaha)"],
+];
 
 export const showcaseProducts: ShowcaseProduct[] = [
   {
-    id: "ergo-watch",
-    name: "Ergo Watch PRO",
-    icon: "watch",
-    before: { values: pick(ergoWatchValues, ["EAN", "Nazwa"]), completeness: 28, image: false },
-    after: { values: ergoWatchValues, completeness: 100, image: true },
-    copy: {
-      seoTitle: "Ergo Watch PRO, smartwatch ze stalową kopertą",
-      description:
-        "Ergo Watch PRO mierzy tętno przez całą dobę i pracuje do 10 dni na jednym ładowaniu. Stalowa koperta i wodoszczelność 5 ATM pozwalają nosić zegarek na basenie i w deszczu.",
-    },
-  },
-  {
-    id: "nord-lamp",
-    name: "Lampa biurkowa Nord LED",
-    icon: "lamp",
+    id: "tigro-worki",
+    name: "Worki na śmieci Tigro 120 l",
+    industry: "Chemia gospodarcza",
+    icon: "trash",
     before: {
-      values: pick(nordLampValues, ["EAN", "Nazwa", "Kolor"]),
-      completeness: 38,
+      values: {
+        Nazwa: "WORKI NA ŚMIECI TIGRO LDPE 120L A25 25SZT CZARNE BIO MOCNE",
+        EAN: "5906154012072",
+      },
       image: false,
     },
-    after: { values: nordLampValues, completeness: 100, image: true },
+    after: { values: tigroValues, image: true },
     copy: {
-      seoTitle: "Lampa biurkowa LED Nord z regulacją barwy światła",
-      description:
-        "Nord LED oferuje trzy barwy światła: ciepłą do wieczornej pracy, neutralną do biura i zimną do czytania. Dotykowy panel płynnie ściemnia lampę, a aluminiowe ramię utrzymuje ustawiony kąt.",
+      seoTitle: tigroValues["Tytuł SEO"]!,
+      description: tigroValues["Opis"]!,
     },
   },
   {
-    id: "vento-backpack",
-    name: "Plecak miejski Vento 22L",
-    icon: "backpack",
-    before: { values: pick(ventoBackpackValues, ["EAN"]), completeness: 10, image: false },
-    after: { values: ventoBackpackValues, completeness: 100, image: true },
+    id: "palmolive-mydlo",
+    name: "Palmolive Joyful Blooming 300 ml",
+    industry: "Kosmetyki",
+    icon: "droplets",
+    before: {
+      values: {
+        Nazwa: "Palmolive Joyful Blooming Mydło w Płynie 300ml",
+        EAN: "8718951378353",
+      },
+      image: false,
+    },
+    after: { values: palmoliveValues, image: true },
     copy: {
-      seoTitle: "Plecak miejski Vento 22 l na laptopa 16 cali",
-      description:
-        "Vento 22L ma wyściełaną kieszeń na laptopa do 16 cali i główną komorę na sprzęt oraz dokumenty. Tkanina powstaje z poliestru z recyklingu, a dołączony pokrowiec przeciwdeszczowy chroni zawartość w drodze.",
+      seoTitle: palmoliveValues["Tytuł SEO"]!,
+      description: palmoliveValues["Opis"]!,
+    },
+  },
+  {
+    id: "athena-wydech",
+    name: "Wydech Athena Racing Pro",
+    industry: "Części motocyklowe",
+    icon: "wrench",
+    before: {
+      values: {
+        Nazwa: "Wydech Athena Racing Pro, Minarelli leżące P400485120012",
+        EAN: "P400485120012",
+      },
+      image: false,
+    },
+    after: { values: athenaValues, image: true },
+    copy: {
+      seoTitle: athenaValues["Tytuł SEO"]!,
+      description: athenaValues["Opis"]!,
     },
   },
 ];
+
+/** Produkt pokazywany w hero i w sekcji „Jak pracujemy”. */
+export const heroProduct = showcaseProducts[0]!;
 
 export function fieldsFromValues(
   values: Record<string, string>,
@@ -145,3 +183,22 @@ export function fieldsFromValues(
     };
   });
 }
+
+/** Buduje pola hero: pierwsze `filledCount` pól produktu 1 jest wypełnionych. */
+export function buildFields(filledCount: number, status: FieldStatus = "ai"): ProductField[] {
+  return FIELD_ORDER.map((label, i) => ({
+    label,
+    long: LONG_FIELDS.has(label),
+    value: i < filledCount ? tigroValues[label] : undefined,
+    status: i < filledCount ? status : ("empty" as FieldStatus),
+  }));
+}
+
+export const navLinks = [
+  { label: "Realizacje", href: "#cases" },
+  { label: "Co dostajesz", href: "#scope" },
+  { label: "Przed i po", href: "#before-after" },
+  { label: "Jak pracujemy", href: "#flow" },
+  { label: "Oferta", href: "#offer" },
+  { label: "FAQ", href: "#faq" },
+];
