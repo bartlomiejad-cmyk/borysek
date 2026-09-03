@@ -25,7 +25,7 @@ export const ergoWatchValues: Record<string, string> = {
   Materiał: "Stal",
   Kategoria: "Smartwatche",
   Opis: "Smartwatch z pomiarem tętna i GPS",
-  "Tytuł SEO": "Ergo Watch PRO — smartwatch ze stali",
+  "Tytuł SEO": "Ergo Watch PRO, smartwatch ze stali",
   "Opis SEO": "Smartwatch Ergo Watch PRO: GPS, tętno, stal",
 };
 
@@ -95,7 +95,7 @@ export const showcaseProducts: ShowcaseProduct[] = [
     before: { values: pick(ergoWatchValues, ["EAN", "Nazwa"]), completeness: 28, image: false },
     after: { values: ergoWatchValues, completeness: 100, image: true },
     copy: {
-      seoTitle: "Ergo Watch PRO — smartwatch ze stalową kopertą",
+      seoTitle: "Ergo Watch PRO, smartwatch ze stalową kopertą",
       description:
         "Ergo Watch PRO mierzy tętno przez całą dobę i pracuje do 10 dni na jednym ładowaniu. Stalowa koperta i wodoszczelność 5 ATM pozwalają nosić zegarek na basenie i w deszczu.",
     },

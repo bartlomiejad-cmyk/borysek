@@ -46,10 +46,10 @@ function CardHeader({ pkg }: { pkg: OfferPackage }) {
             fontFamily: "var(--font-display)",
             fontWeight: 600,
             fontSize: "1.5rem",
-            color: "var(--text-primary)",
+            color: onAccent ? "var(--accent-ink)" : "var(--text-primary)",
           }}
         >
-          Wycena indywidualna
+          {pkg.priceNote}
         </span>
       ) : (
         <div className="mt-2 flex items-baseline gap-2">
