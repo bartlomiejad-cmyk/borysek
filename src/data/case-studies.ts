@@ -1,4 +1,4 @@
-import { ergoWatchValues } from "./demo-products";
+import { tigroValues } from "./demo-products";
 
 /** Placeholders in square brackets are intentional: replace with real data only. */
 
@@ -7,7 +7,6 @@ export const SHOW_CASE_STUDIES = false;
 
 export type CaseProductState = {
   values: Record<string, string>;
-  completeness: number;
   image: boolean;
 };
 
@@ -28,12 +27,11 @@ export type CaseStudy = {
 function demoState(partial: boolean): CaseProductState {
   if (partial) {
     return {
-      values: { EAN: ergoWatchValues.EAN!, Nazwa: ergoWatchValues.Nazwa! },
-      completeness: 20,
+      values: { EAN: tigroValues.EAN!, Nazwa: tigroValues.Nazwa! },
       image: false,
     };
   }
-  return { values: ergoWatchValues, completeness: 100, image: true };
+  return { values: tigroValues, image: true };
 }
 
 export const caseStudies: CaseStudy[] = [1, 2, 3].map((n) => ({

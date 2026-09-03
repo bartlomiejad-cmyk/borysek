@@ -1,26 +1,9 @@
 import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { Backpack, Lamp, Watch } from "lucide-react";
 import { ProductCard } from "@/components/product/ProductCard";
+import { ProductPlaceholderImage } from "@/components/product/ProductIcon";
 import { fieldsFromValues, FIELD_ORDER, type ShowcaseProduct } from "@/data/demo-products";
 import type { ShowcaseState } from "./StateToggle";
-
-const ICONS = { watch: Watch, lamp: Lamp, backpack: Backpack };
-
-function PlaceholderImage({ icon }: { icon: ShowcaseProduct["icon"] }) {
-  const Icon = ICONS[icon];
-  return (
-    <div
-      className="flex h-full w-full items-center justify-center"
-      style={{
-        background:
-          "radial-gradient(120% 100% at 50% 0%, rgba(0,188,135,0.18), rgba(14,16,19,1) 70%)",
-      }}
-    >
-      <Icon aria-hidden className="h-12 w-12" strokeWidth={1.25} style={{ color: "var(--accent)" }} />
-    </div>
-  );
-}
 
 function CopyCard({ product, state }: { product: ShowcaseProduct; state: ShowcaseState }) {
   const sentences = product.copy.description.split(". ").slice(0, 2).join(". ");
@@ -109,9 +92,8 @@ export function ShowcaseCard({
       <ProductCard
         title={state === "after" ? "GOTOWE DO SPRZEDAŻY" : "NOWY"}
         badge={state === "after" ? { text: "Karta gotowa", variant: "accent" } : undefined}
-        image={data.image ? <PlaceholderImage icon={product.icon} /> : undefined}
+        image={data.image ? <ProductPlaceholderImage icon={product.icon} /> : undefined}
         fields={fields}
-        completeness={data.completeness}
         highlight={state === "after" ? "accent" : "none"}
         width="100%"
       />
