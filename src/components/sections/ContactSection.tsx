@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/accordion";
 import { Container } from "@/components/ui-custom/Container";
 import { Reveal } from "@/components/ui-custom/Reveal";
+import { GlassCard } from "@/components/ui-custom/GlassCard";
 import { faqItems } from "@/data/content";
 import { SampleForm } from "./SampleForm";
 
@@ -46,6 +47,7 @@ function Faq() {
         </h2>
       </div>
 
+      <GlassCard padding="none" style={{ padding: "4px 24px" }}>
       <Accordion type="single" collapsible className="w-full">
         {faqItems.map((item, i) => (
           <AccordionItem
@@ -75,6 +77,7 @@ function Faq() {
           </AccordionItem>
         ))}
       </Accordion>
+      </GlassCard>
     </div>
   );
 }
@@ -84,7 +87,7 @@ export function ContactSection() {
     <section id="contact" className="lp-section">
       <span id="faq" aria-hidden className="block" style={{ scrollMarginTop: 88 }} />
       <Container>
-        <div className="grid grid-cols-1 gap-10 lg:grid-cols-[55fr_45fr] lg:gap-14">
+        <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-[55fr_45fr] lg:gap-14">
           <Reveal className="order-2 lg:order-1">
             <Faq />
           </Reveal>
@@ -95,8 +98,15 @@ export function ContactSection() {
                 <span className="lp-caption" style={{ color: "var(--accent)" }}>
                   Bezpłatna próbka
                 </span>
-                <h3 className="lp-h3" style={{ color: "var(--text-primary)" }}>
-                  5 Twoich produktów, gotowe karty, bez zobowiązań
+                <h3
+                  className="whitespace-nowrap" style={{
+                    color: "var(--text-primary)",
+                    fontFamily: "var(--font-display)",
+                    fontWeight: 600,
+                    fontSize: "1.25rem",
+                  }}
+                >
+                  5 produktów. Gotowe karty. Bez zobowiązań.
                 </h3>
               </div>
               <div className="mt-5">
