@@ -12,13 +12,13 @@ import { faqItems } from "@/data/content";
 
 export function FaqSection() {
   return (
-    <section id="faq" className="scroll-mt-24 py-20 md:py-28">
-      <Container className="flex flex-col gap-10">
+    <section id="faq" className="scroll-mt-24 py-20 md:py-32">
+      <Container className="flex flex-col items-center gap-10">
         <Reveal>
-          <SectionHeading eyebrow="FAQ" title="Najczęstsze pytania" align="left" />
+          <SectionHeading eyebrow="FAQ" title="Najczęstsze pytania" align="center" />
         </Reveal>
 
-        <Reveal index={1}>
+        <Reveal index={1} className="mx-auto w-full max-w-[820px]">
         <GlassCard padding="md" radius="lg" className="w-full max-w-[820px]">
           <Accordion type="single" collapsible className="w-full">
             {faqItems.map((item, i) => (

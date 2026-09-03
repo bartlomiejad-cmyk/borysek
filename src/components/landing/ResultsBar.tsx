@@ -11,9 +11,9 @@ export function ResultsBar() {
         <h2 className="sr-only">Jak to działa w liczbach</h2>
         <Reveal>
         <GlassCard padding="lg">
-          <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
+          <div className="grid grid-cols-2 items-start gap-8 md:grid-cols-4">
             {landingStats.map((stat) => (
-              <div key={stat.text}>
+              <div key={stat.text} className="flex h-full flex-col items-start">
                 <StatCounter
                   value={stat.value}
                   suffix={stat.suffix}

@@ -34,7 +34,7 @@ export function FieldTile({ icon: Icon, label, badge, planned = false }: FieldTi
           </span>
         </div>
         <span
-          className="absolute bottom-2 right-0 rounded-full border px-2.5 py-1 text-[11px] transition-shadow duration-300"
+          className="absolute bottom-2 -right-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] leading-none transition-shadow duration-300"
           style={{
             background: planned ? "var(--glass-bg)" : "var(--glass-bg-strong)",
             borderColor: "var(--glass-border-strong)",
@@ -44,7 +44,10 @@ export function FieldTile({ icon: Icon, label, badge, planned = false }: FieldTi
           {badge}
         </span>
       </div>
-      <span className="lp-caption text-center" style={{ color: "var(--text-secondary)" }}>
+      <span
+        className="lp-caption whitespace-nowrap text-center"
+        style={{ color: "var(--text-secondary)", letterSpacing: "0.04em" }}
+      >
         {label}
       </span>
     </div>

@@ -55,7 +55,7 @@ function StepCard({ step }: { step: ProcessStep }) {
 
 export function ProcessFlow() {
   return (
-    <section id="flow" className="relative py-24 md:py-32">
+    <section id="flow" className="relative py-20 md:py-32">
       <Container>
         <Reveal>
           <SectionHeading

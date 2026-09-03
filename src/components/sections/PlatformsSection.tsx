@@ -8,7 +8,7 @@ import { platforms } from "@/data/content";
 
 export function PlatformsSection() {
   return (
-    <section id="platforms" className="relative py-24 lg:py-32">
+    <section id="platforms" className="relative py-20 md:py-32">
       <Container>
         <Reveal>
         <SectionHeading

@@ -13,7 +13,7 @@ const scrollTo = (id: string) =>
 
 export function Hero() {
   return (
-    <section id="top" className="relative pt-16 pb-16 md:pt-24">
+    <section id="top" data-hero className="relative pt-16 pb-16 md:pt-24">
       <Container>
         <div className="grid items-center gap-12 lg:grid-cols-[55fr_45fr]">
           <div className="flex flex-col items-start gap-6">
@@ -26,27 +26,31 @@ export function Hero() {
             <Reveal index={1}>
               <h1
                 className="lp-h1"
-                style={{ color: "var(--text-primary)", textWrap: "balance" }}
+                style={{
+                  color: "var(--text-primary)",
+                  textWrap: "balance",
+                  fontSize: "clamp(2.25rem, 5vw, 4rem)",
+                }}
               >
-                Uzupełnimy karty produktowe w Twoim sklepie. Setki produktów, dni zamiast
-                miesięcy.
+                Kompletne karty produktowe dla Twojego sklepu.
               </h1>
             </Reveal>
 
             <Reveal index={2}>
               <p className="lp-lead max-w-xl" style={{ color: "var(--text-secondary)" }}>
-                Dajesz nam dostęp do sklepu albo plik z produktami. Dostajesz gotowe nazwy,
-                opisy, cechy, treści SEO i zdjęcia produktowe, sprawdzone przez ludzi i
-                opublikowane w Twoim sklepie.
+                Setki produktów w dni zamiast miesięcy. Dajesz nam eksport ze sklepu albo plik
+                z produktami, dostajesz gotowe nazwy, opisy, cechy, treści SEO i zdjęcia,
+                sprawdzone przez ludzi i wgrane do sklepu.
               </p>
             </Reveal>
 
-            <Reveal index={3} className="flex flex-wrap items-center gap-3">
-              <AccentButton size="lg" onClick={() => scrollTo("#contact")}>
+            <Reveal index={3} className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+              <AccentButton size="lg" className="w-full sm:w-auto" onClick={() => scrollTo("#contact")}>
                 Bezpłatna próbka: 5 produktów
               </AccentButton>
               <GhostButton
                 size="lg"
+                className="w-full sm:w-auto"
                 onClick={() => scrollTo(SHOW_CASE_STUDIES ? "#cases" : "#before-after")}
               >
                 {SHOW_CASE_STUDIES ? "Zobacz realizacje" : "Zobacz przed i po"}

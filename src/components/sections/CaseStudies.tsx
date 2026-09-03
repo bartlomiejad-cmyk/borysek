@@ -13,7 +13,7 @@ export function CaseStudies() {
   const visible = showAll ? caseStudies : caseStudies.slice(0, VISIBLE_COUNT);
 
   return (
-    <section id="cases" className="py-20 md:py-28">
+    <section id="cases" className="py-20 md:py-32">
       <Container>
         <Reveal>
         <SectionHeading

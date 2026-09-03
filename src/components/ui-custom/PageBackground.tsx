@@ -24,20 +24,20 @@ export function PageBackground() {
           width: "42rem",
           height: "42rem",
           opacity: 0.25,
-          filter: "blur(120px)",
+          filter: "blur(80px)",
           background:
             "radial-gradient(closest-side, var(--accent), rgba(0,188,135,0))",
         }}
       />
       <div
-        className="fixed -z-10 rounded-full"
+        className="fixed -z-10 hidden rounded-full md:block"
         style={{
           top: "60%",
           left: "-14rem",
           width: "38rem",
           height: "38rem",
           opacity: 0.25,
-          filter: "blur(120px)",
+          filter: "blur(80px)",
           background:
             "radial-gradient(closest-side, var(--accent), rgba(0,188,135,0))",
         }}

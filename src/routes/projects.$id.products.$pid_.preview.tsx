@@ -14,7 +14,15 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/projects/$id/products/$pid_/preview")({
   component: ProductPreview,
-  head: () => ({ meta: [{ title: "Podgląd karty produktu" }, { name: "robots", content: "noindex" }] }),
+  head: () => ({
+    links: [
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
+      },
+    ],
+    meta: [{ title: "Podgląd karty produktu" }, { name: "robots", content: "noindex" }],
+  }),
 });
 
 function ProductPreview() {

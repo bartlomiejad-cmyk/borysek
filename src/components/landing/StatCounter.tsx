@@ -47,7 +47,7 @@ export function StatCounter({
   return (
     <span
       ref={ref}
-      className="block font-[Sora,system-ui] font-bold leading-none"
+      className="block whitespace-nowrap font-[Sora,system-ui] font-bold leading-none"
       style={{
         color: "var(--accent)",
         fontSize: size,

@@ -13,7 +13,7 @@ const mobileOrderClass: Record<number, string> = {
 
 export function OfferSection() {
   return (
-    <section id="offer" className="relative py-24 lg:py-32">
+    <section id="offer" className="relative py-20 md:py-32">
       <Container>
         <Reveal>
           <SectionHeading
@@ -25,9 +25,9 @@ export function OfferSection() {
           />
         </Reveal>
 
-        <div className="flex flex-col gap-6 md:grid md:grid-cols-2 lg:grid-cols-3 lg:items-start">
+        <div className="flex flex-col gap-6 overflow-visible pt-4 md:grid md:grid-cols-2 lg:grid-cols-3 lg:items-start">
           {offerPackages.map((pkg, i) => (
-            <Reveal key={pkg.id} index={i} className={mobileOrderClass[pkg.mobileOrder]}>
+            <Reveal key={pkg.id} index={i} className={`overflow-visible ${mobileOrderClass[pkg.mobileOrder]}`}>
               <PricingCard pkg={pkg} />
             </Reveal>
           ))}
